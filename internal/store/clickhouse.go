@@ -87,11 +87,18 @@ func (c *ClickHouse) migrate(ctx context.Context) error {
 }
 
 func (c *ClickHouse) PutRawEnvelope(ctx context.Context, envelope ingest.RawEnvelope) error {
+	return c.PutRawEnvelopeWithExpiry(ctx, envelope, envelope.ReceivedAt.Add(DefaultRawRetentionDays*24*time.Hour))
+}
+
+func (c *ClickHouse) PutRawEnvelopeWithExpiry(ctx context.Context, envelope ingest.RawEnvelope, expiresAt time.Time) error {
+	if expiresAt.IsZero() {
+		expiresAt = envelope.ReceivedAt.Add(DefaultRawRetentionDays * 24 * time.Hour)
+	}
 	return c.conn.Exec(ctx, `INSERT INTO raw_events
-		(tenant_id,event_id,message_id,collector_id,event_timestamp,received_at,format,content_type,schema_version,raw_hash,payload)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)`, envelope.TenantID, envelope.EventID, envelope.MessageID, envelope.CollectorID,
+		(tenant_id,event_id,message_id,collector_id,event_timestamp,received_at,format,content_type,schema_version,raw_hash,payload,expires_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, envelope.TenantID, envelope.EventID, envelope.MessageID, envelope.CollectorID,
 		envelope.EventTimestamp, envelope.ReceivedAt, envelope.Format, envelope.ContentType, envelope.SchemaVersion,
-		envelope.RawHash, string(envelope.PayloadBytes()))
+		envelope.RawHash, string(envelope.PayloadBytes()), expiresAt.UTC())
 }
 
 // RawEnvelopeCount exposes the durable raw-ingest invariant for operations and
@@ -107,6 +114,10 @@ func (c *ClickHouse) RawEnvelopeCount(ctx context.Context, tenantID, eventID str
 }
 
 func (c *ClickHouse) PutEvent(ctx context.Context, event core.CanonicalEvent) (core.CanonicalEvent, bool, error) {
+	return c.PutEventWithExpiry(ctx, event, event.EventTime.Add(DefaultNormalizedRetentionDays*24*time.Hour))
+}
+
+func (c *ClickHouse) PutEventWithExpiry(ctx context.Context, event core.CanonicalEvent, expiresAt time.Time) (core.CanonicalEvent, bool, error) {
 	existing, err := c.GetEvent(ctx, event.TenantID, event.ID)
 	if err == nil {
 		return existing, true, nil
@@ -119,12 +130,15 @@ func (c *ClickHouse) PutEvent(ctx context.Context, event core.CanonicalEvent) (c
 		return core.CanonicalEvent{}, false, fmt.Errorf("encode normalized event: %w", err)
 	}
 	version := uint64(event.IngestTime.UnixNano())
+	if expiresAt.IsZero() {
+		expiresAt = event.EventTime.Add(DefaultNormalizedRetentionDays * 24 * time.Hour)
+	}
 	if err := c.conn.Exec(ctx, `INSERT INTO normalized_events
 		(tenant_id,event_id,event_time,ingest_time,category,severity,source_vendor,source_product,source_type,user_name,
-		 device_hostname,src_ip,dst_ip,raw_hash,payload,version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 device_hostname,src_ip,dst_ip,raw_hash,payload,version,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		event.TenantID, event.ID, event.EventTime, event.IngestTime, event.Category, event.Severity,
 		event.Source.Vendor, event.Source.Product, event.Source.Type, event.User.Name, event.Device.Hostname,
-		event.SrcEndpoint.IP, event.DstEndpoint.IP, event.Raw.Hash, string(payload), version); err != nil {
+		event.SrcEndpoint.IP, event.DstEndpoint.IP, event.Raw.Hash, string(payload), version, expiresAt.UTC()); err != nil {
 		return core.CanonicalEvent{}, false, fmt.Errorf("insert normalized event: %w", err)
 	}
 	return event, false, nil
@@ -255,14 +269,21 @@ func (c *ClickHouse) HuntEvents(ctx context.Context, tenantID string, request co
 }
 
 func (c *ClickHouse) PutFinding(ctx context.Context, finding core.Finding) error {
+	return c.PutFindingWithExpiry(ctx, finding, finding.CreatedAt.Add(DefaultFindingsRetentionDays*24*time.Hour))
+}
+
+func (c *ClickHouse) PutFindingWithExpiry(ctx context.Context, finding core.Finding, expiresAt time.Time) error {
 	payload, err := json.Marshal(finding)
 	if err != nil {
 		return fmt.Errorf("encode ClickHouse finding: %w", err)
 	}
+	if expiresAt.IsZero() {
+		expiresAt = finding.CreatedAt.Add(DefaultFindingsRetentionDays * 24 * time.Hour)
+	}
 	return c.conn.Exec(ctx, `INSERT INTO findings
-		(tenant_id,finding_id,event_id,rule_id,severity,risk_score,created_at,payload,version) VALUES (?,?,?,?,?,?,?,?,?)`,
+		(tenant_id,finding_id,event_id,rule_id,severity,risk_score,created_at,payload,version,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
 		finding.TenantID, finding.ID, finding.EventID, finding.Rule.ID, finding.Severity, finding.RiskScore,
-		finding.CreatedAt, string(payload), uint64(finding.CreatedAt.UnixNano()))
+		finding.CreatedAt, string(payload), uint64(finding.CreatedAt.UnixNano()), expiresAt.UTC())
 }
 
 func (c *ClickHouse) ListFindings(ctx context.Context, tenantID, eventID string, limit int) ([]core.Finding, error) {

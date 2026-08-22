@@ -37,6 +37,7 @@ func NewDemoAuthenticator() *DemoAuthenticator {
 		"platform.overview.read", "siem.events.read", "siem.findings.read",
 		"soc.alerts.read", "soc.incidents.read", "detection.rules.read", "platform.collectors.read", "siem.rules.read",
 		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage",
+		"platform.retention.read",
 	}
 	l2 := append(append([]string{}, read...), "soc.alerts.manage", "soc.incidents.create", "soc.incidents.manage", "platform.audit.read")
 	return &DemoAuthenticator{tokens: map[string]Principal{

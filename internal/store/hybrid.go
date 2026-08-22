@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/kcsp/platform/internal/core"
@@ -11,8 +12,15 @@ import (
 )
 
 type Hybrid struct {
-	control   *Postgres
-	telemetry *ClickHouse
+	control     *Postgres
+	telemetry   *ClickHouse
+	retentionMu sync.Mutex
+	retention   map[string]retentionSnapshot
+}
+
+type retentionSnapshot struct {
+	policy   core.RetentionPolicy
+	loadedAt time.Time
 }
 
 func OpenHybrid(ctx context.Context, databaseURL, clickhouseURL string) (*Hybrid, error) {
@@ -25,7 +33,7 @@ func OpenHybrid(ctx context.Context, databaseURL, clickhouseURL string) (*Hybrid
 		control.Close()
 		return nil, err
 	}
-	return &Hybrid{control: control, telemetry: telemetry}, nil
+	return &Hybrid{control: control, telemetry: telemetry, retention: map[string]retentionSnapshot{}}, nil
 }
 
 func (h *Hybrid) Health(ctx context.Context) error {
@@ -84,7 +92,13 @@ func (h *Hybrid) ResetTenant(ctx context.Context, tenantID string) error {
 	if err := h.telemetry.ResetTenant(ctx, tenantID); err != nil {
 		return err
 	}
-	return h.control.ResetTenant(ctx, tenantID)
+	if err := h.control.ResetTenant(ctx, tenantID); err != nil {
+		return err
+	}
+	h.retentionMu.Lock()
+	delete(h.retention, tenantID)
+	h.retentionMu.Unlock()
+	return nil
 }
 func (h *Hybrid) SetRules(ctx context.Context, rules []core.DetectionRule) error {
 	return h.control.SetRules(ctx, rules)
@@ -93,10 +107,18 @@ func (h *Hybrid) ListRules(ctx context.Context) ([]core.DetectionRule, error) {
 	return h.control.ListRules(ctx)
 }
 func (h *Hybrid) PutRawEnvelope(ctx context.Context, envelope ingest.RawEnvelope) error {
-	return h.telemetry.PutRawEnvelope(ctx, envelope)
+	policy, err := h.cachedRetentionPolicy(ctx, envelope.TenantID)
+	if err != nil {
+		return err
+	}
+	return h.telemetry.PutRawEnvelopeWithExpiry(ctx, envelope, envelope.ReceivedAt.Add(time.Duration(policy.RawDays)*24*time.Hour))
 }
 func (h *Hybrid) PutEvent(ctx context.Context, event core.CanonicalEvent) (core.CanonicalEvent, bool, error) {
-	return h.telemetry.PutEvent(ctx, event)
+	policy, err := h.cachedRetentionPolicy(ctx, event.TenantID)
+	if err != nil {
+		return core.CanonicalEvent{}, false, err
+	}
+	return h.telemetry.PutEventWithExpiry(ctx, event, event.EventTime.Add(time.Duration(policy.NormalizedDays)*24*time.Hour))
 }
 func (h *Hybrid) GetEvent(ctx context.Context, tenantID, eventID string) (core.CanonicalEvent, error) {
 	event, err := h.telemetry.GetEvent(ctx, tenantID, eventID)
@@ -154,7 +176,43 @@ func (h *Hybrid) ListHuntExecutions(ctx context.Context, tenantID, savedHuntID, 
 	return h.control.ListHuntExecutions(ctx, tenantID, savedHuntID, viewer, includeAll, limit)
 }
 func (h *Hybrid) PutFinding(ctx context.Context, finding core.Finding) error {
-	return h.telemetry.PutFinding(ctx, finding)
+	policy, err := h.cachedRetentionPolicy(ctx, finding.TenantID)
+	if err != nil {
+		return err
+	}
+	return h.telemetry.PutFindingWithExpiry(ctx, finding, finding.CreatedAt.Add(time.Duration(policy.FindingsDays)*24*time.Hour))
+}
+
+func (h *Hybrid) RetentionPolicy(ctx context.Context, tenantID string) (core.RetentionPolicy, error) {
+	return h.cachedRetentionPolicy(ctx, tenantID)
+}
+
+func (h *Hybrid) UpdateRetentionPolicy(ctx context.Context, policy core.RetentionPolicy) (core.RetentionPolicy, error) {
+	updated, err := h.control.UpdateRetentionPolicy(ctx, policy)
+	if err != nil {
+		return core.RetentionPolicy{}, err
+	}
+	h.retentionMu.Lock()
+	h.retention[policy.TenantID] = retentionSnapshot{policy: updated, loadedAt: time.Now()}
+	h.retentionMu.Unlock()
+	return updated, nil
+}
+
+func (h *Hybrid) cachedRetentionPolicy(ctx context.Context, tenantID string) (core.RetentionPolicy, error) {
+	h.retentionMu.Lock()
+	if snapshot, ok := h.retention[tenantID]; ok && time.Since(snapshot.loadedAt) < time.Minute {
+		h.retentionMu.Unlock()
+		return snapshot.policy, nil
+	}
+	h.retentionMu.Unlock()
+	policy, err := h.control.RetentionPolicy(ctx, tenantID)
+	if err != nil {
+		return core.RetentionPolicy{}, err
+	}
+	h.retentionMu.Lock()
+	h.retention[tenantID] = retentionSnapshot{policy: policy, loadedAt: time.Now()}
+	h.retentionMu.Unlock()
+	return policy, nil
 }
 func (h *Hybrid) ListFindings(ctx context.Context, tenantID, eventID string, limit int) ([]core.Finding, error) {
 	current, err := h.telemetry.ListFindings(ctx, tenantID, eventID, limit)

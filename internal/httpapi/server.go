@@ -48,6 +48,7 @@ type Server struct {
 	requireCollectors bool
 	detections        *detection.Service
 	hunts             store.HuntStore
+	retention         store.RetentionStore
 }
 
 type Authenticator interface {
@@ -63,6 +64,7 @@ type Config struct {
 	RequireRegisteredCollectors bool
 	DetectionService            *detection.Service
 	HuntStore                   store.HuntStore
+	RetentionStore              store.RetentionStore
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -76,7 +78,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		profile: config.Profile, authMode: config.AuthMode,
 		gateway: config.Gateway, allowDirectIngest: config.AllowDirectIngest,
 		collectors: config.CollectorRegistry, requireCollectors: config.RequireRegisteredCollectors,
-		detections: config.DetectionService, hunts: config.HuntStore,
+		detections: config.DetectionService, hunts: config.HuntStore, retention: config.RetentionStore,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -124,6 +126,10 @@ func (s *Server) routes() {
 		s.mux.Handle("DELETE /api/v1/hunt/saved/{huntID}", s.protect("siem.hunt.manage", http.HandlerFunc(s.deleteSavedHunt)))
 		s.mux.Handle("POST /api/v1/hunt/saved/{huntID}/execute", s.protect("siem.hunt.execute", http.HandlerFunc(s.executeSavedHunt)))
 		s.mux.Handle("GET /api/v1/hunt/executions", s.protect("siem.hunt.read", http.HandlerFunc(s.listHuntExecutions)))
+	}
+	if s.retention != nil {
+		s.mux.Handle("GET /api/v1/retention", s.protect("platform.retention.read", http.HandlerFunc(s.getRetentionPolicy)))
+		s.mux.Handle("PATCH /api/v1/retention", s.protect("platform.retention.manage", http.HandlerFunc(s.updateRetentionPolicy)))
 	}
 	s.mux.Handle("GET /api/v1/findings", s.protect("siem.findings.read", http.HandlerFunc(s.listFindings)))
 	s.mux.Handle("GET /api/v1/alerts", s.protect("soc.alerts.read", http.HandlerFunc(s.listAlerts)))
@@ -759,6 +765,8 @@ func (s *Server) handleDomainError(w http.ResponseWriter, r *http.Request, err e
 		s.problem(w, r, http.StatusConflict, "invalid_detection_state", "Invalid detection state", err.Error())
 	case errors.Is(err, hunt.ErrInvalidQuery):
 		s.problem(w, r, http.StatusBadRequest, "invalid_hunt_query", "Invalid hunt query", err.Error())
+	case errors.Is(err, store.ErrInvalidRetentionPolicy):
+		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_retention_policy", "Invalid retention policy", err.Error())
 	case errors.Is(err, soc.ErrInvalidTransition):
 		s.problem(w, r, http.StatusConflict, "invalid_transition", "Invalid state transition", err.Error())
 	case errors.Is(err, soc.ErrClosureDetails), errors.Is(err, soc.ErrNoAlerts), errors.Is(err, pipeline.ErrInvalidEvent), errors.Is(err, ingest.ErrInvalidEnvelope):

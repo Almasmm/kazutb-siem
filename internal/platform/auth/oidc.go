@@ -213,34 +213,39 @@ var rolePermissions = map[string][]string{
 	"tenant_admin": {
 		"platform.overview.read", "admin.users.manage", "admin.roles.manage", "admin.config.manage", "platform.audit.read",
 		"siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read", "siem.rules.read",
+		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage", "platform.retention.read", "platform.retention.manage",
 		"soc.alerts.read", "soc.alerts.manage", "soc.alerts.triage", "soc.incidents.read", "soc.incidents.create", "soc.incidents.manage",
 		"soc.cases.manage", "soc.evidence.read", "soc.evidence.write", "soar.playbooks.read", "soar.playbooks.execute",
 	},
 	"soc_manager": {
 		"platform.overview.read", "siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read",
+		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage", "platform.retention.read",
 		"soc.alerts.read", "soc.alerts.manage", "soc.alerts.triage", "soc.incidents.read", "soc.incidents.create", "soc.incidents.manage",
 		"soc.cases.manage", "soc.evidence.read", "soc.evidence.write", "soar.playbooks.read", "soar.playbooks.execute", "soar.actions.approve",
 	},
 	"soc_l1": {
 		"platform.overview.read", "platform.collectors.read", "siem.events.read", "siem.findings.read", "detection.rules.read",
+		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage", "platform.retention.read",
 		"soc.alerts.read", "soc.alerts.manage", "soc.alerts.triage", "soc.incidents.read", "soc.incidents.create",
 	},
 	"soc_l2": {
 		"platform.overview.read", "platform.collectors.read", "siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read",
+		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage", "platform.retention.read",
 		"soc.alerts.read", "soc.alerts.manage", "soc.alerts.triage", "soc.incidents.read", "soc.incidents.create", "soc.incidents.manage",
 		"soc.cases.manage", "soc.evidence.read", "soc.evidence.write", "soar.playbooks.read", "soar.playbooks.execute", "platform.audit.read",
 	},
 	"soc_l3": {
 		"platform.overview.read", "platform.collectors.read", "siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read",
+		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage", "platform.retention.read",
 		"soc.alerts.read", "soc.alerts.manage", "soc.alerts.triage", "soc.incidents.read", "soc.incidents.create", "soc.incidents.manage",
 		"soc.cases.manage", "soc.evidence.read", "soc.evidence.write", "soar.playbooks.read", "soar.playbooks.execute", "soar.actions.approve", "platform.audit.read",
 	},
 	"threat_hunter": {
-		"platform.overview.read", "siem.events.read", "siem.events.export", "siem.findings.read", "siem.hunts.manage",
+		"platform.overview.read", "siem.events.read", "siem.events.export", "siem.findings.read", "siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage", "platform.retention.read",
 		"soc.alerts.read", "soc.incidents.read", "soc.incidents.create", "soc.cases.manage", "soc.evidence.read", "soc.evidence.write",
 	},
 	"detection_engineer": {
-		"platform.overview.read", "siem.events.read", "siem.findings.read", "detection.rules.read", "siem.rules.read", "siem.rules.write", "siem.rules.publish",
+		"platform.overview.read", "siem.events.read", "siem.findings.read", "detection.rules.read", "siem.rules.read", "siem.rules.write", "siem.rules.publish", "siem.hunt.read", "siem.hunt.execute", "platform.retention.read",
 	},
 	"threat_intelligence_analyst": {
 		"platform.overview.read", "siem.events.read", "soc.alerts.read", "soc.incidents.read", "ti.indicators.manage",

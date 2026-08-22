@@ -100,6 +100,7 @@ func run(logger *slog.Logger) error {
 			CollectorRegistry: repository,
 			DetectionService:  detectionService,
 			HuntStore:         repository,
+			RetentionStore:    repository,
 			RequireRegisteredCollectors: strings.EqualFold(
 				envOr("KCSP_REQUIRE_REGISTERED_COLLECTORS", strconv.FormatBool(authMode == "oidc")), "true",
 			),
