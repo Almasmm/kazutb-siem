@@ -156,7 +156,10 @@ func (s *Server) routes() {
 		s.mux.Handle("GET /api/v1/threat-intel/indicators/{indicatorID}", s.protect("ti.indicators.read", http.HandlerFunc(s.getThreatIndicator)))
 		s.mux.Handle("PATCH /api/v1/threat-intel/indicators/{indicatorID}", s.protect("ti.indicators.manage", http.HandlerFunc(s.updateThreatIndicatorState)))
 		s.mux.Handle("GET /api/v1/threat-intel/indicators/{indicatorID}/matches", s.protect("ti.indicators.read", http.HandlerFunc(s.listThreatIndicatorMatches)))
+		s.mux.Handle("POST /api/v1/threat-intel/indicators/{indicatorID}/retrosearch", s.protect("ti.indicators.manage", http.HandlerFunc(s.retrosearchThreatIndicator)))
 		s.mux.Handle("GET /api/v1/threat-intel/matches", s.protect("ti.indicators.read", http.HandlerFunc(s.listThreatIndicatorMatches)))
+		s.mux.Handle("POST /api/v1/threat-intel/stix/import", s.protect("ti.indicators.manage", http.HandlerFunc(s.importThreatIntelSTIX)))
+		s.mux.Handle("GET /api/v1/threat-intel/stix/export", s.protect("ti.indicators.read", http.HandlerFunc(s.exportThreatIntelSTIX)))
 	}
 	s.mux.Handle("GET /api/v1/findings", s.protect("siem.findings.read", http.HandlerFunc(s.listFindings)))
 	s.mux.Handle("GET /api/v1/alerts", s.protect("soc.alerts.read", http.HandlerFunc(s.listAlerts)))
@@ -810,6 +813,8 @@ func (s *Server) handleDomainError(w http.ResponseWriter, r *http.Request, err e
 		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_threat_intel_feed", "Invalid threat intelligence feed", err.Error())
 	case errors.Is(err, threatintel.ErrInvalidIndicator):
 		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_threat_indicator", "Invalid threat indicator", err.Error())
+	case errors.Is(err, threatintel.ErrRetrosearchUnavailable):
+		s.problem(w, r, http.StatusNotImplemented, "retrosearch_unavailable", "Retrosearch unavailable", err.Error())
 	case errors.Is(err, soc.ErrInvalidTransition):
 		s.problem(w, r, http.StatusConflict, "invalid_transition", "Invalid state transition", err.Error())
 	case errors.Is(err, soc.ErrClosureDetails), errors.Is(err, soc.ErrNoAlerts), errors.Is(err, pipeline.ErrInvalidEvent), errors.Is(err, ingest.ErrInvalidEnvelope):

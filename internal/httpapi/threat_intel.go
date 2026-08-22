@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -76,10 +77,10 @@ func (s *Server) updateThreatIntelFeed(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listThreatIndicators(w http.ResponseWriter, r *http.Request) {
 	items, err := s.threatIntel.Indicators(r.Context(), tenantFrom(r.Context()), core.ThreatIndicatorFilter{
 		FeedID: strings.TrimSpace(r.URL.Query().Get("feed_id")),
-		Type: core.ThreatIndicatorType(strings.TrimSpace(r.URL.Query().Get("type"))),
-		State: strings.TrimSpace(r.URL.Query().Get("state")),
-		Query: strings.TrimSpace(r.URL.Query().Get("q")),
-		Limit: intQuery(r, "limit"),
+		Type:   core.ThreatIndicatorType(strings.TrimSpace(r.URL.Query().Get("type"))),
+		State:  strings.TrimSpace(r.URL.Query().Get("state")),
+		Query:  strings.TrimSpace(r.URL.Query().Get("q")),
+		Limit:  intQuery(r, "limit"),
 	})
 	if err != nil {
 		s.handleDomainError(w, r, err)
@@ -174,4 +175,66 @@ func (s *Server) auditThreatIntel(r *http.Request, actor, action, resourceType, 
 		ResourceID: resourceID, Outcome: "SUCCESS", RequestID: requestIDFrom(r.Context()), Metadata: metadata,
 	})
 	return err
+}
+
+func (s *Server) importThreatIntelSTIX(w http.ResponseWriter, r *http.Request) {
+	body := http.MaxBytesReader(w, r.Body, 10<<20)
+	payload, err := io.ReadAll(body)
+	if err != nil {
+		s.problem(w, r, http.StatusRequestEntityTooLarge, "stix_payload_too_large", "STIX payload too large", "The STIX bundle exceeds 10 MiB.")
+		return
+	}
+	principal := principalFrom(r.Context())
+	report, err := s.threatIntel.ImportSTIX(r.Context(), tenantFrom(r.Context()), principal.ID,
+		strings.TrimSpace(r.URL.Query().Get("feed_id")), payload)
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	if err := s.auditThreatIntel(r, principal.ID, "threat_intel.stix.imported", "threat_intel_feed",
+		strings.TrimSpace(r.URL.Query().Get("feed_id")), map[string]interface{}{
+			"bundle_id": report.BundleID, "imported": report.Imported, "rejected": report.RejectedCount,
+			"skipped": report.Skipped,
+		}); err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, report)
+}
+
+func (s *Server) exportThreatIntelSTIX(w http.ResponseWriter, r *http.Request) {
+	bundle, err := s.threatIntel.ExportSTIX(r.Context(), tenantFrom(r.Context()), core.ThreatIndicatorFilter{
+		FeedID: strings.TrimSpace(r.URL.Query().Get("feed_id")),
+		Type:   core.ThreatIndicatorType(strings.TrimSpace(r.URL.Query().Get("type"))),
+		State:  strings.TrimSpace(r.URL.Query().Get("state")),
+		Query:  strings.TrimSpace(r.URL.Query().Get("q")),
+		Limit:  intQuery(r, "limit"),
+	})
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Disposition", `attachment; filename="kcsp-threat-intelligence.json"`)
+	s.json(w, http.StatusOK, bundle)
+}
+
+func (s *Server) retrosearchThreatIndicator(w http.ResponseWriter, r *http.Request) {
+	var request core.ThreatIntelRetrosearchRequest
+	if err := decodeJSON(w, r, &request); err != nil {
+		s.handleDecodeError(w, r, "Invalid threat intelligence retrosearch", err)
+		return
+	}
+	principal := principalFrom(r.Context())
+	result, err := s.threatIntel.Retrosearch(r.Context(), tenantFrom(r.Context()), r.PathValue("indicatorID"), request)
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	if err := s.auditThreatIntel(r, principal.ID, "threat_intel.retrosearch.executed", "threat_indicator",
+		result.IndicatorID, map[string]interface{}{"start": result.Start, "end": result.End,
+			"candidate_events": result.CandidateEvents, "matches": result.Returned, "partial": result.Partial}); err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, result)
 }

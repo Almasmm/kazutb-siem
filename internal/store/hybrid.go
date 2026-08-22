@@ -258,6 +258,59 @@ func (h *Hybrid) MatchThreatIntelEvent(ctx context.Context, event core.Canonical
 	observables := threatintel.ExtractObservables(event)
 	return h.control.MatchThreatIntelObservables(ctx, event.TenantID, event.ID, event.EventTime, observables)
 }
+func (h *Hybrid) RetrosearchThreatIndicator(ctx context.Context, indicator core.ThreatIndicator, request core.ThreatIntelRetrosearchRequest) (core.ThreatIntelRetrosearchResult, error) {
+	started := time.Now()
+	expression, err := threatintel.RetrosearchExpression(indicator)
+	if err != nil {
+		return core.ThreatIntelRetrosearchResult{}, err
+	}
+	result := core.ThreatIntelRetrosearchResult{
+		IndicatorID: indicator.ID, Start: request.Start, End: request.End, Matches: []core.ThreatIntelMatch{},
+	}
+	remaining := request.Limit
+	cursor := ""
+	for remaining > 0 {
+		pageLimit := min(remaining, 200)
+		page, err := h.telemetry.HuntEvents(ctx, indicator.TenantID, core.HuntRequest{
+			Start: request.Start, End: request.End, Expression: expression, Limit: pageLimit, Cursor: cursor,
+		})
+		if err != nil {
+			return core.ThreatIntelRetrosearchResult{}, err
+		}
+		result.CandidateEvents += len(page.Items)
+		for _, event := range page.Items {
+			observables := threatintel.ExtractObservables(event)
+			filtered := make([]core.ThreatObservable, 0, len(observables))
+			for _, observable := range observables {
+				if observable.Type == indicator.Type && observable.NormalizedValue == indicator.NormalizedValue {
+					filtered = append(filtered, observable)
+				}
+			}
+			if len(filtered) == 0 {
+				continue
+			}
+			matches, err := h.control.RecordThreatIntelMatches(ctx, indicator, event.ID, filtered)
+			if err != nil {
+				return core.ThreatIntelRetrosearchResult{}, err
+			}
+			result.EventsMatched++
+			result.Matches = append(result.Matches, matches...)
+		}
+		remaining -= len(page.Items)
+		result.Partial = result.Partial || page.Partial
+		if page.NextCursor == "" {
+			break
+		}
+		if remaining == 0 {
+			result.Partial = true
+			break
+		}
+		cursor = page.NextCursor
+	}
+	result.Returned = len(result.Matches)
+	result.DurationMicros = time.Since(started).Microseconds()
+	return result, nil
+}
 
 func (h *Hybrid) cachedRetentionPolicy(ctx context.Context, tenantID string) (core.RetentionPolicy, error) {
 	h.retentionMu.Lock()

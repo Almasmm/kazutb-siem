@@ -99,3 +99,22 @@ type ThreatIntelMatch struct {
 	Reputation       string              `json:"reputation"`
 	MatchedAt        time.Time           `json:"matched_at"`
 }
+
+type ThreatIntelRetrosearchRequest struct {
+	Start           time.Time `json:"start,omitempty"`
+	End             time.Time `json:"end,omitempty"`
+	LookbackSeconds int64     `json:"lookback_seconds,omitempty"`
+	Limit           int       `json:"limit,omitempty"`
+}
+
+type ThreatIntelRetrosearchResult struct {
+	IndicatorID     string             `json:"indicator_id"`
+	Start           time.Time          `json:"start"`
+	End             time.Time          `json:"end"`
+	CandidateEvents int                `json:"candidate_events"`
+	EventsMatched   int                `json:"events_matched"`
+	Matches         []ThreatIntelMatch `json:"matches"`
+	Returned        int                `json:"returned"`
+	Partial         bool               `json:"partial"`
+	DurationMicros  int64              `json:"duration_micros"`
+}

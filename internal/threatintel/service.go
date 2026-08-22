@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	ErrInvalidFeed      = errors.New("invalid threat intelligence feed")
-	ErrInvalidIndicator = errors.New("invalid threat indicator")
+	ErrInvalidFeed            = errors.New("invalid threat intelligence feed")
+	ErrInvalidIndicator       = errors.New("invalid threat indicator")
+	ErrRetrosearchUnavailable = errors.New("threat intelligence retrosearch is unavailable")
 )
 
 const maximumIndicatorTTL = int64((10 * 365 * 24 * time.Hour) / time.Second)
@@ -34,6 +35,10 @@ type Store interface {
 type Service struct {
 	store Store
 	now   func() time.Time
+}
+
+type retrosearchProvider interface {
+	RetrosearchThreatIndicator(context.Context, core.ThreatIndicator, core.ThreatIntelRetrosearchRequest) (core.ThreatIntelRetrosearchResult, error)
 }
 
 type FeedDraft struct {
@@ -162,6 +167,10 @@ func (s *Service) UpsertIndicator(ctx context.Context, tenantID, actor string, d
 	if err != nil {
 		return core.ThreatIndicator{}, false, err
 	}
+	return s.upsertIndicatorForFeed(ctx, tenantID, actor, feed, draft)
+}
+
+func (s *Service) upsertIndicatorForFeed(ctx context.Context, tenantID, actor string, feed core.ThreatIntelFeed, draft IndicatorDraft) (core.ThreatIndicator, bool, error) {
 	indicatorType, err := NormalizeIndicatorType(draft.Type)
 	if err != nil {
 		return core.ThreatIndicator{}, false, err
@@ -268,6 +277,46 @@ func (s *Service) Matches(ctx context.Context, tenantID, indicatorID, eventID st
 		limit = 500
 	}
 	return s.store.ListThreatIntelMatches(ctx, tenantID, indicatorID, strings.TrimSpace(eventID), limit)
+}
+
+func (s *Service) Retrosearch(ctx context.Context, tenantID, indicatorID string, request core.ThreatIntelRetrosearchRequest) (core.ThreatIntelRetrosearchResult, error) {
+	now := s.now()
+	if request.End.IsZero() {
+		request.End = now
+	} else {
+		request.End = request.End.UTC()
+	}
+	if request.Start.IsZero() {
+		lookback := request.LookbackSeconds
+		if lookback == 0 {
+			lookback = int64((7 * 24 * time.Hour) / time.Second)
+		}
+		if lookback < 1 || lookback > int64((31*24*time.Hour)/time.Second) {
+			return core.ThreatIntelRetrosearchResult{}, fmt.Errorf("%w: lookback must be between 1 second and 31 days", ErrInvalidIndicator)
+		}
+		request.Start = request.End.Add(-time.Duration(lookback) * time.Second)
+	} else {
+		request.Start = request.Start.UTC()
+	}
+	if !request.Start.Before(request.End) || request.End.Sub(request.Start) > 31*24*time.Hour ||
+		request.End.After(now.Add(5*time.Minute)) {
+		return core.ThreatIntelRetrosearchResult{}, fmt.Errorf("%w: retrosearch requires a valid range of at most 31 days", ErrInvalidIndicator)
+	}
+	if request.Limit <= 0 {
+		request.Limit = 100
+	}
+	if request.Limit > 1000 {
+		return core.ThreatIntelRetrosearchResult{}, fmt.Errorf("%w: retrosearch limit cannot exceed 1000 events", ErrInvalidIndicator)
+	}
+	indicator, err := s.store.GetThreatIndicator(ctx, tenantID, indicatorID)
+	if err != nil {
+		return core.ThreatIntelRetrosearchResult{}, err
+	}
+	provider, ok := s.store.(retrosearchProvider)
+	if !ok {
+		return core.ThreatIntelRetrosearchResult{}, ErrRetrosearchUnavailable
+	}
+	return provider.RetrosearchThreatIndicator(ctx, indicator, request)
 }
 
 func validateFeed(feed core.ThreatIntelFeed) error {

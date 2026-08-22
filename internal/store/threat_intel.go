@@ -309,6 +309,38 @@ func (p *Postgres) ListThreatIntelMatches(ctx context.Context, tenantID, indicat
 	return matches, nil
 }
 
+func (p *Postgres) RecordThreatIntelMatches(ctx context.Context, indicator core.ThreatIndicator, eventID string, observables []core.ThreatObservable) ([]core.ThreatIntelMatch, error) {
+	if len(observables) == 0 {
+		return []core.ThreatIntelMatch{}, nil
+	}
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin historical threat intelligence matching: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	matchedAt := time.Now().UTC()
+	matches := make([]core.ThreatIntelMatch, 0, len(observables))
+	for _, observable := range observables {
+		match, err := scanThreatIntelMatch(tx.QueryRow(ctx, `INSERT INTO threat_intel_matches(
+				tenant_id,match_id,indicator_id,indicator_version,feed_id,event_id,indicator_type,indicator_value,
+				matched_field,matched_value,confidence,reputation,matched_at)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+			ON CONFLICT (tenant_id,indicator_id,event_id,matched_field)
+			DO UPDATE SET match_id=threat_intel_matches.match_id
+			RETURNING `+threatMatchColumns, indicator.TenantID, core.NewID("tim"), indicator.ID, indicator.Version,
+			indicator.FeedID, eventID, indicator.Type, indicator.NormalizedValue, observable.Field, observable.RawValue,
+			indicator.Confidence, indicator.Reputation, matchedAt))
+		if err != nil {
+			return nil, fmt.Errorf("persist historical threat intelligence match: %w", err)
+		}
+		matches = append(matches, match)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit historical threat intelligence matching: %w", err)
+	}
+	return matches, nil
+}
+
 func insertThreatIndicator(ctx context.Context, tx pgx.Tx, indicator core.ThreatIndicator) (core.ThreatIndicator, error) {
 	tags, actors, err := encodeThreatIndicatorLists(indicator)
 	if err != nil {
