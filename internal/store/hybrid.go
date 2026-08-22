@@ -354,6 +354,27 @@ func (h *Hybrid) CompleteSOARManualTask(ctx context.Context, tenantID, execution
 func (h *Hybrid) ListSOARActionAttempts(ctx context.Context, tenantID, executionID string, limit int) ([]core.SOARActionAttempt, error) {
 	return h.control.ListSOARActionAttempts(ctx, tenantID, executionID, limit)
 }
+func (h *Hybrid) CreateSOARConnector(ctx context.Context, connector core.SOARConnector) (core.SOARConnector, error) {
+	return h.control.CreateSOARConnector(ctx, connector)
+}
+func (h *Hybrid) GetSOARConnector(ctx context.Context, tenantID, connectorID string) (core.SOARConnector, error) {
+	return h.control.GetSOARConnector(ctx, tenantID, connectorID)
+}
+func (h *Hybrid) ListSOARConnectors(ctx context.Context, tenantID string, filter core.SOARConnectorFilter) ([]core.SOARConnector, error) {
+	return h.control.ListSOARConnectors(ctx, tenantID, filter)
+}
+func (h *Hybrid) UpdateSOARConnector(ctx context.Context, connector core.SOARConnector, version int) (core.SOARConnector, error) {
+	return h.control.UpdateSOARConnector(ctx, connector, version)
+}
+func (h *Hybrid) DisableSOARConnector(ctx context.Context, tenantID, connectorID, actor string, version int) (core.SOARConnector, error) {
+	return h.control.DisableSOARConnector(ctx, tenantID, connectorID, actor, version)
+}
+func (h *Hybrid) CreateSOARConnectorTest(ctx context.Context, test core.SOARConnectorTest) (core.SOARConnectorTest, bool, error) {
+	return h.control.CreateSOARConnectorTest(ctx, test)
+}
+func (h *Hybrid) ListSOARConnectorTests(ctx context.Context, tenantID, connectorID string, limit int) ([]core.SOARConnectorTest, error) {
+	return h.control.ListSOARConnectorTests(ctx, tenantID, connectorID, limit)
+}
 
 func (h *Hybrid) cachedRetentionPolicy(ctx context.Context, tenantID string) (core.RetentionPolicy, error) {
 	h.retentionMu.Lock()

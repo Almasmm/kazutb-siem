@@ -179,6 +179,13 @@ func (s *Server) routes() {
 		s.mux.Handle("GET /api/v1/soar/approvals", s.protect("soar.actions.approve", http.HandlerFunc(s.listSOARApprovals)))
 		s.mux.Handle("POST /api/v1/soar/approvals/{approvalID}/decisions", s.protect("soar.actions.approve", http.HandlerFunc(s.decideSOARApproval)))
 		s.mux.Handle("GET /api/v1/soar/action-attempts", s.protect("soar.playbooks.read", http.HandlerFunc(s.listSOARActionAttempts)))
+		s.mux.Handle("GET /api/v1/soar/connectors", s.protect("soar.connectors.read", http.HandlerFunc(s.listSOARConnectors)))
+		s.mux.Handle("POST /api/v1/soar/connectors", s.protect("soar.connectors.manage", http.HandlerFunc(s.createSOARConnector)))
+		s.mux.Handle("GET /api/v1/soar/connectors/{connectorID}", s.protect("soar.connectors.read", http.HandlerFunc(s.getSOARConnector)))
+		s.mux.Handle("PATCH /api/v1/soar/connectors/{connectorID}", s.protect("soar.connectors.manage", http.HandlerFunc(s.updateSOARConnector)))
+		s.mux.Handle("POST /api/v1/soar/connectors/{connectorID}/disable", s.protect("soar.connectors.manage", http.HandlerFunc(s.disableSOARConnector)))
+		s.mux.Handle("POST /api/v1/soar/connectors/{connectorID}/tests", s.protect("soar.connectors.test", http.HandlerFunc(s.queueSOARConnectorTest)))
+		s.mux.Handle("GET /api/v1/soar/connectors/{connectorID}/tests", s.protect("soar.connectors.read", http.HandlerFunc(s.listSOARConnectorTests)))
 	}
 	s.mux.Handle("GET /api/v1/findings", s.protect("siem.findings.read", http.HandlerFunc(s.listFindings)))
 	s.mux.Handle("GET /api/v1/alerts", s.protect("soc.alerts.read", http.HandlerFunc(s.listAlerts)))
@@ -842,6 +849,8 @@ func (s *Server) handleDomainError(w http.ResponseWriter, r *http.Request, err e
 		s.problem(w, r, http.StatusConflict, "invalid_soar_state", "Invalid SOAR state", err.Error())
 	case errors.Is(err, soar.ErrInvalidExecution):
 		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_soar_execution", "Invalid SOAR execution", err.Error())
+	case errors.Is(err, soar.ErrInvalidConnector):
+		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_soar_connector", "Invalid SOAR connector", err.Error())
 	case errors.Is(err, soc.ErrInvalidTransition):
 		s.problem(w, r, http.StatusConflict, "invalid_transition", "Invalid state transition", err.Error())
 	case errors.Is(err, soc.ErrClosureDetails), errors.Is(err, soc.ErrNoAlerts), errors.Is(err, pipeline.ErrInvalidEvent), errors.Is(err, ingest.ErrInvalidEnvelope):

@@ -47,11 +47,13 @@ type ActionExecutor interface {
 }
 
 type Worker struct {
-	store    RuntimeStore
-	actions  ActionCatalog
-	executor ActionExecutor
-	config   WorkerConfig
-	logger   *slog.Logger
+	store              RuntimeStore
+	actions            ActionCatalog
+	executor           ActionExecutor
+	connectorTestStore ConnectorTestRuntimeStore
+	connectorTester    ConnectorTester
+	config             WorkerConfig
+	logger             *slog.Logger
 }
 
 type NodeError struct {
@@ -81,7 +83,14 @@ func NewWorker(store RuntimeStore, actions ActionCatalog, executor ActionExecuto
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Worker{store: store, actions: actions, executor: executor, config: config, logger: logger}
+	worker := &Worker{store: store, actions: actions, executor: executor, config: config, logger: logger}
+	if connectorStore, ok := store.(ConnectorTestRuntimeStore); ok {
+		if connectorTester, ok := executor.(ConnectorTester); ok {
+			worker.connectorTestStore = connectorStore
+			worker.connectorTester = connectorTester
+		}
+	}
+	return worker
 }
 
 func (w *Worker) Run(ctx context.Context) error {
@@ -106,6 +115,12 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 func (w *Worker) ProcessOne(ctx context.Context) (bool, error) {
+	if w.connectorTestStore != nil && w.connectorTester != nil {
+		worked, err := w.processConnectorTest(ctx)
+		if err != nil || worked {
+			return worked, err
+		}
+	}
 	item, found, err := w.store.ClaimSOARNode(ctx, w.config.ID, w.config.TenantID, w.config.Lease)
 	if err != nil || !found {
 		return found, err
@@ -136,6 +151,33 @@ func (w *Worker) ProcessOne(ctx context.Context) (bool, error) {
 			time.Now().UTC().Add(delay), nodeError.Code, nodeError.Detail)
 	}
 	return true, w.store.FailSOARNode(ctx, item.Node.TenantID, item.Node.ID, w.config.ID, nodeError.Code, nodeError.Detail)
+}
+
+func (w *Worker) processConnectorTest(ctx context.Context) (bool, error) {
+	item, found, err := w.connectorTestStore.ClaimSOARConnectorTest(
+		ctx, w.config.ID, w.config.TenantID, w.config.Lease,
+	)
+	if err != nil || !found {
+		return found, err
+	}
+	timeout := time.Duration(item.Connector.TimeoutSeconds) * time.Second
+	if timeout <= 0 || timeout > time.Minute {
+		timeout = 10 * time.Second
+	}
+	testContext, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	result, testErr := w.connectorTester.TestConnector(testContext, item.Connector)
+	if testErr != nil {
+		result = ConnectorTestResult{
+			Status: core.SOARConnectorTestFailed, ErrorClass: "INTERNAL",
+			Detail: "connector tester returned an internal error",
+		}
+	}
+	_, finishErr := w.connectorTestStore.FinishSOARConnectorTest(
+		ctx, item.Test.TenantID, item.Test.ID, w.config.ID, result.Status,
+		result.ErrorClass, result.Detail, result.HTTPStatus, result.LatencyMS,
+	)
+	return true, finishErr
 }
 
 func (w *Worker) process(ctx context.Context, item core.SOARWorkItem) error {
