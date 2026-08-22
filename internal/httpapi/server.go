@@ -15,6 +15,7 @@ import (
 
 	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/detection"
+	"github.com/kcsp/platform/internal/hunt"
 	"github.com/kcsp/platform/internal/ingest"
 	"github.com/kcsp/platform/internal/pipeline"
 	"github.com/kcsp/platform/internal/platform/auth"
@@ -46,6 +47,7 @@ type Server struct {
 	collectors        store.CollectorRegistry
 	requireCollectors bool
 	detections        *detection.Service
+	hunts             store.HuntStore
 }
 
 type Authenticator interface {
@@ -60,6 +62,7 @@ type Config struct {
 	CollectorRegistry           store.CollectorRegistry
 	RequireRegisteredCollectors bool
 	DetectionService            *detection.Service
+	HuntStore                   store.HuntStore
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -73,7 +76,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		profile: config.Profile, authMode: config.AuthMode,
 		gateway: config.Gateway, allowDirectIngest: config.AllowDirectIngest,
 		collectors: config.CollectorRegistry, requireCollectors: config.RequireRegisteredCollectors,
-		detections: config.DetectionService,
+		detections: config.DetectionService, hunts: config.HuntStore,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -111,6 +114,16 @@ func (s *Server) routes() {
 		s.mux.Handle("POST /api/v1/detection/content/{ruleID}/rollback", s.protect("siem.rules.publish", http.HandlerFunc(s.rollbackDetectionContent)))
 		s.mux.Handle("POST /api/v1/detection/content/{ruleID}/simulate", s.protect("siem.rules.write", http.HandlerFunc(s.simulateDetectionContent)))
 		s.mux.Handle("POST /api/v1/detection/content/{ruleID}/replay", s.protect("siem.rules.write", http.HandlerFunc(s.replayDetectionContent)))
+	}
+	if s.hunts != nil {
+		s.mux.Handle("POST /api/v1/hunt/search", s.protect("siem.hunt.execute", http.HandlerFunc(s.searchHunt)))
+		s.mux.Handle("GET /api/v1/hunt/saved", s.protect("siem.hunt.read", http.HandlerFunc(s.listSavedHunts)))
+		s.mux.Handle("POST /api/v1/hunt/saved", s.protect("siem.hunt.manage", http.HandlerFunc(s.createSavedHunt)))
+		s.mux.Handle("GET /api/v1/hunt/saved/{huntID}", s.protect("siem.hunt.read", http.HandlerFunc(s.getSavedHunt)))
+		s.mux.Handle("PATCH /api/v1/hunt/saved/{huntID}", s.protect("siem.hunt.manage", http.HandlerFunc(s.updateSavedHunt)))
+		s.mux.Handle("DELETE /api/v1/hunt/saved/{huntID}", s.protect("siem.hunt.manage", http.HandlerFunc(s.deleteSavedHunt)))
+		s.mux.Handle("POST /api/v1/hunt/saved/{huntID}/execute", s.protect("siem.hunt.execute", http.HandlerFunc(s.executeSavedHunt)))
+		s.mux.Handle("GET /api/v1/hunt/executions", s.protect("siem.hunt.read", http.HandlerFunc(s.listHuntExecutions)))
 	}
 	s.mux.Handle("GET /api/v1/findings", s.protect("siem.findings.read", http.HandlerFunc(s.listFindings)))
 	s.mux.Handle("GET /api/v1/alerts", s.protect("soc.alerts.read", http.HandlerFunc(s.listAlerts)))
@@ -744,6 +757,8 @@ func (s *Server) handleDomainError(w http.ResponseWriter, r *http.Request, err e
 		s.problem(w, r, http.StatusUnprocessableEntity, "detection_validation_failed", "Detection validation failed", err.Error())
 	case errors.Is(err, detection.ErrInvalidState):
 		s.problem(w, r, http.StatusConflict, "invalid_detection_state", "Invalid detection state", err.Error())
+	case errors.Is(err, hunt.ErrInvalidQuery):
+		s.problem(w, r, http.StatusBadRequest, "invalid_hunt_query", "Invalid hunt query", err.Error())
 	case errors.Is(err, soc.ErrInvalidTransition):
 		s.problem(w, r, http.StatusConflict, "invalid_transition", "Invalid state transition", err.Error())
 	case errors.Is(err, soc.ErrClosureDetails), errors.Is(err, soc.ErrNoAlerts), errors.Is(err, pipeline.ErrInvalidEvent), errors.Is(err, ingest.ErrInvalidEnvelope):

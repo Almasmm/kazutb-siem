@@ -99,6 +99,7 @@ func run(logger *slog.Logger) error {
 			AllowDirectIngest: profile == "development" || profile == "test",
 			CollectorRegistry: repository,
 			DetectionService:  detectionService,
+			HuntStore:         repository,
 			RequireRegisteredCollectors: strings.EqualFold(
 				envOr("KCSP_REQUIRE_REGISTERED_COLLECTORS", strconv.FormatBool(authMode == "oidc")), "true",
 			),

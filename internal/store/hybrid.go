@@ -129,6 +129,30 @@ func (h *Hybrid) ListEvents(ctx context.Context, tenantID string, filter EventFi
 	}
 	return merged, nil
 }
+func (h *Hybrid) HuntEvents(ctx context.Context, tenantID string, request core.HuntRequest) (core.HuntPage, error) {
+	return h.telemetry.HuntEvents(ctx, tenantID, request)
+}
+func (h *Hybrid) CreateSavedHunt(ctx context.Context, item core.SavedHunt) (core.SavedHunt, error) {
+	return h.control.CreateSavedHunt(ctx, item)
+}
+func (h *Hybrid) ListSavedHunts(ctx context.Context, tenantID, viewer string, includeAll bool) ([]core.SavedHunt, error) {
+	return h.control.ListSavedHunts(ctx, tenantID, viewer, includeAll)
+}
+func (h *Hybrid) SavedHunt(ctx context.Context, tenantID, huntID, viewer string, includeAll bool) (core.SavedHunt, error) {
+	return h.control.SavedHunt(ctx, tenantID, huntID, viewer, includeAll)
+}
+func (h *Hybrid) UpdateSavedHunt(ctx context.Context, item core.SavedHunt, actor string, includeAll bool) (core.SavedHunt, error) {
+	return h.control.UpdateSavedHunt(ctx, item, actor, includeAll)
+}
+func (h *Hybrid) DeleteSavedHunt(ctx context.Context, tenantID, huntID string, version int, actor string, includeAll bool) error {
+	return h.control.DeleteSavedHunt(ctx, tenantID, huntID, version, actor, includeAll)
+}
+func (h *Hybrid) RecordHuntExecution(ctx context.Context, execution core.HuntExecution) error {
+	return h.control.RecordHuntExecution(ctx, execution)
+}
+func (h *Hybrid) ListHuntExecutions(ctx context.Context, tenantID, savedHuntID, viewer string, includeAll bool, limit int) ([]core.HuntExecution, error) {
+	return h.control.ListHuntExecutions(ctx, tenantID, savedHuntID, viewer, includeAll, limit)
+}
 func (h *Hybrid) PutFinding(ctx context.Context, finding core.Finding) error {
 	return h.telemetry.PutFinding(ctx, finding)
 }

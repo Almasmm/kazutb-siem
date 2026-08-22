@@ -15,6 +15,7 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 	clickhousedriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/kcsp/platform/internal/core"
+	"github.com/kcsp/platform/internal/hunt"
 	"github.com/kcsp/platform/internal/ingest"
 )
 
@@ -181,6 +182,76 @@ func (c *ClickHouse) ListEvents(ctx context.Context, tenantID string, filter Eve
 		result = append(result, event)
 	}
 	return result, rows.Err()
+}
+
+func (c *ClickHouse) HuntEvents(ctx context.Context, tenantID string, request core.HuntRequest) (core.HuntPage, error) {
+	started := time.Now()
+	normalized, err := hunt.Normalize(request, time.Now().UTC())
+	if err != nil {
+		return core.HuntPage{}, err
+	}
+	queryHash := hunt.QueryHash(normalized)
+	cursor, err := hunt.DecodeCursor(normalized.Cursor)
+	if err != nil {
+		return core.HuntPage{}, err
+	}
+	if cursor.QueryHash != "" && cursor.QueryHash != queryHash {
+		return core.HuntPage{}, fmt.Errorf("%w: cursor belongs to a different query", hunt.ErrInvalidQuery)
+	}
+	expression, expressionArgs, err := hunt.CompileExpression(normalized.Expression)
+	if err != nil {
+		return core.HuntPage{}, err
+	}
+	where := []string{"tenant_id=?", "event_time>=?", "event_time<?"}
+	args := []interface{}{tenantID, normalized.Start, normalized.End}
+	if expression != "" {
+		where = append(where, "("+expression+")")
+		args = append(args, expressionArgs...)
+	}
+	if !cursor.EventTime.IsZero() {
+		where = append(where, "(event_time<? OR (event_time=? AND event_id<?))")
+		args = append(args, cursor.EventTime, cursor.EventTime, cursor.EventID)
+	}
+	args = append(args, normalized.Limit+1)
+	query := `SELECT payload,event_time,event_id FROM normalized_events FINAL WHERE ` + strings.Join(where, " AND ") +
+		` ORDER BY event_time DESC,event_id DESC LIMIT ? SETTINGS max_execution_time=15,max_result_rows=1001,result_overflow_mode='break',max_threads=4`
+	queryContext, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	rows, err := c.conn.Query(queryContext, query, args...)
+	if err != nil {
+		return core.HuntPage{}, fmt.Errorf("hunt ClickHouse events: %w", err)
+	}
+	defer rows.Close()
+	items := []core.CanonicalEvent{}
+	times := []time.Time{}
+	ids := []string{}
+	for rows.Next() {
+		var payload, eventID string
+		var eventTime time.Time
+		if err := rows.Scan(&payload, &eventTime, &eventID); err != nil {
+			return core.HuntPage{}, err
+		}
+		var event core.CanonicalEvent
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			return core.HuntPage{}, fmt.Errorf("decode hunted ClickHouse event: %w", err)
+		}
+		items = append(items, event)
+		times = append(times, eventTime)
+		ids = append(ids, eventID)
+	}
+	if err := rows.Err(); err != nil {
+		return core.HuntPage{}, err
+	}
+	nextCursor := ""
+	if len(items) > normalized.Limit {
+		last := normalized.Limit - 1
+		nextCursor = hunt.EncodeCursor(hunt.Cursor{EventTime: times[last].UTC(), EventID: ids[last], QueryHash: queryHash})
+		items = items[:normalized.Limit]
+	}
+	return core.HuntPage{
+		ExecutionID: core.NewID("hex"), QueryHash: queryHash, Start: normalized.Start, End: normalized.End,
+		Items: items, Returned: len(items), NextCursor: nextCursor, DurationMicros: time.Since(started).Microseconds(), Partial: false,
+	}, nil
 }
 
 func (c *ClickHouse) PutFinding(ctx context.Context, finding core.Finding) error {
