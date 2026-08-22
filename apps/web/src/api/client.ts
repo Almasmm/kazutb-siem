@@ -2,6 +2,7 @@ import type {
   AlertDto,
   ApiProblem,
   AuditDto,
+  CollectorDto,
   EventDto,
   FindingDto,
   IncidentDto,
@@ -197,6 +198,7 @@ export const api = {
     getList<RuleDto>("/rules", params, signal).then((page) => ({ ...page, items: page.items.map(normalizeRule) })),
   audit: (params?: Record<string, QueryValue>, signal?: AbortSignal) =>
     getList<AuditDto>("/audit", params, signal).then((page) => ({ ...page, items: page.items.map(normalizeAudit) })),
+  collectors: (signal?: AbortSignal) => getList<CollectorDto>("/collectors", undefined, signal),
 };
 
 export const apiConfig = { base: API_BASE, get tenantId() { return getTenantId(); } };

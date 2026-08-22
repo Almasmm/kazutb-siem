@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -49,8 +50,21 @@ func run(logger *slog.Logger) error {
 	defer stop()
 	pollInterval := envDuration("KCSP_AGENT_POLL_INTERVAL", 2*time.Second)
 	batchSize := int(envInt64("KCSP_AGENT_BATCH_SIZE", 100))
+	heartbeatInterval := envDuration("KCSP_AGENT_HEARTBEAT_INTERVAL", 30*time.Second)
+	nextHeartbeat := time.Time{}
 	logger.Info("KCSP Windows agent started", "version", agentVersion, "state_directory", stateDirectory)
 	for {
+		if time.Now().After(nextHeartbeat) {
+			depth, queueBytes, _ := queue.Depth()
+			if collector, heartbeatErr := forwarder.Heartbeat(ctx, agentVersion, map[string]interface{}{
+				"os": runtime.GOOS, "arch": runtime.GOARCH, "source": "sysmon", "queue_depth": depth, "queue_bytes": queueBytes,
+			}); heartbeatErr != nil {
+				logger.Warn("collector heartbeat failed", "error", heartbeatErr)
+			} else {
+				logger.Debug("collector heartbeat accepted", "collector_id", collector.ID, "health", collector.Health)
+			}
+			nextHeartbeat = time.Now().Add(heartbeatInterval)
+		}
 		if err := flush(ctx, queue, forwarder, batchSize); err != nil {
 			depth, bytes, _ := queue.Depth()
 			logger.Warn("KCSP gateway unavailable; events remain on disk", "error", err, "queue_depth", depth, "queue_bytes", bytes)

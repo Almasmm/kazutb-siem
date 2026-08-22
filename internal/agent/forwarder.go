@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/ingest"
 )
 
@@ -30,10 +31,11 @@ type ForwarderConfig struct {
 }
 
 type Forwarder struct {
-	endpoint string
-	tenantID string
-	token    string
-	client   *http.Client
+	endpoint          string
+	heartbeatEndpoint string
+	tenantID          string
+	token             string
+	client            *http.Client
 }
 
 func NewForwarder(config ForwarderConfig) (*Forwarder, error) {
@@ -79,11 +81,40 @@ func NewForwarder(config ForwarderConfig) (*Forwarder, error) {
 		config.Timeout = 30 * time.Second
 	}
 	transport := &http.Transport{TLSClientConfig: tlsConfig, MaxIdleConns: 10, IdleConnTimeout: 90 * time.Second}
+	baseURL := strings.TrimRight(serverURL.String(), "/")
 	return &Forwarder{
-		endpoint: strings.TrimRight(serverURL.String(), "/") + "/api/v1/ingest/events",
+		endpoint: baseURL + "/api/v1/ingest/events", heartbeatEndpoint: baseURL + "/api/v1/collectors/heartbeat",
 		tenantID: config.TenantID, token: config.AccessToken,
 		client: &http.Client{Transport: transport, Timeout: config.Timeout},
 	}, nil
+}
+
+func (f *Forwarder) Heartbeat(ctx context.Context, version string, metadata map[string]interface{}) (core.Collector, error) {
+	body, err := json.Marshal(core.CollectorHeartbeat{Version: version, Metadata: metadata})
+	if err != nil {
+		return core.Collector{}, fmt.Errorf("encode collector heartbeat: %w", err)
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, f.heartbeatEndpoint, bytes.NewReader(body))
+	if err != nil {
+		return core.Collector{}, fmt.Errorf("create collector heartbeat: %w", err)
+	}
+	request.Header.Set("Authorization", "Bearer "+f.token)
+	request.Header.Set("X-KCSP-Tenant-ID", f.tenantID)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := f.client.Do(request)
+	if err != nil {
+		return core.Collector{}, fmt.Errorf("send collector heartbeat: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		responseBody, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return core.Collector{}, fmt.Errorf("KCSP heartbeat returned %d: %s", response.StatusCode, strings.TrimSpace(string(responseBody)))
+	}
+	var collector core.Collector
+	if err := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&collector); err != nil {
+		return core.Collector{}, fmt.Errorf("decode collector heartbeat: %w", err)
+	}
+	return collector, nil
 }
 
 func (f *Forwarder) Send(ctx context.Context, event Event) (ingest.Receipt, error) {

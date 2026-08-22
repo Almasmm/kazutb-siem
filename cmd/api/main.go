@@ -51,6 +51,15 @@ func run(logger *slog.Logger) error {
 	if err := repository.EnsureTenant(startupContext, tenantID, tenantName); err != nil {
 		return fmt.Errorf("initialize default tenant: %w", err)
 	}
+	if authMode == "demo" {
+		_, err := repository.RegisterCollector(startupContext, core.Collector{
+			ID: "dev-http-collector", TenantID: tenantID, Name: "Development HTTP Collector", Type: "http-json",
+			AuthSubject: "svc-http-collector", Capabilities: []string{"http-json", "sysmon"}, Version: "development",
+		})
+		if err != nil && !errors.Is(err, store.ErrAlreadyExists) {
+			return fmt.Errorf("initialize development collector binding: %w", err)
+		}
+	}
 	engine, err := pipeline.New(startupContext, repository)
 	if err != nil {
 		return err
@@ -86,6 +95,10 @@ func run(logger *slog.Logger) error {
 		httpapi.Config{
 			Profile: profile + "-distributed", AuthMode: authMode, Gateway: gateway,
 			AllowDirectIngest: profile == "development" || profile == "test",
+			CollectorRegistry: repository,
+			RequireRegisteredCollectors: strings.EqualFold(
+				envOr("KCSP_REQUIRE_REGISTERED_COLLECTORS", strconv.FormatBool(authMode == "oidc")), "true",
+			),
 		},
 	)
 	address := envOr("KCSP_LISTEN_ADDR", "127.0.0.1:8080")

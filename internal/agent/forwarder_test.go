@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/ingest"
 )
 
@@ -44,5 +45,27 @@ func TestForwarderSendsBoundRawEventAndRequiresQueueReceipt(t *testing.T) {
 func TestForwarderRejectsPlainHTTPByDefault(t *testing.T) {
 	if _, err := NewForwarder(ForwarderConfig{ServerURL: "http://kcsp.local", TenantID: "tenant", AccessToken: "token"}); err == nil {
 		t.Fatal("expected plain HTTP to be rejected")
+	}
+}
+
+func TestForwarderSendsCollectorHeartbeat(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/collectors/heartbeat" || r.Header.Get("Authorization") != "Bearer service-token" {
+			t.Fatalf("unexpected heartbeat request: %s headers=%v", r.URL.Path, r.Header)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(core.Collector{ID: "collector-1", Health: "ONLINE"})
+	}))
+	defer server.Close()
+	forwarder, err := NewForwarder(ForwarderConfig{
+		ServerURL: server.URL, TenantID: "tenant-a", AccessToken: "service-token", AllowInsecureHTTP: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer forwarder.Close()
+	collector, err := forwarder.Heartbeat(t.Context(), "0.2.0", map[string]interface{}{"queue_depth": 3})
+	if err != nil || collector.ID != "collector-1" {
+		t.Fatalf("heartbeat failed: collector=%+v err=%v", collector, err)
 	}
 }

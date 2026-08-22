@@ -17,6 +17,7 @@ import (
 var (
 	ErrNotFound        = errors.New("resource not found")
 	ErrVersionConflict = errors.New("resource version conflict")
+	ErrAlreadyExists   = errors.New("resource already exists")
 )
 
 type EventFilter struct {

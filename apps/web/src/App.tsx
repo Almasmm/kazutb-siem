@@ -9,6 +9,7 @@ const HuntPage = lazy(() => import("./pages/HuntPage"));
 const IncidentsPage = lazy(() => import("./pages/IncidentsPage"));
 const RulesPage = lazy(() => import("./pages/RulesPage"));
 const AuditPage = lazy(() => import("./pages/AuditPage"));
+const CollectorsPage = lazy(() => import("./pages/CollectorsPage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 
 export default function App() {
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="/incidents" element={<IncidentsPage />} />
           <Route path="/rules" element={<RulesPage />} />
           <Route path="/audit" element={<AuditPage />} />
+          <Route path="/collectors" element={<CollectorsPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>

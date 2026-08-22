@@ -21,6 +21,7 @@ export const ru = {
     hunt: "Поиск / Hunt",
     incidents: "Инциденты",
     rules: "Детектирование",
+    collectors: "Коллекторы",
     audit: "Аудит",
   },
   common: {
@@ -205,6 +206,14 @@ export const ru = {
     ipAddress: "IP-адрес",
     traceId: "Trace ID",
     payload: "Контекст операции",
+  },
+  collectorsPage: {
+    eyebrow: "Data source control", title: "Коллекторы и агенты",
+    subtitle: "Привязанные service identities, состояние источников и локальные очереди доставки.",
+    searchPlaceholder: "Название, Collector ID, subject, IP или capability", noCollectors: "Коллекторы не зарегистрированы",
+    health: "Состояние", type: "Тип", lastSeen: "Последний heartbeat", neverSeen: "Ещё не подключался",
+    queue: "Очередь", subject: "OIDC subject", observedIp: "Наблюдаемый IP", capabilities: "Возможности",
+    healthMetadata: "Телеметрия здоровья",
   },
   severity: {
     critical: "Критический",

@@ -21,6 +21,7 @@ export const en = {
     hunt: "Search / Hunt",
     incidents: "Incidents",
     rules: "Detections",
+    collectors: "Collectors",
     audit: "Audit",
   },
   common: {
@@ -95,6 +96,14 @@ export const en = {
     subtitle: "Immutable history of user and platform service actions.",
     searchPlaceholder: "Action, resource, actor or Trace ID", noAudit: "No audit records", resource: "Resource",
     ipAddress: "IP address", traceId: "Trace ID", payload: "Operation context",
+  },
+  collectorsPage: {
+    eyebrow: "Data source control", title: "Collectors and agents",
+    subtitle: "Bound service identities, source health and local delivery queues.",
+    searchPlaceholder: "Name, Collector ID, subject, IP or capability", noCollectors: "No collectors registered",
+    health: "Health", type: "Type", lastSeen: "Last heartbeat", neverSeen: "Never connected",
+    queue: "Queue", subject: "OIDC subject", observedIp: "Observed IP", capabilities: "Capabilities",
+    healthMetadata: "Health telemetry",
   },
   severity: { critical: "Critical", high: "High", medium: "Medium", low: "Low", informational: "Informational", unknown: "Not set" },
   status: {

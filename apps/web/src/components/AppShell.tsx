@@ -9,6 +9,7 @@ import {
   LogOut,
   Menu,
   Radar,
+  RadioTower,
   Search,
   Shield,
   ShieldAlert,
@@ -39,7 +40,10 @@ const navGroups = [
   },
   {
     label: "nav.governance",
-    items: [{ to: "/audit", label: "nav.audit", icon: ClipboardList }],
+    items: [
+      { to: "/collectors", label: "nav.collectors", icon: RadioTower },
+      { to: "/audit", label: "nav.audit", icon: ClipboardList },
+    ],
   },
 ];
 
@@ -50,6 +54,7 @@ const pageKeys: Record<string, string> = {
   "/incidents": "nav.incidents",
   "/rules": "nav.rules",
   "/audit": "nav.audit",
+  "/collectors": "nav.collectors",
 };
 
 export function AppShell() {

@@ -14,7 +14,7 @@ export const kk = {
   },
   nav: {
     operations: "Операциялар", intelligence: "Талдау", governance: "Басқару", soc: "SOC панелі",
-    alerts: "Ескертулер кезегі", hunt: "Іздеу / Hunt", incidents: "Инциденттер", rules: "Анықтау ережелері", audit: "Аудит",
+    alerts: "Ескертулер кезегі", hunt: "Іздеу / Hunt", incidents: "Инциденттер", rules: "Анықтау ережелері", collectors: "Коллекторлар", audit: "Аудит",
   },
   common: {
     loading: "Деректер жүктелуде…", retry: "Қайталау", refresh: "Жаңарту", close: "Жабу", cancel: "Бас тарту",
@@ -93,6 +93,14 @@ export const kk = {
     subtitle: "Пайдаланушылар мен платформа сервистерінің өзгермейтін әрекет тарихы.",
     searchPlaceholder: "Әрекет, нысан, бастамашы немесе Trace ID", noAudit: "Аудит жазбалары жоқ",
     resource: "Нысан", ipAddress: "IP мекенжайы", traceId: "Trace ID", payload: "Операция контексті",
+  },
+  collectorsPage: {
+    eyebrow: "Data source control", title: "Коллекторлар мен агенттер",
+    subtitle: "Байланыстырылған service identity, дереккөз күйі және жергілікті жеткізу кезектері.",
+    searchPlaceholder: "Атауы, Collector ID, subject, IP немесе capability", noCollectors: "Коллекторлар тіркелмеген",
+    health: "Күйі", type: "Түрі", lastSeen: "Соңғы heartbeat", neverSeen: "Әлі қосылмаған",
+    queue: "Кезек", subject: "OIDC subject", observedIp: "Бақыланған IP", capabilities: "Мүмкіндіктер",
+    healthMetadata: "Денсаулық телеметриясы",
   },
   severity: { critical: "Сындарлы", high: "Жоғары", medium: "Орташа", low: "Төмен", informational: "Ақпараттық", unknown: "Берілмеген" },
   status: {

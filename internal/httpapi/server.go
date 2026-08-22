@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -41,6 +42,8 @@ type Server struct {
 	authMode          string
 	gateway           *ingest.Gateway
 	allowDirectIngest bool
+	collectors        store.CollectorRegistry
+	requireCollectors bool
 }
 
 type Authenticator interface {
@@ -48,10 +51,12 @@ type Authenticator interface {
 }
 
 type Config struct {
-	Profile           string
-	AuthMode          string
-	Gateway           *ingest.Gateway
-	AllowDirectIngest bool
+	Profile                     string
+	AuthMode                    string
+	Gateway                     *ingest.Gateway
+	AllowDirectIngest           bool
+	CollectorRegistry           store.CollectorRegistry
+	RequireRegisteredCollectors bool
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -64,6 +69,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		logger: logger, mux: http.NewServeMux(), seed: seed, startedAt: time.Now().UTC(),
 		profile: config.Profile, authMode: config.AuthMode,
 		gateway: config.Gateway, allowDirectIngest: config.AllowDirectIngest,
+		collectors: config.CollectorRegistry, requireCollectors: config.RequireRegisteredCollectors,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -85,6 +91,12 @@ func (s *Server) routes() {
 	}
 	if s.gateway != nil {
 		s.mux.Handle("POST /api/v1/ingest/events", s.protect("siem.events.ingest", http.HandlerFunc(s.queueEvent)))
+	}
+	if s.collectors != nil {
+		s.mux.Handle("GET /api/v1/collectors", s.protect("platform.collectors.read", http.HandlerFunc(s.listCollectors)))
+		s.mux.Handle("POST /api/v1/collectors", s.protect("platform.collectors.manage", http.HandlerFunc(s.registerCollector)))
+		s.mux.Handle("PATCH /api/v1/collectors/{collectorID}", s.protect("platform.collectors.manage", http.HandlerFunc(s.updateCollector)))
+		s.mux.Handle("POST /api/v1/collectors/heartbeat", s.protect("platform.collectors.heartbeat", http.HandlerFunc(s.collectorHeartbeat)))
 	}
 	s.mux.Handle("GET /api/v1/findings", s.protect("siem.findings.read", http.HandlerFunc(s.listFindings)))
 	s.mux.Handle("GET /api/v1/alerts", s.protect("soc.alerts.read", http.HandlerFunc(s.listAlerts)))
@@ -255,10 +267,27 @@ func (s *Server) queueEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal := principalFrom(r.Context())
+	collectorID := principal.ID
+	if s.collectors != nil {
+		collector, lookupErr := s.collectors.CollectorBySubject(r.Context(), tenantFrom(r.Context()), principal.ID)
+		switch {
+		case lookupErr == nil && collector.State == "ACTIVE":
+			collectorID = collector.ID
+		case lookupErr == nil:
+			s.problem(w, r, http.StatusForbidden, "collector_revoked", "Collector revoked", "The collector identity is not active.")
+			return
+		case s.requireCollectors && errors.Is(lookupErr, store.ErrNotFound):
+			s.problem(w, r, http.StatusForbidden, "collector_not_registered", "Collector not registered", "The service identity is not bound to an active collector in this tenant.")
+			return
+		case s.requireCollectors:
+			s.handleDomainError(w, r, lookupErr)
+			return
+		}
+	}
 	format := strings.TrimSpace(r.Header.Get("X-KCSP-Event-Format"))
 	var receipt ingest.Receipt
 	if format == "" || format == ingest.FormatCanonicalJSON {
-		receipt, err = s.gateway.SubmitJSON(r.Context(), tenantFrom(r.Context()), principal.ID, payload)
+		receipt, err = s.gateway.SubmitJSON(r.Context(), tenantFrom(r.Context()), collectorID, payload)
 	} else {
 		var eventTimestamp time.Time
 		if value := strings.TrimSpace(r.Header.Get("X-KCSP-Event-Timestamp")); value != "" {
@@ -268,7 +297,7 @@ func (s *Server) queueEvent(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		receipt, err = s.gateway.SubmitRaw(r.Context(), tenantFrom(r.Context()), principal.ID, ingest.RawSubmission{
+		receipt, err = s.gateway.SubmitRaw(r.Context(), tenantFrom(r.Context()), collectorID, ingest.RawSubmission{
 			Format: format, ContentType: r.Header.Get("Content-Type"), EventID: r.Header.Get("X-KCSP-Event-ID"),
 			EventTimestamp: eventTimestamp, Payload: payload,
 		})
@@ -278,6 +307,101 @@ func (s *Server) queueEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.json(w, http.StatusAccepted, receipt)
+}
+
+func (s *Server) listCollectors(w http.ResponseWriter, r *http.Request) {
+	items, err := s.collectors.ListCollectors(r.Context(), tenantFrom(r.Context()))
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": items, "total": len(items)})
+}
+
+func (s *Server) registerCollector(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		ID           string   `json:"collector_id"`
+		Name         string   `json:"name"`
+		Type         string   `json:"type"`
+		AuthSubject  string   `json:"auth_subject"`
+		Capabilities []string `json:"capabilities"`
+	}
+	if err := decodeJSON(w, r, &request); err != nil {
+		s.handleDecodeError(w, r, "Invalid collector registration", err)
+		return
+	}
+	if strings.TrimSpace(request.ID) == "" {
+		request.ID = core.NewID("col")
+	}
+	collector, err := s.collectors.RegisterCollector(r.Context(), core.Collector{
+		ID: request.ID, TenantID: tenantFrom(r.Context()), Name: request.Name, Type: request.Type,
+		AuthSubject: request.AuthSubject, Capabilities: request.Capabilities,
+	})
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	principal := principalFrom(r.Context())
+	if _, err := s.store.AppendAudit(r.Context(), core.AuditEntry{
+		TenantID: collector.TenantID, Actor: principal.ID, Action: "collector.registered", ResourceType: "collector",
+		ResourceID: collector.ID, Outcome: "SUCCESS", RequestID: requestIDFrom(r.Context()),
+		Metadata: map[string]interface{}{"auth_subject": collector.AuthSubject, "type": collector.Type},
+	}); err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusCreated, collector)
+}
+
+func (s *Server) updateCollector(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		State string `json:"state"`
+	}
+	if err := decodeJSON(w, r, &request); err != nil {
+		s.handleDecodeError(w, r, "Invalid collector update", err)
+		return
+	}
+	collector, err := s.collectors.SetCollectorState(r.Context(), tenantFrom(r.Context()), r.PathValue("collectorID"), request.State)
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	principal := principalFrom(r.Context())
+	if _, err := s.store.AppendAudit(r.Context(), core.AuditEntry{
+		TenantID: collector.TenantID, Actor: principal.ID, Action: "collector.state_changed", ResourceType: "collector",
+		ResourceID: collector.ID, Outcome: "SUCCESS", RequestID: requestIDFrom(r.Context()), Metadata: map[string]interface{}{"state": collector.State},
+	}); err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, collector)
+}
+
+func (s *Server) collectorHeartbeat(w http.ResponseWriter, r *http.Request) {
+	var heartbeat core.CollectorHeartbeat
+	if err := decodeJSON(w, r, &heartbeat); err != nil {
+		s.handleDecodeError(w, r, "Invalid collector heartbeat", err)
+		return
+	}
+	principal := principalFrom(r.Context())
+	collector, err := s.collectors.HeartbeatCollector(r.Context(), tenantFrom(r.Context()), principal.ID, heartbeat, remoteIP(r.RemoteAddr))
+	if errors.Is(err, store.ErrNotFound) {
+		s.problem(w, r, http.StatusForbidden, "collector_not_registered", "Collector not registered", "The service identity is not bound to an active collector in this tenant.")
+		return
+	}
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, collector)
+}
+
+func remoteIP(address string) string {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err == nil {
+		return host
+	}
+	return strings.TrimSpace(address)
 }
 
 func (s *Server) listFindings(w http.ResponseWriter, r *http.Request) {
@@ -458,6 +582,8 @@ func (s *Server) handleDomainError(w http.ResponseWriter, r *http.Request, err e
 		s.problem(w, r, http.StatusNotFound, "not_found", "Resource not found", "The resource does not exist in this tenant.")
 	case errors.Is(err, store.ErrVersionConflict):
 		s.problem(w, r, http.StatusPreconditionFailed, "version_conflict", "The resource changed", "Refresh the resource and retry with its current version.")
+	case errors.Is(err, store.ErrAlreadyExists):
+		s.problem(w, r, http.StatusConflict, "already_exists", "Resource already exists", "A resource with this identity already exists in the tenant.")
 	case errors.Is(err, soc.ErrInvalidTransition):
 		s.problem(w, r, http.StatusConflict, "invalid_transition", "Invalid state transition", err.Error())
 	case errors.Is(err, soc.ErrClosureDetails), errors.Is(err, soc.ErrNoAlerts), errors.Is(err, pipeline.ErrInvalidEvent), errors.Is(err, ingest.ErrInvalidEnvelope):

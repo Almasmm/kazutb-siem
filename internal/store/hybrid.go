@@ -38,6 +38,21 @@ func (h *Hybrid) Close() { h.telemetry.Close(); h.control.Close() }
 func (h *Hybrid) EnsureTenant(ctx context.Context, tenantID, name string) error {
 	return h.control.EnsureTenant(ctx, tenantID, name)
 }
+func (h *Hybrid) RegisterCollector(ctx context.Context, collector core.Collector) (core.Collector, error) {
+	return h.control.RegisterCollector(ctx, collector)
+}
+func (h *Hybrid) ListCollectors(ctx context.Context, tenantID string) ([]core.Collector, error) {
+	return h.control.ListCollectors(ctx, tenantID)
+}
+func (h *Hybrid) CollectorBySubject(ctx context.Context, tenantID, subject string) (core.Collector, error) {
+	return h.control.CollectorBySubject(ctx, tenantID, subject)
+}
+func (h *Hybrid) HeartbeatCollector(ctx context.Context, tenantID, subject string, heartbeat core.CollectorHeartbeat, observedIP string) (core.Collector, error) {
+	return h.control.HeartbeatCollector(ctx, tenantID, subject, heartbeat, observedIP)
+}
+func (h *Hybrid) SetCollectorState(ctx context.Context, tenantID, collectorID, state string) (core.Collector, error) {
+	return h.control.SetCollectorState(ctx, tenantID, collectorID, state)
+}
 func (h *Hybrid) ResetTenant(ctx context.Context, tenantID string) error {
 	if err := h.telemetry.ResetTenant(ctx, tenantID); err != nil {
 		return err

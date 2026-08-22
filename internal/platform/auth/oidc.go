@@ -222,16 +222,16 @@ var rolePermissions = map[string][]string{
 		"soc.cases.manage", "soc.evidence.read", "soc.evidence.write", "soar.playbooks.read", "soar.playbooks.execute", "soar.actions.approve",
 	},
 	"soc_l1": {
-		"platform.overview.read", "siem.events.read", "siem.findings.read", "detection.rules.read",
+		"platform.overview.read", "platform.collectors.read", "siem.events.read", "siem.findings.read", "detection.rules.read",
 		"soc.alerts.read", "soc.alerts.manage", "soc.alerts.triage", "soc.incidents.read", "soc.incidents.create",
 	},
 	"soc_l2": {
-		"platform.overview.read", "siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read",
+		"platform.overview.read", "platform.collectors.read", "siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read",
 		"soc.alerts.read", "soc.alerts.manage", "soc.alerts.triage", "soc.incidents.read", "soc.incidents.create", "soc.incidents.manage",
 		"soc.cases.manage", "soc.evidence.read", "soc.evidence.write", "soar.playbooks.read", "soar.playbooks.execute", "platform.audit.read",
 	},
 	"soc_l3": {
-		"platform.overview.read", "siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read",
+		"platform.overview.read", "platform.collectors.read", "siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read",
 		"soc.alerts.read", "soc.alerts.manage", "soc.alerts.triage", "soc.incidents.read", "soc.incidents.create", "soc.incidents.manage",
 		"soc.cases.manage", "soc.evidence.read", "soc.evidence.write", "soar.playbooks.read", "soar.playbooks.execute", "soar.actions.approve", "platform.audit.read",
 	},
@@ -248,8 +248,8 @@ var rolePermissions = map[string][]string{
 	"auditor": {
 		"platform.overview.read", "siem.events.read", "soc.alerts.read", "soc.incidents.read", "soc.evidence.read", "platform.audit.read", "audit.read",
 	},
-	"collector":         {"siem.events.ingest"},
-	"service_collector": {"siem.events.ingest"},
+	"collector":         {"siem.events.ingest", "platform.collectors.heartbeat"},
+	"service_collector": {"siem.events.ingest", "platform.collectors.heartbeat"},
 }
 
 var knownPermissions = func() map[string]bool {

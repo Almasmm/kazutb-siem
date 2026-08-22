@@ -233,6 +233,23 @@ export interface AuditDto {
   [key: string]: unknown;
 }
 
+export interface CollectorDto {
+  collector_id: string;
+  tenant_id?: string;
+  name: string;
+  type: string;
+  auth_subject?: string;
+  state: "ACTIVE" | "REVOKED" | string;
+  health: "ONLINE" | "OFFLINE" | "NEVER_SEEN" | "REVOKED" | string;
+  capabilities?: string[];
+  version?: string;
+  observed_ip?: string;
+  health_metadata?: Record<string, unknown>;
+  last_seen_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface ApiProblem {
   type?: string;
   title?: string;
