@@ -90,3 +90,26 @@ func TestGatewayRejectsInvalidAndOversizedPayloads(t *testing.T) {
 		})
 	}
 }
+
+func TestGatewayPreservesBinarySafeRawSubmission(t *testing.T) {
+	publisher := &recordingPublisher{}
+	payload := []byte(`<Event><Data Name="CommandLine">a &amp; b</Data></Event>`)
+	eventTime := time.Date(2026, 8, 23, 8, 9, 10, 0, time.UTC)
+	receipt, err := NewGateway(publisher).SubmitRaw(context.Background(), "tenant", "agent-01", RawSubmission{
+		Format: FormatSysmonXML, ContentType: "application/xml", EventID: "sysmon-1",
+		EventTimestamp: eventTime, Payload: payload,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.EventID != "sysmon-1" || len(publisher.records) != 1 {
+		t.Fatalf("unexpected receipt/publication: receipt=%+v records=%d", receipt, len(publisher.records))
+	}
+	envelope := publisher.records[0]
+	if envelope.Format != FormatSysmonXML || envelope.SchemaVersion != "2" || string(envelope.PayloadBytes()) != string(payload) {
+		t.Fatalf("raw envelope changed: %+v", envelope)
+	}
+	if len(envelope.Payload) != 0 || len(envelope.RawPayload) == 0 || !envelope.EventTimestamp.Equal(eventTime) {
+		t.Fatalf("raw payload encoding/timestamp invalid: %+v", envelope)
+	}
+}

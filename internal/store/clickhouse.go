@@ -87,9 +87,10 @@ func (c *ClickHouse) migrate(ctx context.Context) error {
 
 func (c *ClickHouse) PutRawEnvelope(ctx context.Context, envelope ingest.RawEnvelope) error {
 	return c.conn.Exec(ctx, `INSERT INTO raw_events
-		(tenant_id,event_id,message_id,collector_id,event_timestamp,received_at,content_type,schema_version,raw_hash,payload)
-		VALUES (?,?,?,?,?,?,?,?,?,?)`, envelope.TenantID, envelope.EventID, envelope.MessageID, envelope.CollectorID,
-		envelope.EventTimestamp, envelope.ReceivedAt, envelope.ContentType, envelope.SchemaVersion, envelope.RawHash, string(envelope.Payload))
+		(tenant_id,event_id,message_id,collector_id,event_timestamp,received_at,format,content_type,schema_version,raw_hash,payload)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)`, envelope.TenantID, envelope.EventID, envelope.MessageID, envelope.CollectorID,
+		envelope.EventTimestamp, envelope.ReceivedAt, envelope.Format, envelope.ContentType, envelope.SchemaVersion,
+		envelope.RawHash, string(envelope.PayloadBytes()))
 }
 
 // RawEnvelopeCount exposes the durable raw-ingest invariant for operations and

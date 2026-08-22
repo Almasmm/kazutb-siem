@@ -139,7 +139,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		if origin == "http://localhost:5173" || origin == "http://127.0.0.1:5173" || origin == "http://localhost:3000" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-KCSP-Tenant-ID, X-Request-ID, If-Match")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-KCSP-Tenant-ID, X-KCSP-Event-Format, X-KCSP-Event-ID, X-KCSP-Event-Timestamp, X-Request-ID, If-Match")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
 		}
 		if r.Method == http.MethodOptions {
@@ -255,7 +255,24 @@ func (s *Server) queueEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal := principalFrom(r.Context())
-	receipt, err := s.gateway.SubmitJSON(r.Context(), tenantFrom(r.Context()), principal.ID, payload)
+	format := strings.TrimSpace(r.Header.Get("X-KCSP-Event-Format"))
+	var receipt ingest.Receipt
+	if format == "" || format == ingest.FormatCanonicalJSON {
+		receipt, err = s.gateway.SubmitJSON(r.Context(), tenantFrom(r.Context()), principal.ID, payload)
+	} else {
+		var eventTimestamp time.Time
+		if value := strings.TrimSpace(r.Header.Get("X-KCSP-Event-Timestamp")); value != "" {
+			eventTimestamp, err = time.Parse(time.RFC3339Nano, value)
+			if err != nil {
+				s.problem(w, r, http.StatusBadRequest, "validation_error", "Invalid event timestamp", "X-KCSP-Event-Timestamp must be RFC3339.")
+				return
+			}
+		}
+		receipt, err = s.gateway.SubmitRaw(r.Context(), tenantFrom(r.Context()), principal.ID, ingest.RawSubmission{
+			Format: format, ContentType: r.Header.Get("Content-Type"), EventID: r.Header.Get("X-KCSP-Event-ID"),
+			EventTimestamp: eventTimestamp, Payload: payload,
+		})
+	}
 	if err != nil {
 		s.handleDomainError(w, r, err)
 		return

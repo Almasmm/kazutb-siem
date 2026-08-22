@@ -15,6 +15,11 @@ import (
 
 const MaxEventBytes = 1 << 20
 
+const (
+	FormatCanonicalJSON = "ocsf-json-v1"
+	FormatSysmonXML     = "microsoft-sysmon-xml-v1"
+)
+
 var ErrInvalidEnvelope = errors.New("invalid ingest envelope")
 
 type RawEnvelope struct {
@@ -24,10 +29,27 @@ type RawEnvelope struct {
 	CollectorID    string          `json:"collector_id"`
 	EventTimestamp time.Time       `json:"event_timestamp"`
 	ReceivedAt     time.Time       `json:"received_at"`
+	Format         string          `json:"format"`
 	ContentType    string          `json:"content_type"`
 	SchemaVersion  string          `json:"schema_version"`
 	RawHash        string          `json:"raw_hash"`
-	Payload        json.RawMessage `json:"payload"`
+	Payload        json.RawMessage `json:"payload,omitempty"`
+	RawPayload     []byte          `json:"raw_payload,omitempty"`
+}
+
+func (e RawEnvelope) PayloadBytes() []byte {
+	if len(e.RawPayload) > 0 {
+		return e.RawPayload
+	}
+	return e.Payload
+}
+
+type RawSubmission struct {
+	Format         string
+	ContentType    string
+	EventID        string
+	EventTimestamp time.Time
+	Payload        []byte
 }
 
 type Receipt struct {
@@ -79,14 +101,52 @@ func (g *Gateway) SubmitJSON(ctx context.Context, tenantID, collectorID string, 
 	if header.CollectorID != "" && header.CollectorID != collectorID {
 		return Receipt{}, fmt.Errorf("%w: collector identity does not match authenticated principal", ErrInvalidEnvelope)
 	}
-	now := g.now()
-	hash := sha256.Sum256(payload)
 	eventID := strings.TrimSpace(header.EventID)
+	return g.submit(ctx, tenantID, collectorID, RawSubmission{
+		Format: FormatCanonicalJSON, ContentType: "application/json", EventID: eventID,
+		EventTimestamp: header.EventTime, Payload: payload,
+	}, true)
+}
+
+func (g *Gateway) SubmitRaw(ctx context.Context, tenantID, collectorID string, submission RawSubmission) (Receipt, error) {
+	if strings.TrimSpace(submission.Format) == "" || submission.Format == FormatCanonicalJSON {
+		return g.SubmitJSON(ctx, tenantID, collectorID, submission.Payload)
+	}
+	return g.submit(ctx, tenantID, collectorID, submission, false)
+}
+
+func (g *Gateway) submit(ctx context.Context, tenantID, collectorID string, submission RawSubmission, canonical bool) (Receipt, error) {
+	tenantID = strings.TrimSpace(tenantID)
+	collectorID = strings.TrimSpace(collectorID)
+	format := strings.TrimSpace(submission.Format)
+	if tenantID == "" || collectorID == "" {
+		return Receipt{}, fmt.Errorf("%w: tenant and collector identity are required", ErrInvalidEnvelope)
+	}
+	if len(tenantID) > 128 || len(collectorID) > 256 || !validFormat(format) {
+		return Receipt{}, fmt.Errorf("%w: invalid tenant, collector, or format identity", ErrInvalidEnvelope)
+	}
+	if len(submission.Payload) == 0 || len(submission.Payload) > MaxEventBytes {
+		return Receipt{}, fmt.Errorf("%w: payload must contain up to %d bytes", ErrInvalidEnvelope, MaxEventBytes)
+	}
+	contentType := strings.TrimSpace(submission.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	if len(contentType) > 128 || strings.ContainsAny(contentType, "\r\n") {
+		return Receipt{}, fmt.Errorf("%w: invalid content type", ErrInvalidEnvelope)
+	}
+	now := g.now()
+	hash := sha256.Sum256(submission.Payload)
+	eventID := strings.TrimSpace(submission.EventID)
 	if eventID == "" {
-		identityHash := sha256.Sum256(append([]byte(tenantID+"|"), payload...))
+		identityInput := append([]byte(tenantID+"|"+collectorID+"|"+format+"|"), submission.Payload...)
+		identityHash := sha256.Sum256(identityInput)
 		eventID = "evt_" + hex.EncodeToString(identityHash[:12])
 	}
-	eventTimestamp := header.EventTime
+	if len(eventID) > 256 || strings.ContainsAny(eventID, "\r\n") {
+		return Receipt{}, fmt.Errorf("%w: invalid event identity", ErrInvalidEnvelope)
+	}
+	eventTimestamp := submission.EventTimestamp
 	if eventTimestamp.IsZero() {
 		eventTimestamp = now
 	} else {
@@ -94,13 +154,31 @@ func (g *Gateway) SubmitJSON(ctx context.Context, tenantID, collectorID string, 
 	}
 	envelope := RawEnvelope{
 		MessageID: core.NewID("msg"), EventID: eventID, TenantID: tenantID, CollectorID: collectorID,
-		EventTimestamp: eventTimestamp, ReceivedAt: now, ContentType: "application/json",
-		SchemaVersion: "1", RawHash: "sha256:" + hex.EncodeToString(hash[:]), Payload: append(json.RawMessage(nil), payload...),
+		EventTimestamp: eventTimestamp, ReceivedAt: now, Format: format, ContentType: contentType,
+		SchemaVersion: "2", RawHash: "sha256:" + hex.EncodeToString(hash[:]),
+	}
+	if canonical {
+		envelope.Payload = append(json.RawMessage(nil), submission.Payload...)
+	} else {
+		envelope.RawPayload = append([]byte(nil), submission.Payload...)
 	}
 	if err := g.publisher.Publish(ctx, envelope); err != nil {
 		return Receipt{}, fmt.Errorf("publish raw event: %w", err)
 	}
 	return Receipt{MessageID: envelope.MessageID, EventID: envelope.EventID, Status: "QUEUED", Topic: g.publisher.RawTopic(), AcceptedAt: now}, nil
+}
+
+func validFormat(value string) bool {
+	if value == "" || len(value) > 64 {
+		return false
+	}
+	for _, character := range value {
+		if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '-' || character == '_' || character == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 type DeadLetter struct {

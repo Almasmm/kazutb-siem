@@ -76,6 +76,8 @@ jobs:
         run: go test -race ./...
       - name: Static analysis
         run: go vet ./...
+      - name: Build Windows lightweight agent
+        run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o /tmp/kcsp-agent.exe ./cmd/agent
 
   web:
     runs-on: ubuntu-latest

@@ -17,7 +17,8 @@ type CanonicalJSON struct{}
 
 func (CanonicalJSON) Parse(_ context.Context, envelope ingest.RawEnvelope) (core.CanonicalEvent, error) {
 	var event core.CanonicalEvent
-	if err := json.Unmarshal(envelope.Payload, &event); err != nil {
+	payload := envelope.PayloadBytes()
+	if err := json.Unmarshal(payload, &event); err != nil {
 		return core.CanonicalEvent{}, fmt.Errorf("%w: decode canonical JSON: %v", ErrParse, err)
 	}
 	if strings.TrimSpace(event.Category) == "" || strings.TrimSpace(event.Source.Type) == "" {
@@ -28,7 +29,7 @@ func (CanonicalJSON) Parse(_ context.Context, envelope ingest.RawEnvelope) (core
 	event.CollectorID = envelope.CollectorID
 	event.IngestTime = envelope.ReceivedAt
 	event.EventTime = envelope.EventTimestamp
-	event.Raw.Message = string(envelope.Payload)
+	event.Raw.Message = string(payload)
 	event.Raw.Hash = envelope.RawHash
 	event.Raw.Reference = "clickhouse://raw/" + envelope.TenantID + "/" + envelope.EventID
 	event.Parser = core.ParserRef{ID: "kcsp-canonical-json", Version: "1.0.0"}

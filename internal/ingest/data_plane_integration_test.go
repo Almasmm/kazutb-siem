@@ -2,8 +2,8 @@ package ingest_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -64,7 +64,7 @@ func TestKafkaClickHousePostgresDetectionFlow(t *testing.T) {
 	processor, err := ingest.OpenProcessor(ingest.ProcessorConfig{
 		Brokers: brokers, ClientID: "kcsp-integration-processor",
 		GroupID: "kcsp-integration-" + core.NewID("group"), Topic: publisher.RawTopic(),
-	}, repository, parser.CanonicalJSON{}, engine, publisher)
+	}, repository, parser.NewRegistry(), engine, publisher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,18 +85,16 @@ func TestKafkaClickHousePostgresDetectionFlow(t *testing.T) {
 	}()
 
 	eventTime := time.Now().UTC().Add(-time.Minute).Truncate(time.Millisecond)
-	payload, err := json.Marshal(core.CanonicalEvent{
-		ID: eventID, EventTime: eventTime,
-		Category: "process_activity", ActivityName: "Process created",
-		Source:  core.EventSource{Vendor: "Microsoft", Product: "Sysmon", Type: "endpoint"},
-		User:    core.UserRef{Name: `KCSP\admin`, IsPrivileged: true},
-		Device:  core.DeviceRef{Hostname: "dc-integration", Criticality: 5},
-		Process: core.ProcessRef{Name: "powershell.exe", CommandLine: "powershell.exe -EncodedCommand SQBFAFgA"},
+	payload := []byte(fmt.Sprintf(`<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System><Provider Name="Microsoft-Windows-Sysmon"/><EventID>1</EventID><EventRecordID>9001</EventRecordID>
+  <Channel>Microsoft-Windows-Sysmon/Operational</Channel><Computer>dc-integration</Computer><TimeCreated SystemTime="%s"/></System>
+  <EventData><Data Name="User">KCSP\admin</Data><Data Name="Image">C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe</Data>
+  <Data Name="ProcessId">4242</Data><Data Name="CommandLine">powershell.exe -EncodedCommand SQBFAFgA</Data><Data Name="ParentImage">C:\Windows\System32\services.exe</Data></EventData>
+</Event>`, eventTime.Format(time.RFC3339Nano)))
+	receipt, err := ingest.NewGateway(publisher).SubmitRaw(ctx, tenantID, "sysmon-collector-01", ingest.RawSubmission{
+		Format: ingest.FormatSysmonXML, ContentType: "application/xml", EventID: eventID,
+		EventTimestamp: eventTime, Payload: payload,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	receipt, err := ingest.NewGateway(publisher).SubmitJSON(ctx, tenantID, "sysmon-collector-01", payload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,6 +120,9 @@ func TestKafkaClickHousePostgresDetectionFlow(t *testing.T) {
 			len(alerts) == 1 && len(audit) > 0 && rawCount == 1 {
 			if !storedEvent.EventTime.Equal(eventTime) {
 				t.Fatalf("source event time changed: got %s want %s", storedEvent.EventTime, eventTime)
+			}
+			if storedEvent.Parser.ID != "microsoft-sysmon-xml" || storedEvent.Schema.OCSFVersion != "1.4.0" {
+				t.Fatalf("Sysmon parser lineage missing: parser=%+v schema=%+v", storedEvent.Parser, storedEvent.Schema)
 			}
 			if alerts[0].EventIDs[0] != eventID {
 				t.Fatalf("alert lineage is broken: %+v", alerts[0])
