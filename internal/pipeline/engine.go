@@ -20,21 +20,15 @@ var ErrInvalidEvent = errors.New("invalid event")
 const (
 	PowerShellRuleID = "KCSP-WIN-PS-001"
 	AuthRuleID       = "KCSP-AUTH-THRESHOLD-001"
+	authBaseRuleID   = "KCSP-AUTH-FAILURE-BASE"
 )
 
-type failureObservation struct {
-	At      time.Time
-	User    string
-	EventID string
-}
-
 type Engine struct {
-	store        Repository
-	mu           sync.Mutex
-	authFailures map[string][]failureObservation
-	rules        map[string]core.DetectionRule
-	dynamicMu    sync.Mutex
-	dynamicRules map[string]dynamicRuleSnapshot
+	store             Repository
+	rules             map[string]core.DetectionRule
+	dynamicMu         sync.Mutex
+	dynamicRules      map[string]dynamicRuleSnapshot
+	correlationMemory *detection.MemoryCorrelationStore
 }
 
 type dynamicRuleSnapshot struct {
@@ -44,6 +38,10 @@ type dynamicRuleSnapshot struct {
 
 type publishedContentProvider interface {
 	PublishedDetectionContent(context.Context, string) ([]core.DetectionContent, error)
+}
+
+type correlationStateStore interface {
+	ObserveCorrelation(context.Context, core.CorrelationObservation) (core.CorrelationEvaluation, error)
 }
 
 // Repository is the data-plane port used by the embedded executor. Production
@@ -61,6 +59,7 @@ type detectionMatch struct {
 	Rule          core.DetectionRule
 	MatchedFields []string
 	Factors       []core.RiskFactor
+	EventIDs      []string
 }
 
 func New(ctx context.Context, repository Repository) (*Engine, error) {
@@ -91,22 +90,16 @@ func New(ctx context.Context, repository Repository) (*Engine, error) {
 		return nil, fmt.Errorf("publish built-in detection rules: %w", err)
 	}
 	return &Engine{
-		store: repository, authFailures: map[string][]failureObservation{}, rules: byID,
-		dynamicRules: map[string]dynamicRuleSnapshot{},
+		store: repository, rules: byID, dynamicRules: map[string]dynamicRuleSnapshot{},
+		correlationMemory: detection.NewMemoryCorrelationStore(),
 	}, nil
 }
 
 func (e *Engine) ResetTenant(tenantID string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	for key := range e.authFailures {
-		if strings.HasPrefix(key, tenantID+"|") {
-			delete(e.authFailures, key)
-		}
-	}
 	e.dynamicMu.Lock()
 	delete(e.dynamicRules, tenantID)
 	e.dynamicMu.Unlock()
+	e.correlationMemory.ResetTenant(tenantID)
 }
 
 func (e *Engine) Ingest(ctx context.Context, tenantID string, input core.CanonicalEvent) (core.IngestResult, error) {
@@ -134,7 +127,7 @@ func (e *Engine) Ingest(ctx context.Context, tenantID string, input core.Canonic
 		}
 		result.Findings = append(result.Findings, finding)
 
-		candidate, dedupKey := makeAlert(stored, finding)
+		candidate, dedupKey := makeAlert(stored, finding, match.EventIDs)
 		alert, created, err := e.store.UpsertAlert(ctx, candidate, dedupKey, 15*time.Minute)
 		if err != nil {
 			return core.IngestResult{}, fmt.Errorf("persist alert: %w", err)
@@ -210,6 +203,7 @@ func normalize(tenantID string, input core.CanonicalEvent) (core.CanonicalEvent,
 
 func (e *Engine) detect(ctx context.Context, event core.CanonicalEvent) ([]detectionMatch, error) {
 	matches := make([]detectionMatch, 0, 2)
+	matchedRuleIDs := map[string]bool{}
 	if matchedFields, tokenFactors := suspiciousPowerShell(event); len(matchedFields) > 0 {
 		factors := []core.RiskFactor{
 			{Code: "base_severity", Label: "High-confidence process detection", Delta: 30, SourceReference: PowerShellRuleID},
@@ -217,10 +211,15 @@ func (e *Engine) detect(ctx context.Context, event core.CanonicalEvent) ([]detec
 		}
 		factors = append(factors, tokenFactors...)
 		factors = append(factors, contextFactors(event)...)
-		matches = append(matches, detectionMatch{Rule: e.rules[PowerShellRuleID], MatchedFields: matchedFields, Factors: factors})
+		matches = append(matches, detectionMatch{Rule: e.rules[PowerShellRuleID], MatchedFields: matchedFields, Factors: factors, EventIDs: []string{event.ID}})
+		matchedRuleIDs[PowerShellRuleID] = true
 	}
-	if threshold, fields, factors := e.observeAuthenticationFailure(event); threshold {
-		matches = append(matches, detectionMatch{Rule: e.rules[AuthRuleID], MatchedFields: fields, Factors: factors})
+	threshold, fields, factors, err := e.observeAuthenticationFailure(ctx, event)
+	if err != nil {
+		return nil, fmt.Errorf("evaluate authentication threshold: %w", err)
+	}
+	if threshold.Triggered {
+		matches = append(matches, detectionMatch{Rule: e.rules[AuthRuleID], MatchedFields: fields, Factors: factors, EventIDs: threshold.EventIDs})
 	}
 	dynamicRules, err := e.rulesForTenant(ctx, event.TenantID)
 	if err != nil {
@@ -228,6 +227,9 @@ func (e *Engine) detect(ctx context.Context, event core.CanonicalEvent) ([]detec
 	}
 	for _, compiled := range dynamicRules {
 		if _, builtIn := e.rules[compiled.Rule.ID]; builtIn {
+			continue
+		}
+		if compiled.IsCorrelation() {
 			continue
 		}
 		matched, fields := compiled.Evaluate(event)
@@ -239,7 +241,57 @@ func (e *Engine) detect(ctx context.Context, event core.CanonicalEvent) ([]detec
 			{Code: "rule_confidence", Label: "Validated rule confidence", Delta: max(5, compiled.Rule.Confidence/5), SourceReference: compiled.Rule.ID + "@" + compiled.Rule.Version},
 		}
 		factors = append(factors, contextFactors(event)...)
-		matches = append(matches, detectionMatch{Rule: compiled.Rule, MatchedFields: fields, Factors: factors})
+		matches = append(matches, detectionMatch{Rule: compiled.Rule, MatchedFields: fields, Factors: factors, EventIDs: []string{event.ID}})
+		matchedRuleIDs[compiled.Rule.ID] = true
+	}
+	for _, compiled := range dynamicRules {
+		spec, isCorrelation := compiled.CorrelationSpec()
+		if !isCorrelation {
+			continue
+		}
+		matchedSources := make([]string, 0, len(spec.Rules))
+		for _, sourceRuleID := range spec.Rules {
+			if matchedRuleIDs[sourceRuleID] {
+				matchedSources = append(matchedSources, sourceRuleID)
+			}
+		}
+		if len(matchedSources) == 0 {
+			continue
+		}
+		groupKey, ok := detection.CorrelationGroup(event, spec.GroupBy)
+		if !ok {
+			continue
+		}
+		value := ""
+		if spec.Type == core.CorrelationValueCount {
+			value, ok = detection.CorrelationValue(event, spec.ValueField)
+			if !ok {
+				continue
+			}
+		}
+		correlated, err := e.observeCorrelation(ctx, core.CorrelationObservation{
+			TenantID: event.TenantID, RuleID: compiled.Rule.ID, RuleVersion: compiled.Rule.Version,
+			GroupKey: groupKey, SourceRuleIDs: matchedSources, EventID: event.ID, EventTime: event.EventTime,
+			Value: value, Spec: spec,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("evaluate correlation rule %s: %w", compiled.Rule.ID, err)
+		}
+		if !correlated.Triggered {
+			continue
+		}
+		matchedFields := append([]string(nil), spec.GroupBy...)
+		if spec.ValueField != "" {
+			matchedFields = append(matchedFields, spec.ValueField)
+		}
+		matchedFields = append(matchedFields, "correlation.rules")
+		factors := []core.RiskFactor{
+			{Code: "base_severity", Label: "Published Sigma correlation", Delta: severityRisk(compiled.Rule.Severity), SourceReference: compiled.Rule.ID},
+			{Code: "rule_confidence", Label: "Validated correlation confidence", Delta: max(5, compiled.Rule.Confidence/5), SourceReference: compiled.Rule.ID + "@" + compiled.Rule.Version},
+			{Code: "correlation_count", Label: "Correlated security events", Delta: min(20, max(5, correlated.Count)), SourceReference: fmt.Sprint(correlated.Count)},
+		}
+		factors = append(factors, contextFactors(event)...)
+		matches = append(matches, detectionMatch{Rule: compiled.Rule, MatchedFields: matchedFields, Factors: factors, EventIDs: correlated.EventIDs})
 	}
 	return matches, nil
 }
@@ -329,47 +381,47 @@ func contextFactors(event core.CanonicalEvent) []core.RiskFactor {
 	return factors
 }
 
-func (e *Engine) observeAuthenticationFailure(event core.CanonicalEvent) (bool, []string, []core.RiskFactor) {
+func (e *Engine) observeAuthenticationFailure(ctx context.Context, event core.CanonicalEvent) (core.CorrelationEvaluation, []string, []core.RiskFactor, error) {
 	if !strings.EqualFold(event.Category, "authentication") || !strings.EqualFold(event.SecurityResult.Outcome, "failure") {
-		return false, nil, nil
+		return core.CorrelationEvaluation{}, nil, nil, nil
 	}
 	source := event.SrcEndpoint.IP
 	if source == "" {
 		source = event.Device.IP
 	}
 	if source == "" {
-		return false, nil, nil
+		return core.CorrelationEvaluation{}, nil, nil, nil
 	}
-	key := event.TenantID + "|" + source
-	cutoff := event.EventTime.Add(-5 * time.Minute)
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	observations := e.authFailures[key][:0]
-	for _, observation := range e.authFailures[key] {
-		if !observation.At.Before(cutoff) {
-			observations = append(observations, observation)
-		}
-	}
-	observations = append(observations, failureObservation{At: event.EventTime, User: event.User.Name, EventID: event.ID})
-	e.authFailures[key] = observations
-	if len(observations) != 5 {
-		return false, nil, nil
-	}
-	users := map[string]bool{}
-	for _, observation := range observations {
-		if observation.User != "" {
-			users[observation.User] = true
-		}
+	groupEvent := event
+	groupEvent.SrcEndpoint.IP = source
+	groupKey, _ := detection.CorrelationGroup(groupEvent, []string{"src_endpoint.ip"})
+	evaluation, err := e.observeCorrelation(ctx, core.CorrelationObservation{
+		TenantID: event.TenantID, RuleID: AuthRuleID, RuleVersion: "1.0.0", GroupKey: groupKey,
+		SourceRuleIDs: []string{authBaseRuleID}, EventID: event.ID, EventTime: event.EventTime, Value: event.User.Name,
+		Spec: core.CorrelationSpec{
+			Type: core.CorrelationEventCount, Rules: []string{authBaseRuleID}, GroupBy: []string{"src_endpoint.ip"},
+			TimespanSeconds: int64((5 * time.Minute) / time.Second), Threshold: 5,
+		},
+	})
+	if err != nil || !evaluation.Triggered {
+		return evaluation, nil, nil, err
 	}
 	factors := []core.RiskFactor{
 		{Code: "base_severity", Label: "Authentication threshold reached", Delta: 35, SourceReference: AuthRuleID},
 		{Code: "rule_confidence", Label: "Threshold confidence", Delta: 20, SourceReference: AuthRuleID + "@1.0.0"},
 	}
-	if len(users) >= 3 {
+	if evaluation.DistinctValues >= 3 {
 		factors = append(factors, core.RiskFactor{Code: "multiple_accounts", Label: "Multiple accounts targeted", Delta: 15, SourceReference: source})
 	}
 	factors = append(factors, contextFactors(event)...)
-	return true, []string{"security_result.outcome", "src_endpoint.ip", "user.name"}, factors
+	return evaluation, []string{"security_result.outcome", "src_endpoint.ip", "user.name"}, factors, nil
+}
+
+func (e *Engine) observeCorrelation(ctx context.Context, observation core.CorrelationObservation) (core.CorrelationEvaluation, error) {
+	if state, ok := e.store.(correlationStateStore); ok {
+		return state.ObserveCorrelation(ctx, observation)
+	}
+	return e.correlationMemory.ObserveCorrelation(ctx, observation)
 }
 
 func (e *Engine) makeFinding(event core.CanonicalEvent, match detectionMatch) core.Finding {
@@ -392,8 +444,19 @@ func (e *Engine) makeFinding(event core.CanonicalEvent, match detectionMatch) co
 	}
 }
 
-func makeAlert(event core.CanonicalEvent, finding core.Finding) (core.Alert, string) {
+func makeAlert(event core.CanonicalEvent, finding core.Finding, correlatedEventIDs []string) (core.Alert, string) {
 	now := time.Now().UTC()
+	eventIDs := make([]string, 0, len(correlatedEventIDs)+1)
+	seenEventIDs := map[string]bool{}
+	for _, eventID := range correlatedEventIDs {
+		if eventID != "" && !seenEventIDs[eventID] {
+			seenEventIDs[eventID] = true
+			eventIDs = append(eventIDs, eventID)
+		}
+	}
+	if len(eventIDs) == 0 {
+		eventIDs = append(eventIDs, event.ID)
+	}
 	entity := core.EntitySummary{Type: "device", ID: event.Device.ID, Name: event.Device.Hostname, Label: event.Device.Department}
 	if event.User.Name != "" {
 		entity = core.EntitySummary{Type: "user", ID: event.User.ID, Name: event.User.Name, Label: event.Device.Hostname}
@@ -406,7 +469,7 @@ func makeAlert(event core.CanonicalEvent, finding core.Finding) (core.Alert, str
 		ID: core.NewID("alt"), TenantID: event.TenantID, Title: finding.Title,
 		Severity: finding.Severity, RiskScore: finding.RiskScore, RiskBreakdown: finding.RiskBreakdown,
 		Status: "NEW", Rule: finding.Rule, MITRE: finding.MITRE, Entity: entity,
-		FindingIDs: []string{finding.ID}, EventIDs: []string{event.ID}, EventCount: 1,
+		FindingIDs: []string{finding.ID}, EventIDs: eventIDs, EventCount: len(eventIDs),
 		FirstSeen: event.EventTime, LastSeen: event.EventTime,
 		SLA:     core.SLAInfo{AcknowledgeBy: now.Add(acknowledgementWindow(finding.Severity))},
 		Version: 1, CreatedAt: now, UpdatedAt: now,

@@ -77,6 +77,9 @@ func (h *Hybrid) RollbackDetectionContent(ctx context.Context, tenantID, ruleID 
 func (h *Hybrid) PublishedDetectionContent(ctx context.Context, tenantID string) ([]core.DetectionContent, error) {
 	return h.control.PublishedDetectionContent(ctx, tenantID)
 }
+func (h *Hybrid) ObserveCorrelation(ctx context.Context, input core.CorrelationObservation) (core.CorrelationEvaluation, error) {
+	return h.control.ObserveCorrelation(ctx, input)
+}
 func (h *Hybrid) ResetTenant(ctx context.Context, tenantID string) error {
 	if err := h.telemetry.ResetTenant(ctx, tenantID); err != nil {
 		return err

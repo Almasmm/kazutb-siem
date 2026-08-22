@@ -3,8 +3,52 @@ package core
 import "time"
 
 type DetectionSample struct {
-	Name  string         `json:"name"`
-	Event CanonicalEvent `json:"event"`
+	Name   string           `json:"name"`
+	Event  CanonicalEvent   `json:"event"`
+	Events []CanonicalEvent `json:"events,omitempty"`
+}
+
+const (
+	CorrelationEventCount      = "event_count"
+	CorrelationValueCount      = "value_count"
+	CorrelationTemporal        = "temporal"
+	CorrelationTemporalOrdered = "temporal_ordered"
+)
+
+type CorrelationSpec struct {
+	Type            string   `json:"type"`
+	Rules           []string `json:"rules"`
+	GroupBy         []string `json:"group_by,omitempty"`
+	ValueField      string   `json:"value_field,omitempty"`
+	TimespanSeconds int64    `json:"timespan_seconds"`
+	Threshold       int      `json:"threshold"`
+}
+
+type CorrelationObservation struct {
+	TenantID      string          `json:"tenant_id"`
+	RuleID        string          `json:"rule_id"`
+	RuleVersion   string          `json:"rule_version"`
+	GroupKey      string          `json:"group_key"`
+	SourceRuleIDs []string        `json:"source_rule_ids"`
+	EventID       string          `json:"event_id"`
+	EventTime     time.Time       `json:"event_time"`
+	Value         string          `json:"value,omitempty"`
+	Spec          CorrelationSpec `json:"spec"`
+}
+
+type CorrelationRecord struct {
+	SourceRuleID string    `json:"source_rule_id"`
+	EventID      string    `json:"event_id"`
+	EventTime    time.Time `json:"event_time"`
+	Value        string    `json:"value,omitempty"`
+}
+
+type CorrelationEvaluation struct {
+	Satisfied      bool     `json:"satisfied"`
+	Triggered      bool     `json:"triggered"`
+	Count          int      `json:"count"`
+	DistinctValues int      `json:"distinct_values"`
+	EventIDs       []string `json:"event_ids"`
 }
 
 type DetectionValidationReport struct {

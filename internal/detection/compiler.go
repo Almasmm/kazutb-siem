@@ -9,12 +9,13 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kcsp/platform/internal/core"
 	"gopkg.in/yaml.v3"
 )
 
-const CompilerVersion = "kcsp-sigma-ast/0.1.0"
+const CompilerVersion = "kcsp-sigma-ast/0.2.0"
 
 var ErrInvalidRule = errors.New("invalid detection rule")
 
@@ -30,12 +31,27 @@ type sigmaDocument struct {
 	FalsePositives []string               `yaml:"falsepositives"`
 	LogSource      map[string]interface{} `yaml:"logsource"`
 	Detection      map[string]interface{} `yaml:"detection"`
+	Correlation    *sigmaCorrelation      `yaml:"correlation"`
+}
+
+type sigmaCorrelation struct {
+	Type      string                    `yaml:"type"`
+	Rules     interface{}               `yaml:"rules"`
+	GroupBy   []string                  `yaml:"group-by"`
+	Timespan  string                    `yaml:"timespan"`
+	Condition sigmaCorrelationCondition `yaml:"condition"`
+}
+
+type sigmaCorrelationCondition struct {
+	GTE   int    `yaml:"gte"`
+	Field string `yaml:"field"`
 }
 
 type CompiledRule struct {
-	Rule       core.DetectionRule
-	selections map[string]compiledSelection
-	condition  conditionNode
+	Rule        core.DetectionRule
+	selections  map[string]compiledSelection
+	condition   conditionNode
+	correlation *core.CorrelationSpec
 }
 
 type compiledSelection struct {
@@ -68,6 +84,28 @@ func Compile(content core.DetectionContent) (*CompiledRule, error) {
 	if content.RuleID != "" && content.RuleID != document.ID {
 		return nil, fmt.Errorf("%w: route rule_id %q differs from Sigma id %q", ErrInvalidRule, content.RuleID, document.ID)
 	}
+	version := strings.TrimSpace(content.Version)
+	if version == "" {
+		return nil, fmt.Errorf("%w: rule version is required", ErrInvalidRule)
+	}
+	confidence := document.Confidence
+	if confidence <= 0 || confidence > 100 {
+		confidence = 70
+	}
+	rule := core.DetectionRule{
+		ID: document.ID, Title: document.Title, Description: strings.TrimSpace(document.Description),
+		Version: version, Severity: sigmaSeverity(document.Level), Confidence: confidence,
+		MITRE: sigmaTechniques(document.Tags), RequiredDataSources: sigmaDataSources(document.LogSource),
+		KnownFalsePositives: append([]string(nil), document.FalsePositives...), Owner: sigmaAuthor(document.Author),
+		State: content.State, UpdatedAt: content.UpdatedAt,
+	}
+	if document.Correlation != nil {
+		spec, err := compileCorrelation(document.ID, *document.Correlation)
+		if err != nil {
+			return nil, err
+		}
+		return &CompiledRule{Rule: rule, correlation: &spec}, nil
+	}
 	conditionText, ok := document.Detection["condition"].(string)
 	if !ok || strings.TrimSpace(conditionText) == "" {
 		return nil, fmt.Errorf("%w: detection.condition is required", ErrInvalidRule)
@@ -94,25 +132,13 @@ func Compile(content core.DetectionContent) (*CompiledRule, error) {
 	if err != nil {
 		return nil, err
 	}
-	version := strings.TrimSpace(content.Version)
-	if version == "" {
-		return nil, fmt.Errorf("%w: rule version is required", ErrInvalidRule)
-	}
-	confidence := document.Confidence
-	if confidence <= 0 || confidence > 100 {
-		confidence = 70
-	}
-	rule := core.DetectionRule{
-		ID: document.ID, Title: document.Title, Description: strings.TrimSpace(document.Description),
-		Version: version, Severity: sigmaSeverity(document.Level), Confidence: confidence,
-		MITRE: sigmaTechniques(document.Tags), RequiredDataSources: sigmaDataSources(document.LogSource),
-		KnownFalsePositives: append([]string(nil), document.FalsePositives...), Owner: sigmaAuthor(document.Author),
-		State: content.State, UpdatedAt: content.UpdatedAt,
-	}
 	return &CompiledRule{Rule: rule, selections: selections, condition: condition}, nil
 }
 
 func (rule *CompiledRule) Evaluate(event core.CanonicalEvent) (bool, []string) {
+	if rule.correlation != nil {
+		return false, nil
+	}
 	results := make(map[string]bool, len(rule.selections))
 	matchedFields := map[string]bool{}
 	for name, selection := range rule.selections {
@@ -133,6 +159,80 @@ func (rule *CompiledRule) Evaluate(event core.CanonicalEvent) (bool, []string) {
 	}
 	sort.Strings(fields)
 	return true, fields
+}
+
+func (rule *CompiledRule) IsCorrelation() bool { return rule != nil && rule.correlation != nil }
+
+func (rule *CompiledRule) CorrelationSpec() (core.CorrelationSpec, bool) {
+	if rule == nil || rule.correlation == nil {
+		return core.CorrelationSpec{}, false
+	}
+	spec := *rule.correlation
+	spec.Rules = append([]string(nil), spec.Rules...)
+	spec.GroupBy = append([]string(nil), spec.GroupBy...)
+	return spec, true
+}
+
+func compileCorrelation(ruleID string, document sigmaCorrelation) (core.CorrelationSpec, error) {
+	typeName := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(document.Type), "-", "_"))
+	switch typeName {
+	case core.CorrelationEventCount, core.CorrelationValueCount, core.CorrelationTemporal, core.CorrelationTemporalOrdered:
+	default:
+		return core.CorrelationSpec{}, fmt.Errorf("%w: unsupported correlation type %q", ErrInvalidRule, document.Type)
+	}
+	rawRules, err := scalarValues(document.Rules)
+	if err != nil {
+		return core.CorrelationSpec{}, fmt.Errorf("%w: correlation.rules: %v", ErrInvalidRule, err)
+	}
+	rules := make([]string, 0, len(rawRules))
+	seen := map[string]bool{}
+	for _, raw := range rawRules {
+		value := strings.TrimSpace(raw)
+		if value == "" || value == ruleID {
+			return core.CorrelationSpec{}, fmt.Errorf("%w: correlation rule references must be non-empty and cannot reference itself", ErrInvalidRule)
+		}
+		if !seen[value] {
+			seen[value] = true
+			rules = append(rules, value)
+		}
+	}
+	if len(rules) == 0 || len(rules) > 32 {
+		return core.CorrelationSpec{}, fmt.Errorf("%w: correlation requires between 1 and 32 unique rule references", ErrInvalidRule)
+	}
+	if (typeName == core.CorrelationTemporal || typeName == core.CorrelationTemporalOrdered) && len(rules) < 2 {
+		return core.CorrelationSpec{}, fmt.Errorf("%w: temporal correlation requires at least two rule references", ErrInvalidRule)
+	}
+	timespan, err := time.ParseDuration(strings.TrimSpace(document.Timespan))
+	if err != nil || timespan < time.Second || timespan > 24*time.Hour {
+		return core.CorrelationSpec{}, fmt.Errorf("%w: correlation.timespan must be between 1s and 24h", ErrInvalidRule)
+	}
+	groupBy := make([]string, 0, len(document.GroupBy))
+	for _, field := range document.GroupBy {
+		field = strings.TrimSpace(field)
+		if field == "" || len(field) > 128 {
+			return core.CorrelationSpec{}, fmt.Errorf("%w: correlation.group-by contains an invalid field", ErrInvalidRule)
+		}
+		groupBy = append(groupBy, field)
+	}
+	if len(groupBy) > 8 {
+		return core.CorrelationSpec{}, fmt.Errorf("%w: correlation.group-by supports at most 8 fields", ErrInvalidRule)
+	}
+	threshold := document.Condition.GTE
+	valueField := strings.TrimSpace(document.Condition.Field)
+	if typeName == core.CorrelationEventCount || typeName == core.CorrelationValueCount {
+		if threshold < 2 || threshold > 1_000_000 {
+			return core.CorrelationSpec{}, fmt.Errorf("%w: count correlation condition.gte must be between 2 and 1000000", ErrInvalidRule)
+		}
+	} else {
+		threshold = len(rules)
+	}
+	if typeName == core.CorrelationValueCount && valueField == "" {
+		return core.CorrelationSpec{}, fmt.Errorf("%w: value_count correlation requires condition.field", ErrInvalidRule)
+	}
+	return core.CorrelationSpec{
+		Type: typeName, Rules: rules, GroupBy: groupBy, ValueField: valueField,
+		TimespanSeconds: int64(timespan / time.Second), Threshold: threshold,
+	}, nil
 }
 
 func compileSelection(name string, raw interface{}) (compiledSelection, error) {
@@ -582,6 +682,9 @@ func (p *conditionParser) peek(value string) bool {
 
 func MarshalASTSummary(rule *CompiledRule) []byte {
 	summary := map[string]interface{}{"compiler": CompilerVersion, "rule": rule.Rule, "selections": len(rule.selections)}
+	if correlation, ok := rule.CorrelationSpec(); ok {
+		summary["correlation"] = correlation
+	}
 	body, _ := json.Marshal(summary)
 	return body
 }

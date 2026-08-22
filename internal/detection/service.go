@@ -70,17 +70,26 @@ func (s *Service) Validate(ctx context.Context, tenantID, ruleID, version string
 	if compileErr != nil {
 		report.Errors = append(report.Errors, compileErr.Error())
 	}
+	var evaluate sampleEvaluator
+	if compiled != nil {
+		evaluate, compileErr = s.sampleEvaluator(ctx, content, compiled)
+		if compileErr != nil {
+			report.Errors = append(report.Errors, compileErr.Error())
+		}
+	}
 	if len(content.PositiveTests) == 0 {
 		report.Errors = append(report.Errors, "at least one positive test is required")
 	}
 	if len(content.NegativeTests) == 0 {
 		report.Errors = append(report.Errors, "at least one negative test is required")
 	}
-	if compiled != nil {
+	if evaluate != nil {
 		for _, sample := range content.PositiveTests {
 			evaluationStarted := time.Now()
-			matched, _ := compiled.Evaluate(sample.Event)
-			if matched {
+			matched, evaluationErr := evaluate(sample)
+			if evaluationErr != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("positive sample %q failed: %v", sample.Name, evaluationErr))
+			} else if matched {
 				report.PositivePassed++
 			} else {
 				report.Errors = append(report.Errors, fmt.Sprintf("positive sample %q did not match", sample.Name))
@@ -91,8 +100,10 @@ func (s *Service) Validate(ctx context.Context, tenantID, ruleID, version string
 		}
 		for _, sample := range content.NegativeTests {
 			evaluationStarted := time.Now()
-			matched, _ := compiled.Evaluate(sample.Event)
-			if !matched {
+			matched, evaluationErr := evaluate(sample)
+			if evaluationErr != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("negative sample %q failed: %v", sample.Name, evaluationErr))
+			} else if !matched {
 				report.NegativePassed++
 			} else {
 				report.Errors = append(report.Errors, fmt.Sprintf("negative sample %q matched", sample.Name))
@@ -118,6 +129,103 @@ func (s *Service) Validate(ctx context.Context, tenantID, ruleID, version string
 		return updated, fmt.Errorf("%w: %s", ErrValidationFailed, strings.Join(report.Errors, "; "))
 	}
 	return updated, nil
+}
+
+type sampleEvaluator func(core.DetectionSample) (bool, error)
+
+func (s *Service) sampleEvaluator(ctx context.Context, content core.DetectionContent, compiled *CompiledRule) (sampleEvaluator, error) {
+	spec, isCorrelation := compiled.CorrelationSpec()
+	if !isCorrelation {
+		return func(sample core.DetectionSample) (bool, error) {
+			events := detectionSampleEvents(sample)
+			for _, event := range events {
+				matched, _ := compiled.Evaluate(event)
+				if matched {
+					return true, nil
+				}
+			}
+			return false, nil
+		}, nil
+	}
+	published, err := s.repository.PublishedDetectionContent(ctx, content.TenantID)
+	if err != nil {
+		return nil, fmt.Errorf("load correlation dependencies: %w", err)
+	}
+	dependencies := map[string]*CompiledRule{}
+	wanted := map[string]bool{}
+	for _, ruleID := range spec.Rules {
+		wanted[ruleID] = true
+	}
+	for _, dependency := range published {
+		if !wanted[dependency.RuleID] {
+			continue
+		}
+		compiledDependency, err := Compile(dependency)
+		if err != nil {
+			return nil, fmt.Errorf("compile correlation dependency %s: %w", dependency.RuleID, err)
+		}
+		if compiledDependency.IsCorrelation() {
+			return nil, fmt.Errorf("%w: correlation-of-correlation reference %q is not supported", ErrInvalidRule, dependency.RuleID)
+		}
+		dependencies[dependency.RuleID] = compiledDependency
+	}
+	for _, ruleID := range spec.Rules {
+		if dependencies[ruleID] == nil {
+			return nil, fmt.Errorf("%w: correlation dependency %q must be published", ErrInvalidRule, ruleID)
+		}
+	}
+	return func(sample core.DetectionSample) (bool, error) {
+		memory := NewMemoryCorrelationStore()
+		for index, event := range detectionSampleEvents(sample) {
+			if event.ID == "" {
+				event.ID = fmt.Sprintf("validation-%s-%d", content.RuleID, index)
+			}
+			if event.EventTime.IsZero() {
+				event.EventTime = time.Unix(int64(index+1), 0).UTC()
+			}
+			event.TenantID = content.TenantID
+			matchedRules := []string{}
+			for _, ruleID := range spec.Rules {
+				matched, _ := dependencies[ruleID].Evaluate(event)
+				if matched {
+					matchedRules = append(matchedRules, ruleID)
+				}
+			}
+			if len(matchedRules) == 0 {
+				continue
+			}
+			groupKey, ok := CorrelationGroup(event, spec.GroupBy)
+			if !ok {
+				continue
+			}
+			value := ""
+			if spec.Type == core.CorrelationValueCount {
+				value, ok = CorrelationValue(event, spec.ValueField)
+				if !ok {
+					continue
+				}
+			}
+			result, err := memory.ObserveCorrelation(ctx, core.CorrelationObservation{
+				TenantID: content.TenantID, RuleID: content.RuleID, RuleVersion: content.Version,
+				GroupKey: groupKey, SourceRuleIDs: matchedRules, EventID: event.ID, EventTime: event.EventTime,
+				Value: value, Spec: spec,
+			})
+			if err != nil {
+				return false, err
+			}
+			if result.Triggered {
+				return true, nil
+			}
+		}
+		return false, nil
+	}, nil
+}
+
+func detectionSampleEvents(sample core.DetectionSample) []core.CanonicalEvent {
+	if len(sample.Events) > 0 {
+		return sample.Events
+	}
+	return []core.CanonicalEvent{sample.Event}
 }
 
 func (s *Service) Publish(ctx context.Context, tenantID, ruleID, version string) (core.DetectionContent, error) {
