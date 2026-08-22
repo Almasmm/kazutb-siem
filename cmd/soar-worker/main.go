@@ -43,7 +43,7 @@ func run(logger *slog.Logger) error {
 		hostname, _ := os.Hostname()
 		workerID = "soar-worker-" + hostname
 	}
-	executor := soar.NewManagedConnectorExecutor(soar.EnvironmentSecretResolver{}, nil)
+	executor := soar.NewManagedConnectorExecutor(repository, soar.EnvironmentSecretResolver{}, nil)
 	worker := soar.NewWorker(repository, nil, executor, soar.WorkerConfig{
 		ID: workerID, TenantID: strings.TrimSpace(os.Getenv("KCSP_SOAR_TENANT_ID")),
 		PollInterval: pollInterval, Lease: lease,

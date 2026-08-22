@@ -49,7 +49,7 @@ func TestManagedConnectorTesterUsesBoundSecretWithoutPersistingIt(t *testing.T) 
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
-	executor := NewManagedConnectorExecutor(EnvironmentSecretResolver{}, server.Client())
+	executor := NewManagedConnectorExecutor(nil, EnvironmentSecretResolver{}, server.Client())
 	result, err := executor.TestConnector(context.Background(), core.SOARConnector{
 		ID: "connector-1", Kind: core.SOARConnectorKindWebhook, State: core.SOARConnectorCredentialsNeeded,
 		Endpoint: server.URL, AuthType: core.SOARConnectorAuthBearer,
@@ -62,7 +62,7 @@ func TestManagedConnectorTesterUsesBoundSecretWithoutPersistingIt(t *testing.T) 
 }
 
 func TestManagedConnectorTesterReportsCredentialsRequired(t *testing.T) {
-	executor := NewManagedConnectorExecutor(EnvironmentSecretResolver{}, nil)
+	executor := NewManagedConnectorExecutor(nil, EnvironmentSecretResolver{}, nil)
 	result, err := executor.TestConnector(context.Background(), core.SOARConnector{
 		State: core.SOARConnectorCredentialsNeeded, Endpoint: "https://hooks.example.edu/kcsp",
 		AuthType: core.SOARConnectorAuthHMAC, TimeoutSeconds: 1,

@@ -13,7 +13,10 @@ import (
 	"github.com/kcsp/platform/internal/core"
 )
 
-var ErrInvalidConnector = errors.New("invalid SOAR connector")
+var (
+	ErrInvalidConnector     = errors.New("invalid SOAR connector")
+	ErrConnectorRateLimited = errors.New("SOAR connector rate limit exceeded")
+)
 
 type ConnectorControlStore interface {
 	CreateSOARConnector(context.Context, core.SOARConnector) (core.SOARConnector, error)

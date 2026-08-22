@@ -267,6 +267,33 @@ func (p *Postgres) FinishSOARConnectorTest(ctx context.Context, tenantID, testID
 	return test, nil
 }
 
+func (p *Postgres) ReserveSOARConnectorCall(ctx context.Context, tenantID, connectorID string,
+	limit int, at time.Time) error {
+	if limit < 1 || limit > 600 {
+		return fmt.Errorf("%w: connector rate limit is invalid", soar.ErrInvalidConnector)
+	}
+	window := at.UTC().Truncate(time.Minute)
+	var used int
+	err := p.pool.QueryRow(ctx, `INSERT INTO soar_connector_rate_windows(
+		tenant_id,connector_id,window_start,used,updated_at)
+		VALUES($1,$2,$3,1,$4)
+		ON CONFLICT (tenant_id,connector_id,window_start) DO UPDATE SET
+			used=soar_connector_rate_windows.used+1,updated_at=EXCLUDED.updated_at
+			WHERE soar_connector_rate_windows.used < $5
+		RETURNING used`, tenantID, connectorID, window, at.UTC(), limit).Scan(&used)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return soar.ErrConnectorRateLimited
+	}
+	if err != nil {
+		return fmt.Errorf("reserve SOAR connector call: %w", err)
+	}
+	if used == 1 {
+		_, _ = p.pool.Exec(ctx, `DELETE FROM soar_connector_rate_windows
+			WHERE updated_at < $1`, at.UTC().Add(-2*time.Hour))
+	}
+	return nil
+}
+
 func encodeSOARConnectorJSON(connector core.SOARConnector) ([]byte, []byte, []byte, error) {
 	actions, err := json.Marshal(connector.AllowedActions)
 	if err != nil {

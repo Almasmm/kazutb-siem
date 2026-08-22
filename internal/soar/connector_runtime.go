@@ -1,13 +1,16 @@
 package soar
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -22,6 +25,11 @@ import (
 type ConnectorTestRuntimeStore interface {
 	ClaimSOARConnectorTest(context.Context, string, string, time.Duration) (core.SOARConnectorTestWorkItem, bool, error)
 	FinishSOARConnectorTest(context.Context, string, string, string, string, string, string, int, int64) (core.SOARConnectorTest, error)
+}
+
+type ConnectorActionStore interface {
+	GetSOARConnector(context.Context, string, string) (core.SOARConnector, error)
+	ReserveSOARConnectorCall(context.Context, string, string, int, time.Time) error
 }
 
 type ConnectorTestResult struct {
@@ -68,19 +76,133 @@ func (EnvironmentSecretResolver) Resolve(_ context.Context, reference string) (s
 }
 
 type ManagedConnectorExecutor struct {
+	store   ConnectorActionStore
 	secrets SecretResolver
 	client  *http.Client
 }
 
-func NewManagedConnectorExecutor(secrets SecretResolver, client *http.Client) *ManagedConnectorExecutor {
+func NewManagedConnectorExecutor(store ConnectorActionStore, secrets SecretResolver,
+	client *http.Client) *ManagedConnectorExecutor {
 	if secrets == nil {
 		secrets = EnvironmentSecretResolver{}
 	}
-	return &ManagedConnectorExecutor{secrets: secrets, client: client}
+	return &ManagedConnectorExecutor{store: store, secrets: secrets, client: client}
 }
 
 func (e *ManagedConnectorExecutor) Execute(ctx context.Context, request ActionRequest) (ActionResult, error) {
-	return (SafeActionExecutor{}).Execute(ctx, request)
+	if request.Attempt.Mode == "DRY_RUN" || request.Attempt.ActionType == "kcsp.enrich.threat_intel" {
+		return (SafeActionExecutor{}).Execute(ctx, request)
+	}
+	if e.store == nil {
+		return ActionResult{}, &NodeError{
+			Code: "connector_unavailable", Detail: "managed connector runtime is unavailable", Permanent: true,
+		}
+	}
+	if request.Attempt.RiskLevel > 2 {
+		return ActionResult{}, &NodeError{
+			Code: "connector_policy_denied", Detail: "webhook connectors only execute A1/A2 actions", Permanent: true,
+		}
+	}
+	connector, err := e.store.GetSOARConnector(ctx, request.Attempt.TenantID, request.Attempt.ConnectorID)
+	if err != nil {
+		return ActionResult{}, &NodeError{
+			Code: "connector_not_found", Detail: "configured connector is unavailable", Permanent: true,
+		}
+	}
+	if connector.State != core.SOARConnectorReady || connector.HealthStatus != core.SOARConnectorHealthHealthy {
+		return ActionResult{}, &NodeError{
+			Code: "connector_not_ready", Detail: "connector must pass a health test before LIVE execution", Permanent: true,
+		}
+	}
+	if !connectorAllowsAction(connector, request.Attempt.ActionType) {
+		return ActionResult{}, &NodeError{
+			Code: "connector_action_denied", Detail: "action is not in the connector allowlist", Permanent: true,
+		}
+	}
+	secret, nodeError := e.resolveActionSecret(ctx, connector)
+	if nodeError != nil {
+		return ActionResult{}, nodeError
+	}
+	payload, err := json.Marshal(map[string]interface{}{
+		"schema_version":  "1.0",
+		"action_type":     request.Attempt.ActionType,
+		"idempotency_key": request.Attempt.IdempotencyKey,
+		"execution_id":    request.Attempt.ExecutionID,
+		"parameters":      request.Attempt.Request,
+	})
+	if err != nil || len(payload) > 1<<20 {
+		return ActionResult{}, &NodeError{
+			Code: "connector_payload_invalid", Detail: "connector action payload exceeds safe bounds", Permanent: true,
+		}
+	}
+	if err := e.store.ReserveSOARConnectorCall(
+		ctx, connector.TenantID, connector.ID, connector.RateLimitPerMinute, time.Now().UTC(),
+	); err != nil {
+		if errors.Is(err, ErrConnectorRateLimited) {
+			return ActionResult{}, &NodeError{
+				Code: "connector_rate_limited", Detail: "connector call quota is exhausted", Permanent: false,
+			}
+		}
+		return ActionResult{}, err
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, connector.Endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return ActionResult{}, &NodeError{
+			Code: "connector_configuration", Detail: "connector endpoint is invalid", Permanent: true,
+		}
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	httpRequest.Header.Set("User-Agent", "KCSP-SOAR-Connector/1.0")
+	httpRequest.Header.Set("X-KCSP-Connector-ID", connector.ID)
+	httpRequest.Header.Set("Idempotency-Key", request.Attempt.IdempotencyKey)
+	applyConnectorAuthentication(httpRequest, connector.AuthType, secret, payload)
+	timeout := time.Duration(connector.TimeoutSeconds) * time.Second
+	if timeout <= 0 || timeout > time.Minute {
+		timeout = 10 * time.Second
+	}
+	client := e.client
+	if client == nil {
+		client = secureConnectorHTTPClient(timeout)
+	}
+	response, err := client.Do(httpRequest)
+	if err != nil {
+		class, detail := classifyConnectorHTTPError(err)
+		permanent := class == "TLS" || class == "REDIRECT_FORBIDDEN" || class == "ENDPOINT_FORBIDDEN"
+		return ActionResult{}, &NodeError{
+			Code: "connector_" + strings.ToLower(class), Detail: detail, Permanent: permanent,
+		}
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, (64<<10)+1))
+	if err != nil {
+		return ActionResult{}, &NodeError{
+			Code: "connector_response_read", Detail: "connector response could not be read", Permanent: false,
+		}
+	}
+	if len(body) > 64<<10 {
+		return ActionResult{}, &NodeError{
+			Code: "connector_response_too_large", Detail: "connector response exceeds 64 KiB", Permanent: true,
+		}
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return ActionResult{}, connectorHTTPStatusError(response.StatusCode)
+	}
+	output := map[string]interface{}{
+		"connector_id": connector.ID, "http_status": response.StatusCode, "acknowledged": true,
+	}
+	verification := "ACKNOWLEDGED"
+	var responseObject map[string]interface{}
+	if len(body) > 0 && json.Unmarshal(body, &responseObject) == nil {
+		for _, key := range []string{"id", "ticket_id", "message_id"} {
+			if value, ok := responseObject[key].(string); ok && len(value) <= 256 {
+				output[key] = value
+			}
+		}
+		if verified, _ := responseObject["verified"].(bool); verified {
+			verification = "VERIFIED"
+		}
+	}
+	return ActionResult{Output: output, VerificationStatus: verification}, nil
 }
 
 func (e *ManagedConnectorExecutor) TestConnector(ctx context.Context,
@@ -181,6 +303,71 @@ func (e *ManagedConnectorExecutor) TestConnector(ctx context.Context,
 		Detail:     fmt.Sprintf("health endpoint returned HTTP %d", response.StatusCode),
 		HTTPStatus: response.StatusCode, LatencyMS: latency,
 	}, nil
+}
+
+func (e *ManagedConnectorExecutor) resolveActionSecret(ctx context.Context,
+	connector core.SOARConnector) (string, *NodeError) {
+	if connector.AuthType == core.SOARConnectorAuthNone {
+		return "", nil
+	}
+	if connector.SecretRef == "" {
+		return "", &NodeError{
+			Code: "connector_credentials_required", Detail: "connector has no secret binding", Permanent: true,
+		}
+	}
+	secret, err := e.secrets.Resolve(ctx, connector.SecretRef)
+	if err == nil {
+		return secret, nil
+	}
+	return "", &NodeError{
+		Code: "connector_credentials_required", Detail: "bound connector credential is unavailable", Permanent: true,
+	}
+}
+
+func connectorAllowsAction(connector core.SOARConnector, action string) bool {
+	for _, allowed := range connector.AllowedActions {
+		if allowed == action {
+			return true
+		}
+	}
+	return false
+}
+
+func applyConnectorAuthentication(request *http.Request, authType, secret string, payload []byte) {
+	switch authType {
+	case core.SOARConnectorAuthBearer:
+		request.Header.Set("Authorization", "Bearer "+secret)
+	case core.SOARConnectorAuthHMAC:
+		timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+		bodyHash := sha256.Sum256(payload)
+		message := timestamp + "\n" + request.Method + "\n" + request.URL.EscapedPath() +
+			"\n" + hex.EncodeToString(bodyHash[:])
+		mac := hmac.New(sha256.New, []byte(secret))
+		_, _ = mac.Write([]byte(message))
+		request.Header.Set("X-KCSP-Timestamp", timestamp)
+		request.Header.Set("X-KCSP-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+	}
+}
+
+func connectorHTTPStatusError(status int) *NodeError {
+	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return &NodeError{
+			Code: "connector_authentication", Detail: fmt.Sprintf("connector returned HTTP %d", status), Permanent: true,
+		}
+	case status == http.StatusTooManyRequests:
+		return &NodeError{
+			Code: "connector_rate_limited", Detail: "connector returned HTTP 429", Permanent: false,
+		}
+	case status >= 500:
+		return &NodeError{
+			Code: "connector_upstream", Detail: fmt.Sprintf("connector returned HTTP %d", status), Permanent: false,
+		}
+	default:
+		return &NodeError{
+			Code: "connector_protocol", Detail: fmt.Sprintf("connector returned HTTP %d", status), Permanent: true,
+		}
+	}
 }
 
 func connectorHealthURL(connector core.SOARConnector) (*url.URL, error) {
