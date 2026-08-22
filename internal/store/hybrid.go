@@ -198,6 +198,34 @@ func (h *Hybrid) UpdateRetentionPolicy(ctx context.Context, policy core.Retentio
 	return updated, nil
 }
 
+func (h *Hybrid) ReserveEvidence(ctx context.Context, item core.EvidenceItem, mutation core.EvidenceMutation) (core.EvidenceItem, bool, error) {
+	return h.control.ReserveEvidence(ctx, item, mutation)
+}
+func (h *Hybrid) FinalizeEvidence(ctx context.Context, tenantID, evidenceID, objectVersion, etag string, mutation core.EvidenceMutation) (core.EvidenceItem, error) {
+	return h.control.FinalizeEvidence(ctx, tenantID, evidenceID, objectVersion, etag, mutation)
+}
+func (h *Hybrid) FailEvidence(ctx context.Context, tenantID, evidenceID, failure string, mutation core.EvidenceMutation) (core.EvidenceItem, error) {
+	return h.control.FailEvidence(ctx, tenantID, evidenceID, failure, mutation)
+}
+func (h *Hybrid) Evidence(ctx context.Context, tenantID, evidenceID string) (core.EvidenceItem, error) {
+	return h.control.Evidence(ctx, tenantID, evidenceID)
+}
+func (h *Hybrid) ListEvidence(ctx context.Context, tenantID string, filter core.EvidenceFilter) ([]core.EvidenceItem, error) {
+	return h.control.ListEvidence(ctx, tenantID, filter)
+}
+func (h *Hybrid) AppendEvidenceCustody(ctx context.Context, tenantID, evidenceID string, mutation core.EvidenceMutation) (core.EvidenceCustodyEntry, error) {
+	return h.control.AppendEvidenceCustody(ctx, tenantID, evidenceID, mutation)
+}
+func (h *Hybrid) ListEvidenceCustody(ctx context.Context, tenantID, evidenceID string) ([]core.EvidenceCustodyEntry, error) {
+	return h.control.ListEvidenceCustody(ctx, tenantID, evidenceID)
+}
+func (h *Hybrid) RecordEvidenceVerification(ctx context.Context, tenantID, evidenceID string, valid bool, mutation core.EvidenceMutation) (core.EvidenceItem, error) {
+	return h.control.RecordEvidenceVerification(ctx, tenantID, evidenceID, valid, mutation)
+}
+func (h *Hybrid) VerifyEvidenceCustody(ctx context.Context, tenantID, evidenceID string) (bool, error) {
+	return h.control.VerifyEvidenceCustody(ctx, tenantID, evidenceID)
+}
+
 func (h *Hybrid) cachedRetentionPolicy(ctx context.Context, tenantID string) (core.RetentionPolicy, error) {
 	h.retentionMu.Lock()
 	if snapshot, ok := h.retention[tenantID]; ok && time.Since(snapshot.loadedAt) < time.Minute {

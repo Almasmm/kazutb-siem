@@ -16,6 +16,7 @@ import (
 	"github.com/kcsp/platform/internal/bootstrap"
 	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/detection"
+	"github.com/kcsp/platform/internal/evidence"
 	"github.com/kcsp/platform/internal/httpapi"
 	"github.com/kcsp/platform/internal/ingest"
 	"github.com/kcsp/platform/internal/pipeline"
@@ -67,6 +68,23 @@ func run(logger *slog.Logger) error {
 	}
 	socService := soc.New(repository)
 	detectionService := detection.NewService(repository)
+	minioSecure, err := strconv.ParseBool(envOr("KCSP_MINIO_SECURE", "true"))
+	if err != nil {
+		return fmt.Errorf("parse KCSP_MINIO_SECURE: %w", err)
+	}
+	blobStore, err := evidence.OpenMinIOBlob(startupContext, evidence.MinIOConfig{
+		Endpoint: os.Getenv("KCSP_MINIO_ENDPOINT"), AccessKey: os.Getenv("KCSP_MINIO_ACCESS_KEY"),
+		SecretKey: os.Getenv("KCSP_MINIO_SECRET_KEY"), Bucket: envOr("KCSP_MINIO_EVIDENCE_BUCKET", "kcsp-evidence"),
+		Region: envOr("KCSP_MINIO_REGION", "us-east-1"), Secure: minioSecure,
+	})
+	if err != nil {
+		return err
+	}
+	maximumEvidenceBytes, err := strconv.ParseInt(envOr("KCSP_EVIDENCE_MAX_BYTES", strconv.FormatInt(evidence.DefaultMaximumBytes, 10)), 10, 64)
+	if err != nil || maximumEvidenceBytes < 1 {
+		return errors.New("KCSP_EVIDENCE_MAX_BYTES must be a positive integer")
+	}
+	evidenceService := evidence.NewService(repository, blobStore, evidence.Config{MaximumBytes: maximumEvidenceBytes})
 	publisher, err := ingest.OpenKafkaPublisher(startupContext, kafkaConfig("kcsp-api"))
 	if err != nil {
 		return err
@@ -101,6 +119,7 @@ func run(logger *slog.Logger) error {
 			DetectionService:  detectionService,
 			HuntStore:         repository,
 			RetentionStore:    repository,
+			EvidenceService:   evidenceService,
 			RequireRegisteredCollectors: strings.EqualFold(
 				envOr("KCSP_REQUIRE_REGISTERED_COLLECTORS", strconv.FormatBool(authMode == "oidc")), "true",
 			),

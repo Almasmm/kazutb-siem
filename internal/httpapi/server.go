@@ -15,6 +15,7 @@ import (
 
 	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/detection"
+	"github.com/kcsp/platform/internal/evidence"
 	"github.com/kcsp/platform/internal/hunt"
 	"github.com/kcsp/platform/internal/ingest"
 	"github.com/kcsp/platform/internal/pipeline"
@@ -49,6 +50,7 @@ type Server struct {
 	detections        *detection.Service
 	hunts             store.HuntStore
 	retention         store.RetentionStore
+	evidence          *evidence.Service
 }
 
 type Authenticator interface {
@@ -65,6 +67,7 @@ type Config struct {
 	DetectionService            *detection.Service
 	HuntStore                   store.HuntStore
 	RetentionStore              store.RetentionStore
+	EvidenceService             *evidence.Service
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -79,6 +82,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		gateway: config.Gateway, allowDirectIngest: config.AllowDirectIngest,
 		collectors: config.CollectorRegistry, requireCollectors: config.RequireRegisteredCollectors,
 		detections: config.DetectionService, hunts: config.HuntStore, retention: config.RetentionStore,
+		evidence: config.EvidenceService,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -130,6 +134,14 @@ func (s *Server) routes() {
 	if s.retention != nil {
 		s.mux.Handle("GET /api/v1/retention", s.protect("platform.retention.read", http.HandlerFunc(s.getRetentionPolicy)))
 		s.mux.Handle("PATCH /api/v1/retention", s.protect("platform.retention.manage", http.HandlerFunc(s.updateRetentionPolicy)))
+	}
+	if s.evidence != nil {
+		s.mux.Handle("GET /api/v1/evidence", s.protect("soc.evidence.read", http.HandlerFunc(s.listEvidence)))
+		s.mux.Handle("POST /api/v1/evidence", s.protect("soc.evidence.write", http.HandlerFunc(s.uploadEvidence)))
+		s.mux.Handle("GET /api/v1/evidence/{evidenceID}", s.protect("soc.evidence.read", http.HandlerFunc(s.getEvidence)))
+		s.mux.Handle("GET /api/v1/evidence/{evidenceID}/content", s.protect("soc.evidence.read", http.HandlerFunc(s.downloadEvidence)))
+		s.mux.Handle("POST /api/v1/evidence/{evidenceID}/verify", s.protect("soc.evidence.read", http.HandlerFunc(s.verifyEvidence)))
+		s.mux.Handle("GET /api/v1/evidence/{evidenceID}/custody", s.protect("soc.evidence.read", http.HandlerFunc(s.listEvidenceCustody)))
 	}
 	s.mux.Handle("GET /api/v1/findings", s.protect("siem.findings.read", http.HandlerFunc(s.listFindings)))
 	s.mux.Handle("GET /api/v1/alerts", s.protect("soc.alerts.read", http.HandlerFunc(s.listAlerts)))
@@ -211,6 +223,12 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.handleDomainError(w, r, err)
 		return
+	}
+	if s.evidence != nil {
+		if err := s.evidence.Health(r.Context()); err != nil {
+			s.problem(w, r, http.StatusServiceUnavailable, "evidence_unavailable", "Service unavailable", "Immutable evidence storage is not ready.")
+			return
+		}
 	}
 	s.json(w, http.StatusOK, map[string]interface{}{"status": "ready", "profile": s.profile, "audit_chain_valid": auditValid})
 }
@@ -767,6 +785,12 @@ func (s *Server) handleDomainError(w http.ResponseWriter, r *http.Request, err e
 		s.problem(w, r, http.StatusBadRequest, "invalid_hunt_query", "Invalid hunt query", err.Error())
 	case errors.Is(err, store.ErrInvalidRetentionPolicy):
 		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_retention_policy", "Invalid retention policy", err.Error())
+	case errors.Is(err, evidence.ErrInvalidEvidence):
+		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_evidence", "Invalid evidence", err.Error())
+	case errors.Is(err, evidence.ErrEvidencePending), errors.Is(err, evidence.ErrIdempotencyMismatch), errors.Is(err, store.ErrEvidenceState):
+		s.problem(w, r, http.StatusConflict, "evidence_conflict", "Evidence conflict", err.Error())
+	case errors.Is(err, evidence.ErrEvidenceIntegrity):
+		s.problem(w, r, http.StatusConflict, "evidence_integrity_failed", "Evidence integrity check failed", err.Error())
 	case errors.Is(err, soc.ErrInvalidTransition):
 		s.problem(w, r, http.StatusConflict, "invalid_transition", "Invalid state transition", err.Error())
 	case errors.Is(err, soc.ErrClosureDetails), errors.Is(err, soc.ErrNoAlerts), errors.Is(err, pipeline.ErrInvalidEvent), errors.Is(err, ingest.ErrInvalidEnvelope):
