@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kcsp/platform/internal/core"
+	"github.com/kcsp/platform/internal/ingest"
 	"github.com/kcsp/platform/internal/pipeline"
 	"github.com/kcsp/platform/internal/platform/auth"
 	"github.com/kcsp/platform/internal/soc"
@@ -28,16 +29,18 @@ const (
 )
 
 type Server struct {
-	store     store.Repository
-	engine    *pipeline.Engine
-	soc       *soc.Service
-	auth      Authenticator
-	logger    *slog.Logger
-	mux       *http.ServeMux
-	seed      func(context.Context) error
-	startedAt time.Time
-	profile   string
-	authMode  string
+	store             store.Repository
+	engine            *pipeline.Engine
+	soc               *soc.Service
+	auth              Authenticator
+	logger            *slog.Logger
+	mux               *http.ServeMux
+	seed              func(context.Context) error
+	startedAt         time.Time
+	profile           string
+	authMode          string
+	gateway           *ingest.Gateway
+	allowDirectIngest bool
 }
 
 type Authenticator interface {
@@ -45,12 +48,14 @@ type Authenticator interface {
 }
 
 type Config struct {
-	Profile  string
-	AuthMode string
+	Profile           string
+	AuthMode          string
+	Gateway           *ingest.Gateway
+	AllowDirectIngest bool
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
-	return NewWithConfig(repository, engine, socService, authenticator, logger, seed, Config{Profile: "test", AuthMode: "demo"})
+	return NewWithConfig(repository, engine, socService, authenticator, logger, seed, Config{Profile: "test", AuthMode: "demo", AllowDirectIngest: true})
 }
 
 func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error, config Config) http.Handler {
@@ -58,6 +63,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		store: repository, engine: engine, soc: socService, auth: authenticator,
 		logger: logger, mux: http.NewServeMux(), seed: seed, startedAt: time.Now().UTC(),
 		profile: config.Profile, authMode: config.AuthMode,
+		gateway: config.Gateway, allowDirectIngest: config.AllowDirectIngest,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -74,7 +80,12 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/v1/overview", s.protect("platform.overview.read", http.HandlerFunc(s.overview)))
 	s.mux.Handle("GET /api/v1/events", s.protect("siem.events.read", http.HandlerFunc(s.listEvents)))
 	s.mux.Handle("GET /api/v1/events/{eventID}", s.protect("siem.events.read", http.HandlerFunc(s.getEvent)))
-	s.mux.Handle("POST /api/v1/events", s.protect("siem.events.ingest", http.HandlerFunc(s.ingestEvent)))
+	if s.allowDirectIngest {
+		s.mux.Handle("POST /api/v1/events", s.protect("siem.events.ingest", http.HandlerFunc(s.ingestEvent)))
+	}
+	if s.gateway != nil {
+		s.mux.Handle("POST /api/v1/ingest/events", s.protect("siem.events.ingest", http.HandlerFunc(s.queueEvent)))
+	}
 	s.mux.Handle("GET /api/v1/findings", s.protect("siem.findings.read", http.HandlerFunc(s.listFindings)))
 	s.mux.Handle("GET /api/v1/alerts", s.protect("soc.alerts.read", http.HandlerFunc(s.listAlerts)))
 	s.mux.Handle("GET /api/v1/alerts/{alertID}", s.protect("soc.alerts.read", http.HandlerFunc(s.getAlert)))
@@ -234,6 +245,22 @@ func (s *Server) ingestEvent(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusOK
 	}
 	s.json(w, status, result)
+}
+
+func (s *Server) queueEvent(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, ingest.MaxEventBytes)
+	payload, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.handleDecodeError(w, r, "Invalid event payload", err)
+		return
+	}
+	principal := principalFrom(r.Context())
+	receipt, err := s.gateway.SubmitJSON(r.Context(), tenantFrom(r.Context()), principal.ID, payload)
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusAccepted, receipt)
 }
 
 func (s *Server) listFindings(w http.ResponseWriter, r *http.Request) {
@@ -416,7 +443,7 @@ func (s *Server) handleDomainError(w http.ResponseWriter, r *http.Request, err e
 		s.problem(w, r, http.StatusPreconditionFailed, "version_conflict", "The resource changed", "Refresh the resource and retry with its current version.")
 	case errors.Is(err, soc.ErrInvalidTransition):
 		s.problem(w, r, http.StatusConflict, "invalid_transition", "Invalid state transition", err.Error())
-	case errors.Is(err, soc.ErrClosureDetails), errors.Is(err, soc.ErrNoAlerts), errors.Is(err, pipeline.ErrInvalidEvent):
+	case errors.Is(err, soc.ErrClosureDetails), errors.Is(err, soc.ErrNoAlerts), errors.Is(err, pipeline.ErrInvalidEvent), errors.Is(err, ingest.ErrInvalidEnvelope):
 		s.problem(w, r, http.StatusUnprocessableEntity, "validation_failed", "Validation failed", err.Error())
 	default:
 		s.logger.Error("request failed", "error", err, "request_id", requestIDFrom(r.Context()))

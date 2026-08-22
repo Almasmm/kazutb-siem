@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/kcsp/platform/internal/bootstrap"
 	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/httpapi"
+	"github.com/kcsp/platform/internal/ingest"
 	"github.com/kcsp/platform/internal/pipeline"
 	"github.com/kcsp/platform/internal/platform/auth"
 	"github.com/kcsp/platform/internal/soc"
@@ -38,7 +40,7 @@ func run(logger *slog.Logger) error {
 
 	startupContext, cancelStartup := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelStartup()
-	repository, err := store.OpenPostgres(startupContext, os.Getenv("KCSP_DATABASE_URL"))
+	repository, err := store.OpenHybrid(startupContext, os.Getenv("KCSP_DATABASE_URL"), os.Getenv("KCSP_CLICKHOUSE_URL"))
 	if err != nil {
 		return err
 	}
@@ -54,6 +56,12 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	socService := soc.New(repository)
+	publisher, err := ingest.OpenKafkaPublisher(startupContext, kafkaConfig("kcsp-api"))
+	if err != nil {
+		return err
+	}
+	defer publisher.Close()
+	gateway := ingest.NewGateway(publisher)
 	authenticator, err := configureAuthenticator(startupContext, profile, authMode)
 	if err != nil {
 		return err
@@ -75,7 +83,10 @@ func run(logger *slog.Logger) error {
 		authenticator,
 		logger,
 		seed,
-		httpapi.Config{Profile: profile + "-postgres", AuthMode: authMode},
+		httpapi.Config{
+			Profile: profile + "-distributed", AuthMode: authMode, Gateway: gateway,
+			AllowDirectIngest: profile == "development" || profile == "test",
+		},
 	)
 	address := envOr("KCSP_LISTEN_ADDR", "127.0.0.1:8080")
 	server := &http.Server{
@@ -99,6 +110,16 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("serve HTTP: %w", err)
 	}
 	return nil
+}
+
+func kafkaConfig(clientID string) ingest.KafkaConfig {
+	partitions, _ := strconv.Atoi(envOr("KCSP_KAFKA_PARTITIONS", "12"))
+	replication, _ := strconv.Atoi(envOr("KCSP_KAFKA_REPLICATION_FACTOR", "1"))
+	return ingest.KafkaConfig{
+		Brokers: strings.Split(os.Getenv("KCSP_KAFKA_BROKERS"), ","), ClientID: clientID,
+		RawTopic: os.Getenv("KCSP_KAFKA_RAW_TOPIC"), DeadLetterTopic: os.Getenv("KCSP_KAFKA_DLQ_TOPIC"),
+		Partitions: int32(partitions), ReplicationFactor: int16(replication),
+	}
 }
 
 func configureAuthenticator(ctx context.Context, profile, mode string) (httpapi.Authenticator, error) {
