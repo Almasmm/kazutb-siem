@@ -312,6 +312,37 @@ func (h *Hybrid) RetrosearchThreatIndicator(ctx context.Context, indicator core.
 	return result, nil
 }
 
+func (h *Hybrid) CreateSOARPlaybook(ctx context.Context, playbook core.SOARPlaybook, version core.SOARPlaybookVersion) (core.SOARPlaybookDetails, error) {
+	return h.control.CreateSOARPlaybook(ctx, playbook, version)
+}
+func (h *Hybrid) CreateSOARPlaybookVersion(ctx context.Context, tenantID, playbookID, actor string, spec core.SOARPlaybookSpec, report core.SOARValidationReport) (core.SOARPlaybookVersion, error) {
+	return h.control.CreateSOARPlaybookVersion(ctx, tenantID, playbookID, actor, spec, report)
+}
+func (h *Hybrid) GetSOARPlaybook(ctx context.Context, tenantID, playbookID string) (core.SOARPlaybookDetails, error) {
+	return h.control.GetSOARPlaybook(ctx, tenantID, playbookID)
+}
+func (h *Hybrid) ListSOARPlaybooks(ctx context.Context, tenantID string) ([]core.SOARPlaybook, error) {
+	return h.control.ListSOARPlaybooks(ctx, tenantID)
+}
+func (h *Hybrid) SaveSOARValidation(ctx context.Context, tenantID, playbookID string, version int, report core.SOARValidationReport) (core.SOARPlaybookVersion, error) {
+	return h.control.SaveSOARValidation(ctx, tenantID, playbookID, version, report)
+}
+func (h *Hybrid) PublishSOARPlaybookVersion(ctx context.Context, tenantID, playbookID string, version int, actor string) (core.SOARPlaybookDetails, error) {
+	return h.control.PublishSOARPlaybookVersion(ctx, tenantID, playbookID, version, actor)
+}
+func (h *Hybrid) DisableSOARPlaybook(ctx context.Context, tenantID, playbookID, actor string) (core.SOARPlaybook, error) {
+	return h.control.DisableSOARPlaybook(ctx, tenantID, playbookID, actor)
+}
+func (h *Hybrid) CreateSOARExecution(ctx context.Context, execution core.SOARExecution, nodes []core.SOARNode) (core.SOARExecution, bool, error) {
+	return h.control.CreateSOARExecution(ctx, execution, nodes)
+}
+func (h *Hybrid) GetSOARExecution(ctx context.Context, tenantID, executionID string) (core.SOARExecution, error) {
+	return h.control.GetSOARExecution(ctx, tenantID, executionID)
+}
+func (h *Hybrid) ListSOARExecutions(ctx context.Context, tenantID string, filter core.SOARExecutionFilter) ([]core.SOARExecution, error) {
+	return h.control.ListSOARExecutions(ctx, tenantID, filter)
+}
+
 func (h *Hybrid) cachedRetentionPolicy(ctx context.Context, tenantID string) (core.RetentionPolicy, error) {
 	h.retentionMu.Lock()
 	if snapshot, ok := h.retention[tenantID]; ok && time.Since(snapshot.loadedAt) < time.Minute {

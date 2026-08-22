@@ -21,6 +21,7 @@ import (
 	"github.com/kcsp/platform/internal/ingest"
 	"github.com/kcsp/platform/internal/pipeline"
 	"github.com/kcsp/platform/internal/platform/auth"
+	"github.com/kcsp/platform/internal/soar"
 	"github.com/kcsp/platform/internal/soc"
 	"github.com/kcsp/platform/internal/store"
 	"github.com/kcsp/platform/internal/threatintel"
@@ -87,6 +88,7 @@ func run(logger *slog.Logger) error {
 	}
 	evidenceService := evidence.NewService(repository, blobStore, evidence.Config{MaximumBytes: maximumEvidenceBytes})
 	threatIntelService := threatintel.NewService(repository)
+	soarService := soar.NewService(repository, nil)
 	publisher, err := ingest.OpenKafkaPublisher(startupContext, kafkaConfig("kcsp-api"))
 	if err != nil {
 		return err
@@ -123,6 +125,7 @@ func run(logger *slog.Logger) error {
 			RetentionStore:     repository,
 			EvidenceService:    evidenceService,
 			ThreatIntelService: threatIntelService,
+			SOARService:        soarService,
 			RequireRegisteredCollectors: strings.EqualFold(
 				envOr("KCSP_REQUIRE_REGISTERED_COLLECTORS", strconv.FormatBool(authMode == "oidc")), "true",
 			),

@@ -20,6 +20,7 @@ import (
 	"github.com/kcsp/platform/internal/ingest"
 	"github.com/kcsp/platform/internal/pipeline"
 	"github.com/kcsp/platform/internal/platform/auth"
+	"github.com/kcsp/platform/internal/soar"
 	"github.com/kcsp/platform/internal/soc"
 	"github.com/kcsp/platform/internal/store"
 	"github.com/kcsp/platform/internal/threatintel"
@@ -53,6 +54,7 @@ type Server struct {
 	retention         store.RetentionStore
 	evidence          *evidence.Service
 	threatIntel       *threatintel.Service
+	soar              *soar.Service
 }
 
 type Authenticator interface {
@@ -71,6 +73,7 @@ type Config struct {
 	RetentionStore              store.RetentionStore
 	EvidenceService             *evidence.Service
 	ThreatIntelService          *threatintel.Service
+	SOARService                 *soar.Service
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -85,7 +88,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		gateway: config.Gateway, allowDirectIngest: config.AllowDirectIngest,
 		collectors: config.CollectorRegistry, requireCollectors: config.RequireRegisteredCollectors,
 		detections: config.DetectionService, hunts: config.HuntStore, retention: config.RetentionStore,
-		evidence: config.EvidenceService, threatIntel: config.ThreatIntelService,
+		evidence: config.EvidenceService, threatIntel: config.ThreatIntelService, soar: config.SOARService,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -160,6 +163,18 @@ func (s *Server) routes() {
 		s.mux.Handle("GET /api/v1/threat-intel/matches", s.protect("ti.indicators.read", http.HandlerFunc(s.listThreatIndicatorMatches)))
 		s.mux.Handle("POST /api/v1/threat-intel/stix/import", s.protect("ti.indicators.manage", http.HandlerFunc(s.importThreatIntelSTIX)))
 		s.mux.Handle("GET /api/v1/threat-intel/stix/export", s.protect("ti.indicators.read", http.HandlerFunc(s.exportThreatIntelSTIX)))
+	}
+	if s.soar != nil {
+		s.mux.Handle("GET /api/v1/soar/playbooks", s.protect("soar.playbooks.read", http.HandlerFunc(s.listSOARPlaybooks)))
+		s.mux.Handle("POST /api/v1/soar/playbooks", s.protect("soar.playbooks.write", http.HandlerFunc(s.createSOARPlaybook)))
+		s.mux.Handle("GET /api/v1/soar/playbooks/{playbookID}", s.protect("soar.playbooks.read", http.HandlerFunc(s.getSOARPlaybook)))
+		s.mux.Handle("POST /api/v1/soar/playbooks/{playbookID}/versions", s.protect("soar.playbooks.write", http.HandlerFunc(s.createSOARVersion)))
+		s.mux.Handle("POST /api/v1/soar/playbooks/{playbookID}/versions/{version}/validate", s.protect("soar.playbooks.write", http.HandlerFunc(s.validateSOARVersion)))
+		s.mux.Handle("POST /api/v1/soar/playbooks/{playbookID}/versions/{version}/publish", s.protect("soar.playbooks.write", http.HandlerFunc(s.publishSOARVersion)))
+		s.mux.Handle("POST /api/v1/soar/playbooks/{playbookID}/disable", s.protect("soar.playbooks.write", http.HandlerFunc(s.disableSOARPlaybook)))
+		s.mux.Handle("GET /api/v1/soar/executions", s.protect("soar.playbooks.read", http.HandlerFunc(s.listSOARExecutions)))
+		s.mux.Handle("POST /api/v1/soar/executions", s.protect("soar.playbooks.execute", http.HandlerFunc(s.startSOARExecution)))
+		s.mux.Handle("GET /api/v1/soar/executions/{executionID}", s.protect("soar.playbooks.read", http.HandlerFunc(s.getSOARExecution)))
 	}
 	s.mux.Handle("GET /api/v1/findings", s.protect("siem.findings.read", http.HandlerFunc(s.listFindings)))
 	s.mux.Handle("GET /api/v1/alerts", s.protect("soc.alerts.read", http.HandlerFunc(s.listAlerts)))
@@ -815,6 +830,14 @@ func (s *Server) handleDomainError(w http.ResponseWriter, r *http.Request, err e
 		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_threat_indicator", "Invalid threat indicator", err.Error())
 	case errors.Is(err, threatintel.ErrRetrosearchUnavailable):
 		s.problem(w, r, http.StatusNotImplemented, "retrosearch_unavailable", "Retrosearch unavailable", err.Error())
+	case errors.Is(err, soar.ErrInvalidPlaybook):
+		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_soar_playbook", "Invalid SOAR playbook", err.Error())
+	case errors.Is(err, soar.ErrValidationFailed):
+		s.problem(w, r, http.StatusUnprocessableEntity, "soar_validation_failed", "SOAR validation failed", err.Error())
+	case errors.Is(err, soar.ErrInvalidState):
+		s.problem(w, r, http.StatusConflict, "invalid_soar_state", "Invalid SOAR state", err.Error())
+	case errors.Is(err, soar.ErrInvalidExecution):
+		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_soar_execution", "Invalid SOAR execution", err.Error())
 	case errors.Is(err, soc.ErrInvalidTransition):
 		s.problem(w, r, http.StatusConflict, "invalid_transition", "Invalid state transition", err.Error())
 	case errors.Is(err, soc.ErrClosureDetails), errors.Is(err, soc.ErrNoAlerts), errors.Is(err, pipeline.ErrInvalidEvent), errors.Is(err, ingest.ErrInvalidEnvelope):

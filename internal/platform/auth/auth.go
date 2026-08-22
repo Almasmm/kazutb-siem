@@ -40,8 +40,9 @@ func NewDemoAuthenticator() *DemoAuthenticator {
 		"platform.retention.read",
 		"soc.evidence.read",
 		"ti.indicators.read",
+		"soar.playbooks.read",
 	}
-	l2 := append(append([]string{}, read...), "soc.alerts.manage", "soc.incidents.create", "soc.incidents.manage", "platform.audit.read", "soc.evidence.write")
+	l2 := append(append([]string{}, read...), "soc.alerts.manage", "soc.incidents.create", "soc.incidents.manage", "platform.audit.read", "soc.evidence.write", "soar.playbooks.execute", "soar.actions.approve")
 	return &DemoAuthenticator{tokens: map[string]Principal{
 		"kcsp-demo-l1":                 principal("user-soc-l1", "Айдана Сәрсен", "SOC L1", append(read, "soc.alerts.manage", "soc.incidents.create")),
 		"kcsp-demo-l2":                 principal("user-soc-l2", "Данияр Нұрлан", "SOC L2", l2),
@@ -49,6 +50,7 @@ func NewDemoAuthenticator() *DemoAuthenticator {
 		"kcsp-demo-collector":          principal("svc-http-collector", "HTTP Collector", "Service Account", []string{"siem.events.ingest", "platform.collectors.heartbeat"}),
 		"kcsp-demo-detection-engineer": principal("user-detection-engineer", "Detection Engineer", "Detection Engineer", []string{"platform.overview.read", "siem.events.read", "siem.rules.read", "siem.rules.write", "siem.rules.publish", "siem.hunt.read", "siem.hunt.execute"}),
 		"kcsp-demo-threat-intel":       principal("user-threat-intel", "Threat Intelligence Analyst", "Threat Intelligence Analyst", []string{"platform.overview.read", "siem.events.read", "soc.alerts.read", "soc.incidents.read", "ti.indicators.read", "ti.indicators.manage"}),
+		"kcsp-demo-soar-engineer":      principal("user-soar-engineer", "SOAR Engineer", "SOAR Engineer", []string{"platform.overview.read", "soc.alerts.read", "soc.incidents.read", "soar.playbooks.read", "soar.playbooks.write", "soar.playbooks.execute", "soar.actions.approve"}),
 		"kcsp-demo-admin": {
 			ID:             "user-platform-admin",
 			DisplayName:    "KCSP Administrator",
