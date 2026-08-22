@@ -53,6 +53,30 @@ func (h *Hybrid) HeartbeatCollector(ctx context.Context, tenantID, subject strin
 func (h *Hybrid) SetCollectorState(ctx context.Context, tenantID, collectorID, state string) (core.Collector, error) {
 	return h.control.SetCollectorState(ctx, tenantID, collectorID, state)
 }
+func (h *Hybrid) CreateDetectionDraft(ctx context.Context, content core.DetectionContent) (core.DetectionContent, error) {
+	return h.control.CreateDetectionDraft(ctx, content)
+}
+func (h *Hybrid) DetectionContent(ctx context.Context, tenantID, ruleID, version string) (core.DetectionContent, error) {
+	return h.control.DetectionContent(ctx, tenantID, ruleID, version)
+}
+func (h *Hybrid) ListDetectionContent(ctx context.Context, tenantID string) ([]core.DetectionContent, error) {
+	return h.control.ListDetectionContent(ctx, tenantID)
+}
+func (h *Hybrid) SaveDetectionValidation(ctx context.Context, content core.DetectionContent, rule core.DetectionRule, report core.DetectionValidationReport) (core.DetectionContent, error) {
+	return h.control.SaveDetectionValidation(ctx, content, rule, report)
+}
+func (h *Hybrid) PublishDetectionContent(ctx context.Context, tenantID, ruleID, version string) (core.DetectionContent, error) {
+	return h.control.PublishDetectionContent(ctx, tenantID, ruleID, version)
+}
+func (h *Hybrid) DisableDetectionContent(ctx context.Context, tenantID, ruleID string) (core.DetectionContent, error) {
+	return h.control.DisableDetectionContent(ctx, tenantID, ruleID)
+}
+func (h *Hybrid) RollbackDetectionContent(ctx context.Context, tenantID, ruleID string) (core.DetectionContent, error) {
+	return h.control.RollbackDetectionContent(ctx, tenantID, ruleID)
+}
+func (h *Hybrid) PublishedDetectionContent(ctx context.Context, tenantID string) ([]core.DetectionContent, error) {
+	return h.control.PublishedDetectionContent(ctx, tenantID)
+}
 func (h *Hybrid) ResetTenant(ctx context.Context, tenantID string) error {
 	if err := h.telemetry.ResetTenant(ctx, tenantID); err != nil {
 		return err

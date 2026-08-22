@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kcsp/platform/internal/core"
+	"github.com/kcsp/platform/internal/detection"
 	"github.com/kcsp/platform/internal/ingest"
 	"github.com/kcsp/platform/internal/pipeline"
 	"github.com/kcsp/platform/internal/platform/auth"
@@ -44,6 +45,7 @@ type Server struct {
 	allowDirectIngest bool
 	collectors        store.CollectorRegistry
 	requireCollectors bool
+	detections        *detection.Service
 }
 
 type Authenticator interface {
@@ -57,6 +59,7 @@ type Config struct {
 	AllowDirectIngest           bool
 	CollectorRegistry           store.CollectorRegistry
 	RequireRegisteredCollectors bool
+	DetectionService            *detection.Service
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -70,6 +73,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		profile: config.Profile, authMode: config.AuthMode,
 		gateway: config.Gateway, allowDirectIngest: config.AllowDirectIngest,
 		collectors: config.CollectorRegistry, requireCollectors: config.RequireRegisteredCollectors,
+		detections: config.DetectionService,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -97,6 +101,16 @@ func (s *Server) routes() {
 		s.mux.Handle("POST /api/v1/collectors", s.protect("platform.collectors.manage", http.HandlerFunc(s.registerCollector)))
 		s.mux.Handle("PATCH /api/v1/collectors/{collectorID}", s.protect("platform.collectors.manage", http.HandlerFunc(s.updateCollector)))
 		s.mux.Handle("POST /api/v1/collectors/heartbeat", s.protect("platform.collectors.heartbeat", http.HandlerFunc(s.collectorHeartbeat)))
+	}
+	if s.detections != nil {
+		s.mux.Handle("GET /api/v1/detection/content", s.protect("siem.rules.read", http.HandlerFunc(s.listDetectionContent)))
+		s.mux.Handle("POST /api/v1/detection/content", s.protect("siem.rules.write", http.HandlerFunc(s.createDetectionDraft)))
+		s.mux.Handle("POST /api/v1/detection/content/{ruleID}/versions/{version}/validate", s.protect("siem.rules.write", http.HandlerFunc(s.validateDetectionContent)))
+		s.mux.Handle("POST /api/v1/detection/content/{ruleID}/versions/{version}/publish", s.protect("siem.rules.publish", http.HandlerFunc(s.publishDetectionContent)))
+		s.mux.Handle("POST /api/v1/detection/content/{ruleID}/disable", s.protect("siem.rules.publish", http.HandlerFunc(s.disableDetectionContent)))
+		s.mux.Handle("POST /api/v1/detection/content/{ruleID}/rollback", s.protect("siem.rules.publish", http.HandlerFunc(s.rollbackDetectionContent)))
+		s.mux.Handle("POST /api/v1/detection/content/{ruleID}/simulate", s.protect("siem.rules.write", http.HandlerFunc(s.simulateDetectionContent)))
+		s.mux.Handle("POST /api/v1/detection/content/{ruleID}/replay", s.protect("siem.rules.write", http.HandlerFunc(s.replayDetectionContent)))
 	}
 	s.mux.Handle("GET /api/v1/findings", s.protect("siem.findings.read", http.HandlerFunc(s.listFindings)))
 	s.mux.Handle("GET /api/v1/alerts", s.protect("soc.alerts.read", http.HandlerFunc(s.listAlerts)))
@@ -404,6 +418,146 @@ func remoteIP(address string) string {
 	return strings.TrimSpace(address)
 }
 
+func (s *Server) listDetectionContent(w http.ResponseWriter, r *http.Request) {
+	items, err := s.detections.List(r.Context(), tenantFrom(r.Context()))
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": items, "total": len(items)})
+}
+
+func (s *Server) createDetectionDraft(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		RuleID                  string                 `json:"rule_id"`
+		Version                 string                 `json:"version"`
+		SigmaYAML               string                 `json:"sigma_yaml"`
+		PositiveTests           []core.DetectionSample `json:"positive_tests"`
+		NegativeTests           []core.DetectionSample `json:"negative_tests"`
+		PerformanceBudgetMicros int64                  `json:"performance_budget_micros"`
+	}
+	if err := decodeJSON(w, r, &request); err != nil {
+		s.handleDecodeError(w, r, "Invalid detection draft", err)
+		return
+	}
+	principal := principalFrom(r.Context())
+	content, err := s.detections.CreateDraft(r.Context(), core.DetectionContent{
+		TenantID: tenantFrom(r.Context()), RuleID: request.RuleID, Version: request.Version, SigmaYAML: request.SigmaYAML,
+		PositiveTests: request.PositiveTests, NegativeTests: request.NegativeTests,
+		PerformanceBudgetMicros: request.PerformanceBudgetMicros, CreatedBy: principal.ID,
+	})
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	if err := s.auditDetection(r, principal.ID, "detection.draft_created", content); err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusCreated, content)
+}
+
+func (s *Server) validateDetectionContent(w http.ResponseWriter, r *http.Request) {
+	content, err := s.detections.Validate(r.Context(), tenantFrom(r.Context()), r.PathValue("ruleID"), r.PathValue("version"))
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	principal := principalFrom(r.Context())
+	if err := s.auditDetection(r, principal.ID, "detection.validated", content); err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, content)
+}
+
+func (s *Server) publishDetectionContent(w http.ResponseWriter, r *http.Request) {
+	content, err := s.detections.Publish(r.Context(), tenantFrom(r.Context()), r.PathValue("ruleID"), r.PathValue("version"))
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	principal := principalFrom(r.Context())
+	if err := s.auditDetection(r, principal.ID, "detection.published", content); err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, content)
+}
+
+func (s *Server) disableDetectionContent(w http.ResponseWriter, r *http.Request) {
+	content, err := s.detections.Disable(r.Context(), tenantFrom(r.Context()), r.PathValue("ruleID"))
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	principal := principalFrom(r.Context())
+	if err := s.auditDetection(r, principal.ID, "detection.disabled", content); err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, content)
+}
+
+func (s *Server) rollbackDetectionContent(w http.ResponseWriter, r *http.Request) {
+	content, err := s.detections.Rollback(r.Context(), tenantFrom(r.Context()), r.PathValue("ruleID"))
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	principal := principalFrom(r.Context())
+	if err := s.auditDetection(r, principal.ID, "detection.rolled_back", content); err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, content)
+}
+
+func (s *Server) simulateDetectionContent(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Version string              `json:"version"`
+		Event   core.CanonicalEvent `json:"event"`
+	}
+	if err := decodeJSON(w, r, &request); err != nil {
+		s.handleDecodeError(w, r, "Invalid detection simulation", err)
+		return
+	}
+	matched, fields, err := s.detections.Simulate(r.Context(), tenantFrom(r.Context()), r.PathValue("ruleID"), request.Version, request.Event)
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"matched": matched, "matched_fields": fields})
+}
+
+func (s *Server) replayDetectionContent(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Version string    `json:"version"`
+		Start   time.Time `json:"start"`
+		End     time.Time `json:"end"`
+		Limit   int       `json:"limit"`
+	}
+	if err := decodeJSON(w, r, &request); err != nil {
+		s.handleDecodeError(w, r, "Invalid detection replay", err)
+		return
+	}
+	report, err := s.detections.Replay(r.Context(), tenantFrom(r.Context()), r.PathValue("ruleID"), request.Version, request.Start, request.End, request.Limit)
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, report)
+}
+
+func (s *Server) auditDetection(r *http.Request, actor, action string, content core.DetectionContent) error {
+	_, err := s.store.AppendAudit(r.Context(), core.AuditEntry{
+		TenantID: content.TenantID, Actor: actor, Action: action, ResourceType: "detection_rule",
+		ResourceID: content.RuleID, Outcome: "SUCCESS", RequestID: requestIDFrom(r.Context()),
+		Metadata: map[string]interface{}{"version": content.Version, "state": content.State},
+	})
+	return err
+}
+
 func (s *Server) listFindings(w http.ResponseWriter, r *http.Request) {
 	items, err := s.store.ListFindings(r.Context(), tenantFrom(r.Context()), r.URL.Query().Get("event_id"), intQuery(r, "limit"))
 	if err != nil {
@@ -584,6 +738,12 @@ func (s *Server) handleDomainError(w http.ResponseWriter, r *http.Request, err e
 		s.problem(w, r, http.StatusPreconditionFailed, "version_conflict", "The resource changed", "Refresh the resource and retry with its current version.")
 	case errors.Is(err, store.ErrAlreadyExists):
 		s.problem(w, r, http.StatusConflict, "already_exists", "Resource already exists", "A resource with this identity already exists in the tenant.")
+	case errors.Is(err, detection.ErrInvalidRule):
+		s.problem(w, r, http.StatusBadRequest, "invalid_detection_rule", "Invalid detection rule", err.Error())
+	case errors.Is(err, detection.ErrValidationFailed):
+		s.problem(w, r, http.StatusUnprocessableEntity, "detection_validation_failed", "Detection validation failed", err.Error())
+	case errors.Is(err, detection.ErrInvalidState):
+		s.problem(w, r, http.StatusConflict, "invalid_detection_state", "Invalid detection state", err.Error())
 	case errors.Is(err, soc.ErrInvalidTransition):
 		s.problem(w, r, http.StatusConflict, "invalid_transition", "Invalid state transition", err.Error())
 	case errors.Is(err, soc.ErrClosureDetails), errors.Is(err, soc.ErrNoAlerts), errors.Is(err, pipeline.ErrInvalidEvent), errors.Is(err, ingest.ErrInvalidEnvelope):

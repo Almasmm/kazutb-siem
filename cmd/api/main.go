@@ -15,6 +15,7 @@ import (
 
 	"github.com/kcsp/platform/internal/bootstrap"
 	"github.com/kcsp/platform/internal/core"
+	"github.com/kcsp/platform/internal/detection"
 	"github.com/kcsp/platform/internal/httpapi"
 	"github.com/kcsp/platform/internal/ingest"
 	"github.com/kcsp/platform/internal/pipeline"
@@ -65,6 +66,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	socService := soc.New(repository)
+	detectionService := detection.NewService(repository)
 	publisher, err := ingest.OpenKafkaPublisher(startupContext, kafkaConfig("kcsp-api"))
 	if err != nil {
 		return err
@@ -96,6 +98,7 @@ func run(logger *slog.Logger) error {
 			Profile: profile + "-distributed", AuthMode: authMode, Gateway: gateway,
 			AllowDirectIngest: profile == "development" || profile == "test",
 			CollectorRegistry: repository,
+			DetectionService:  detectionService,
 			RequireRegisteredCollectors: strings.EqualFold(
 				envOr("KCSP_REQUIRE_REGISTERED_COLLECTORS", strconv.FormatBool(authMode == "oidc")), "true",
 			),

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kcsp/platform/internal/core"
+	"github.com/kcsp/platform/internal/detection"
 )
 
 var ErrInvalidEvent = errors.New("invalid event")
@@ -32,6 +33,17 @@ type Engine struct {
 	mu           sync.Mutex
 	authFailures map[string][]failureObservation
 	rules        map[string]core.DetectionRule
+	dynamicMu    sync.Mutex
+	dynamicRules map[string]dynamicRuleSnapshot
+}
+
+type dynamicRuleSnapshot struct {
+	Rules    []*detection.CompiledRule
+	LoadedAt time.Time
+}
+
+type publishedContentProvider interface {
+	PublishedDetectionContent(context.Context, string) ([]core.DetectionContent, error)
 }
 
 // Repository is the data-plane port used by the embedded executor. Production
@@ -78,7 +90,10 @@ func New(ctx context.Context, repository Repository) (*Engine, error) {
 	if err := repository.SetRules(ctx, rules); err != nil {
 		return nil, fmt.Errorf("publish built-in detection rules: %w", err)
 	}
-	return &Engine{store: repository, authFailures: map[string][]failureObservation{}, rules: byID}, nil
+	return &Engine{
+		store: repository, authFailures: map[string][]failureObservation{}, rules: byID,
+		dynamicRules: map[string]dynamicRuleSnapshot{},
+	}, nil
 }
 
 func (e *Engine) ResetTenant(tenantID string) {
@@ -89,6 +104,9 @@ func (e *Engine) ResetTenant(tenantID string) {
 			delete(e.authFailures, key)
 		}
 	}
+	e.dynamicMu.Lock()
+	delete(e.dynamicRules, tenantID)
+	e.dynamicMu.Unlock()
 }
 
 func (e *Engine) Ingest(ctx context.Context, tenantID string, input core.CanonicalEvent) (core.IngestResult, error) {
@@ -104,7 +122,10 @@ func (e *Engine) Ingest(ctx context.Context, tenantID string, input core.Canonic
 		return core.IngestResult{Event: stored, Duplicate: true, Findings: []core.Finding{}, Alerts: []core.Alert{}}, nil
 	}
 
-	matches := e.detect(stored)
+	matches, err := e.detect(ctx, stored)
+	if err != nil {
+		return core.IngestResult{}, err
+	}
 	result := core.IngestResult{Event: stored, Findings: []core.Finding{}, Alerts: []core.Alert{}}
 	for _, match := range matches {
 		finding := e.makeFinding(stored, match)
@@ -154,7 +175,11 @@ func normalize(tenantID string, input core.CanonicalEvent) (core.CanonicalEvent,
 	} else {
 		input.EventTime = input.EventTime.UTC()
 	}
-	input.IngestTime = now
+	if input.IngestTime.IsZero() {
+		input.IngestTime = now
+	} else {
+		input.IngestTime = input.IngestTime.UTC()
+	}
 	if input.CollectorID == "" {
 		input.CollectorID = "collector-http-dev"
 	}
@@ -183,7 +208,7 @@ func normalize(tenantID string, input core.CanonicalEvent) (core.CanonicalEvent,
 	return input, nil
 }
 
-func (e *Engine) detect(event core.CanonicalEvent) []detectionMatch {
+func (e *Engine) detect(ctx context.Context, event core.CanonicalEvent) ([]detectionMatch, error) {
 	matches := make([]detectionMatch, 0, 2)
 	if matchedFields, tokenFactors := suspiciousPowerShell(event); len(matchedFields) > 0 {
 		factors := []core.RiskFactor{
@@ -197,7 +222,67 @@ func (e *Engine) detect(event core.CanonicalEvent) []detectionMatch {
 	if threshold, fields, factors := e.observeAuthenticationFailure(event); threshold {
 		matches = append(matches, detectionMatch{Rule: e.rules[AuthRuleID], MatchedFields: fields, Factors: factors})
 	}
-	return matches
+	dynamicRules, err := e.rulesForTenant(ctx, event.TenantID)
+	if err != nil {
+		return nil, fmt.Errorf("load published detection content: %w", err)
+	}
+	for _, compiled := range dynamicRules {
+		if _, builtIn := e.rules[compiled.Rule.ID]; builtIn {
+			continue
+		}
+		matched, fields := compiled.Evaluate(event)
+		if !matched {
+			continue
+		}
+		factors := []core.RiskFactor{
+			{Code: "base_severity", Label: "Published Sigma detection", Delta: severityRisk(compiled.Rule.Severity), SourceReference: compiled.Rule.ID},
+			{Code: "rule_confidence", Label: "Validated rule confidence", Delta: max(5, compiled.Rule.Confidence/5), SourceReference: compiled.Rule.ID + "@" + compiled.Rule.Version},
+		}
+		factors = append(factors, contextFactors(event)...)
+		matches = append(matches, detectionMatch{Rule: compiled.Rule, MatchedFields: fields, Factors: factors})
+	}
+	return matches, nil
+}
+
+func (e *Engine) rulesForTenant(ctx context.Context, tenantID string) ([]*detection.CompiledRule, error) {
+	provider, ok := e.store.(publishedContentProvider)
+	if !ok {
+		return nil, nil
+	}
+	e.dynamicMu.Lock()
+	defer e.dynamicMu.Unlock()
+	if snapshot, found := e.dynamicRules[tenantID]; found && time.Since(snapshot.LoadedAt) < 5*time.Second {
+		return snapshot.Rules, nil
+	}
+	contents, err := provider.PublishedDetectionContent(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	compiledRules := make([]*detection.CompiledRule, 0, len(contents))
+	for _, content := range contents {
+		compiled, err := detection.Compile(content)
+		if err != nil {
+			return nil, fmt.Errorf("compile published rule %s@%s: %w", content.RuleID, content.Version, err)
+		}
+		compiledRules = append(compiledRules, compiled)
+	}
+	e.dynamicRules[tenantID] = dynamicRuleSnapshot{Rules: compiledRules, LoadedAt: time.Now()}
+	return compiledRules, nil
+}
+
+func severityRisk(severity core.Severity) int {
+	switch severity {
+	case core.SeverityCritical:
+		return 65
+	case core.SeverityHigh:
+		return 50
+	case core.SeverityMedium:
+		return 35
+	case core.SeverityLow:
+		return 20
+	default:
+		return 10
+	}
 }
 
 func suspiciousPowerShell(event core.CanonicalEvent) ([]string, []core.RiskFactor) {
