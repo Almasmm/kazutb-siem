@@ -38,11 +38,11 @@ type Engine struct {
 // adapters can route events/findings to ClickHouse and control objects to PostgreSQL
 // without leaking those SDK types into the domain pipeline.
 type Repository interface {
-	SetRules([]core.DetectionRule)
-	PutEvent(core.CanonicalEvent) (core.CanonicalEvent, bool)
-	PutFinding(core.Finding)
-	UpsertAlert(core.Alert, string, time.Duration) (core.Alert, bool)
-	AppendAudit(core.AuditEntry) core.AuditEntry
+	SetRules(context.Context, []core.DetectionRule) error
+	PutEvent(context.Context, core.CanonicalEvent) (core.CanonicalEvent, bool, error)
+	PutFinding(context.Context, core.Finding) error
+	UpsertAlert(context.Context, core.Alert, string, time.Duration) (core.Alert, bool, error)
+	AppendAudit(context.Context, core.AuditEntry) (core.AuditEntry, error)
 }
 
 type detectionMatch struct {
@@ -51,7 +51,7 @@ type detectionMatch struct {
 	Factors       []core.RiskFactor
 }
 
-func New(memory Repository) *Engine {
+func New(ctx context.Context, repository Repository) (*Engine, error) {
 	now := time.Now().UTC()
 	rules := []core.DetectionRule{
 		{
@@ -75,8 +75,10 @@ func New(memory Repository) *Engine {
 	for _, rule := range rules {
 		byID[rule.ID] = rule
 	}
-	memory.SetRules(rules)
-	return &Engine{store: memory, authFailures: map[string][]failureObservation{}, rules: byID}
+	if err := repository.SetRules(ctx, rules); err != nil {
+		return nil, fmt.Errorf("publish built-in detection rules: %w", err)
+	}
+	return &Engine{store: repository, authFailures: map[string][]failureObservation{}, rules: byID}, nil
 }
 
 func (e *Engine) ResetTenant(tenantID string) {
@@ -89,12 +91,15 @@ func (e *Engine) ResetTenant(tenantID string) {
 	}
 }
 
-func (e *Engine) Ingest(_ context.Context, tenantID string, input core.CanonicalEvent) (core.IngestResult, error) {
+func (e *Engine) Ingest(ctx context.Context, tenantID string, input core.CanonicalEvent) (core.IngestResult, error) {
 	event, err := normalize(tenantID, input)
 	if err != nil {
 		return core.IngestResult{}, err
 	}
-	stored, duplicate := e.store.PutEvent(event)
+	stored, duplicate, err := e.store.PutEvent(ctx, event)
+	if err != nil {
+		return core.IngestResult{}, fmt.Errorf("persist canonical event: %w", err)
+	}
 	if duplicate {
 		return core.IngestResult{Event: stored, Duplicate: true, Findings: []core.Finding{}, Alerts: []core.Alert{}}, nil
 	}
@@ -103,21 +108,28 @@ func (e *Engine) Ingest(_ context.Context, tenantID string, input core.Canonical
 	result := core.IngestResult{Event: stored, Findings: []core.Finding{}, Alerts: []core.Alert{}}
 	for _, match := range matches {
 		finding := e.makeFinding(stored, match)
-		e.store.PutFinding(finding)
+		if err := e.store.PutFinding(ctx, finding); err != nil {
+			return core.IngestResult{}, fmt.Errorf("persist finding: %w", err)
+		}
 		result.Findings = append(result.Findings, finding)
 
 		candidate, dedupKey := makeAlert(stored, finding)
-		alert, created := e.store.UpsertAlert(candidate, dedupKey, 15*time.Minute)
+		alert, created, err := e.store.UpsertAlert(ctx, candidate, dedupKey, 15*time.Minute)
+		if err != nil {
+			return core.IngestResult{}, fmt.Errorf("persist alert: %w", err)
+		}
 		result.Alerts = append(result.Alerts, alert)
 		action := "alert.updated"
 		if created {
 			action = "alert.created"
 		}
-		e.store.AppendAudit(core.AuditEntry{
+		if _, err := e.store.AppendAudit(ctx, core.AuditEntry{
 			TenantID: tenantID, Actor: "system:detection-engine", Action: action,
 			ResourceType: "alert", ResourceID: alert.ID, Outcome: "success",
 			Metadata: map[string]interface{}{"event_id": stored.ID, "rule_id": finding.Rule.ID, "risk_score": finding.RiskScore},
-		})
+		}); err != nil {
+			return core.IngestResult{}, fmt.Errorf("append detection audit: %w", err)
+		}
 	}
 	return result, nil
 }

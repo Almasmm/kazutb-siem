@@ -1,12 +1,37 @@
-name: kcsp-v01
+name: kcsp
 
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: kcsp
+      POSTGRES_USER: kcsp
+      POSTGRES_PASSWORD: ${KCSP_POSTGRES_PASSWORD:?Set KCSP_POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kcsp -d kcsp"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - kcsp-postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
   api:
     build:
       context: .
       dockerfile: Dockerfile.api
     environment:
       KCSP_LISTEN_ADDR: ":8080"
+      KCSP_PROFILE: development
+      KCSP_AUTH_MODE: demo
+      KCSP_DEMO_SEED: "false"
+      KCSP_DEFAULT_TENANT_ID: university-kulazhanov
+      KCSP_DEFAULT_TENANT_NAME: K. Kulazhanov University
+      KCSP_DATABASE_URL: postgres://kcsp:${KCSP_POSTGRES_PASSWORD}@postgres:5432/kcsp?sslmode=disable
     ports:
       - "127.0.0.1:8080:8080"
     healthcheck:
@@ -14,6 +39,9 @@ services:
       interval: 5s
       timeout: 2s
       retries: 10
+    depends_on:
+      postgres:
+        condition: service_healthy
     read_only: true
     tmpfs:
       - /tmp
@@ -40,3 +68,6 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  kcsp-postgres-data:

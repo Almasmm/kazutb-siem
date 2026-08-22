@@ -1,0 +1,8 @@
+.git
+.github
+.tools
+apps/web/node_modules
+apps/web/dist
+docs
+test
+*.log

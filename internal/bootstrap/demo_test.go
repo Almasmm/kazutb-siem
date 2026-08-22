@@ -12,9 +12,13 @@ import (
 
 func TestDemoSeedBuildsStableVerticalSliceAndCanReset(t *testing.T) {
 	memory := store.NewMemory()
-	engine := pipeline.New(memory)
-	service := soc.New(memory)
-	seeder := DemoSeeder{Store: memory, Pipeline: engine, SOC: service}
+	repository := store.WrapMemory(memory)
+	engine, err := pipeline.New(context.Background(), repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := soc.New(repository)
+	seeder := DemoSeeder{Store: repository, Pipeline: engine, SOC: service}
 	for run := 0; run < 2; run++ {
 		if err := seeder.Seed(context.Background()); err != nil {
 			t.Fatalf("seed run %d: %v", run+1, err)

@@ -10,6 +10,22 @@ permissions:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: kcsp_test
+          POSTGRES_USER: kcsp
+          POSTGRES_PASSWORD: kcsp-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kcsp -d kcsp_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      KCSP_TEST_DATABASE_URL: postgres://kcsp:kcsp-ci-only@127.0.0.1:5432/kcsp_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v6
@@ -37,4 +53,3 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci
       - run: npm run build
-

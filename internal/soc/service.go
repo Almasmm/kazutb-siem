@@ -1,6 +1,7 @@
 package soc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -24,12 +25,12 @@ type Service struct {
 // Repository is the transactional SOC port. A production implementation must
 // make each mutation and its audit record atomic in PostgreSQL.
 type Repository interface {
-	ListIncidents(string, store.IncidentFilter) []core.Incident
-	GetAlert(string, string) (core.Alert, error)
-	MutateAlert(string, string, int, func(*core.Alert) error) (core.Alert, error)
-	CreateIncident(core.Incident) (core.Incident, error)
-	MutateIncident(string, string, int, func(*core.Incident) error) (core.Incident, error)
-	AppendAudit(core.AuditEntry) core.AuditEntry
+	ListIncidents(context.Context, string, store.IncidentFilter) ([]core.Incident, error)
+	GetAlert(context.Context, string, string) (core.Alert, error)
+	MutateAlert(context.Context, string, string, int, func(*core.Alert) error) (core.Alert, error)
+	CreateIncident(context.Context, core.Incident) (core.Incident, error)
+	MutateIncident(context.Context, string, string, int, func(*core.Incident) error) (core.Incident, error)
+	AppendAudit(context.Context, core.AuditEntry) (core.AuditEntry, error)
 }
 
 type AlertPatch struct {
@@ -58,13 +59,13 @@ type IncidentPatch struct {
 	RequestID     string
 }
 
-func New(memory Repository) *Service {
-	return &Service{store: memory}
+func New(repository Repository) *Service {
+	return &Service{store: repository}
 }
 
-func (s *Service) UpdateAlert(tenantID, alertID, actor, requestID string, patch AlertPatch) (core.Alert, error) {
+func (s *Service) UpdateAlert(ctx context.Context, tenantID, alertID, actor, requestID string, patch AlertPatch) (core.Alert, error) {
 	now := time.Now().UTC()
-	alert, err := s.store.MutateAlert(tenantID, alertID, patch.Version, func(alert *core.Alert) error {
+	alert, err := s.store.MutateAlert(ctx, tenantID, alertID, patch.Version, func(alert *core.Alert) error {
 		if patch.Status != "" {
 			next := strings.ToUpper(patch.Status)
 			if !validAlertTransition(alert.Status, next) {
@@ -93,11 +94,13 @@ func (s *Service) UpdateAlert(tenantID, alertID, actor, requestID string, patch 
 	if err != nil {
 		return core.Alert{}, err
 	}
-	s.store.AppendAudit(core.AuditEntry{
+	if _, err := s.store.AppendAudit(ctx, core.AuditEntry{
 		TenantID: tenantID, Actor: actor, Action: "alert.triaged", ResourceType: "alert", ResourceID: alert.ID,
 		Outcome: "success", RequestID: requestID,
 		Metadata: map[string]interface{}{"status": alert.Status, "assignee": alert.Assignee, "disposition": alert.Disposition, "comment": patch.Comment},
-	})
+	}); err != nil {
+		return core.Alert{}, fmt.Errorf("append alert audit: %w", err)
+	}
 	return alert, nil
 }
 
@@ -114,12 +117,16 @@ func validAlertTransition(current, next string) bool {
 	return allowed[current][next]
 }
 
-func (s *Service) CreateIncident(tenantID, actor string, input CreateIncidentInput) (core.Incident, bool, error) {
+func (s *Service) CreateIncident(ctx context.Context, tenantID, actor string, input CreateIncidentInput) (core.Incident, bool, error) {
 	if len(input.AlertIDs) == 0 {
 		return core.Incident{}, false, ErrNoAlerts
 	}
 	alertIDs := uniqueSorted(input.AlertIDs)
-	for _, existing := range s.store.ListIncidents(tenantID, store.IncidentFilter{Limit: 500}) {
+	existingIncidents, err := s.store.ListIncidents(ctx, tenantID, store.IncidentFilter{Limit: 500})
+	if err != nil {
+		return core.Incident{}, false, err
+	}
+	for _, existing := range existingIncidents {
 		if stringSlicesEqual(uniqueSorted(existing.AlertIDs), alertIDs) {
 			return existing, true, nil
 		}
@@ -131,7 +138,7 @@ func (s *Service) CreateIncident(tenantID, actor string, input CreateIncidentInp
 	findingIDs, eventIDs, mitre := []string{}, []string{}, []string{}
 	entities := []core.EntitySummary{}
 	for _, alertID := range alertIDs {
-		alert, err := s.store.GetAlert(tenantID, alertID)
+		alert, err := s.store.GetAlert(ctx, tenantID, alertID)
 		if err != nil {
 			return core.Incident{}, false, err
 		}
@@ -162,12 +169,12 @@ func (s *Service) CreateIncident(tenantID, actor string, input CreateIncidentInp
 		SLA:                core.SLAInfo{AcknowledgeBy: now.Add(acknowledgementWindow(severity))},
 		AllowedTransitions: AllowedTransitions("NEW"), Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	created, err := s.store.CreateIncident(incident)
+	created, err := s.store.CreateIncident(ctx, incident)
 	if err != nil {
 		return core.Incident{}, false, err
 	}
 	for _, alert := range alerts {
-		_, _ = s.store.MutateAlert(tenantID, alert.ID, 0, func(value *core.Alert) error {
+		if _, err := s.store.MutateAlert(ctx, tenantID, alert.ID, 0, func(value *core.Alert) error {
 			if value.Status == "NEW" || value.Status == "ACKNOWLEDGED" {
 				value.Status = "IN_PROGRESS"
 			}
@@ -175,19 +182,23 @@ func (s *Service) CreateIncident(tenantID, actor string, input CreateIncidentInp
 				value.Assignee = input.Assignee
 			}
 			return nil
-		})
+		}); err != nil {
+			return core.Incident{}, false, fmt.Errorf("link alert %s to incident: %w", alert.ID, err)
+		}
 	}
-	s.store.AppendAudit(core.AuditEntry{
+	if _, err := s.store.AppendAudit(ctx, core.AuditEntry{
 		TenantID: tenantID, Actor: actor, Action: "incident.created", ResourceType: "incident", ResourceID: created.ID,
 		Outcome: "success", RequestID: input.RequestID,
 		Metadata: map[string]interface{}{"alert_ids": alertIDs, "severity": severity, "risk_score": riskScore},
-	})
+	}); err != nil {
+		return core.Incident{}, false, fmt.Errorf("append incident creation audit: %w", err)
+	}
 	return created, false, nil
 }
 
-func (s *Service) UpdateIncident(tenantID, incidentID, actor string, patch IncidentPatch) (core.Incident, error) {
+func (s *Service) UpdateIncident(ctx context.Context, tenantID, incidentID, actor string, patch IncidentPatch) (core.Incident, error) {
 	now := time.Now().UTC()
-	incident, err := s.store.MutateIncident(tenantID, incidentID, patch.Version, func(incident *core.Incident) error {
+	incident, err := s.store.MutateIncident(ctx, tenantID, incidentID, patch.Version, func(incident *core.Incident) error {
 		previous := incident.Status
 		if patch.Status != "" {
 			next := strings.ToUpper(patch.Status)
@@ -239,11 +250,13 @@ func (s *Service) UpdateIncident(tenantID, incidentID, actor string, patch Incid
 	if err != nil {
 		return core.Incident{}, err
 	}
-	s.store.AppendAudit(core.AuditEntry{
+	if _, err := s.store.AppendAudit(ctx, core.AuditEntry{
 		TenantID: tenantID, Actor: actor, Action: "incident.updated", ResourceType: "incident", ResourceID: incident.ID,
 		Outcome: "success", RequestID: patch.RequestID,
 		Metadata: map[string]interface{}{"status": incident.Status, "assignee": incident.Assignee, "disposition": incident.Disposition},
-	})
+	}); err != nil {
+		return core.Incident{}, fmt.Errorf("append incident audit: %w", err)
+	}
 	return incident, nil
 }
 

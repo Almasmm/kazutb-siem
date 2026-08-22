@@ -28,20 +28,36 @@ const (
 )
 
 type Server struct {
-	store     *store.Memory
+	store     store.Repository
 	engine    *pipeline.Engine
 	soc       *soc.Service
-	auth      *auth.DemoAuthenticator
+	auth      Authenticator
 	logger    *slog.Logger
 	mux       *http.ServeMux
 	seed      func(context.Context) error
 	startedAt time.Time
+	profile   string
+	authMode  string
 }
 
-func New(memory *store.Memory, engine *pipeline.Engine, socService *soc.Service, authenticator *auth.DemoAuthenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
+type Authenticator interface {
+	Authenticate(*http.Request) (auth.Principal, error)
+}
+
+type Config struct {
+	Profile  string
+	AuthMode string
+}
+
+func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
+	return NewWithConfig(repository, engine, socService, authenticator, logger, seed, Config{Profile: "test", AuthMode: "demo"})
+}
+
+func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error, config Config) http.Handler {
 	server := &Server{
-		store: memory, engine: engine, soc: socService, auth: authenticator,
+		store: repository, engine: engine, soc: socService, auth: authenticator,
 		logger: logger, mux: http.NewServeMux(), seed: seed, startedAt: time.Now().UTC(),
+		profile: config.Profile, authMode: config.AuthMode,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -69,7 +85,9 @@ func (s *Server) routes() {
 	s.mux.Handle("PATCH /api/v1/incidents/{incidentID}", s.protect("soc.incidents.manage", http.HandlerFunc(s.updateIncident)))
 	s.mux.Handle("GET /api/v1/rules", s.protect("detection.rules.read", http.HandlerFunc(s.listRules)))
 	s.mux.Handle("GET /api/v1/audit", s.protect("platform.audit.read", http.HandlerFunc(s.listAudit)))
-	s.mux.Handle("POST /api/v1/demo/reset", s.protect("platform.demo.reset", http.HandlerFunc(s.resetDemo)))
+	if s.seed != nil {
+		s.mux.Handle("POST /api/v1/demo/reset", s.protect("platform.demo.reset", http.HandlerFunc(s.resetDemo)))
+	}
 }
 
 func (s *Server) protect(permission string, next http.Handler) http.Handler {
@@ -129,15 +147,28 @@ func (s *Server) live(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
-	s.json(w, http.StatusOK, map[string]interface{}{"status": "ready", "profile": "embedded-dev", "audit_chain_valid": s.store.VerifyAudit(core.DefaultTenantID)})
+	if err := s.store.Health(r.Context()); err != nil {
+		s.problem(w, r, http.StatusServiceUnavailable, "dependency_unavailable", "Service unavailable", "PostgreSQL is not ready.")
+		return
+	}
+	auditValid, err := s.store.VerifyAudit(r.Context(), core.DefaultTenantID)
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"status": "ready", "profile": s.profile, "audit_chain_valid": auditValid})
 }
 
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
-	overview := s.store.Overview(core.DefaultTenantID)
+	overview, err := s.store.Overview(r.Context(), core.DefaultTenantID)
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
 	metrics := overview["metrics"].(map[string]interface{})
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	fmt.Fprintf(w, "# HELP kcsp_uptime_seconds KCSP API process uptime.\n# TYPE kcsp_uptime_seconds gauge\nkcsp_uptime_seconds %.0f\n", time.Since(s.startedAt).Seconds())
-	fmt.Fprintf(w, "# HELP kcsp_events_total Events held by the embedded development adapter.\n# TYPE kcsp_events_total gauge\nkcsp_events_total %v\n", metrics["events_24h"])
+	fmt.Fprintf(w, "# HELP kcsp_events_total Events durably stored during the last 24 hours.\n# TYPE kcsp_events_total gauge\nkcsp_events_total %v\n", metrics["events_24h"])
 	fmt.Fprintf(w, "# HELP kcsp_open_alerts Open alerts.\n# TYPE kcsp_open_alerts gauge\nkcsp_open_alerts %v\n", metrics["open_alerts"])
 	fmt.Fprintf(w, "# HELP kcsp_active_incidents Active incidents.\n# TYPE kcsp_active_incidents gauge\nkcsp_active_incidents %v\n", metrics["active_incidents"])
 }
@@ -151,12 +182,17 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, map[string]interface{}{
 		"principal":   map[string]string{"id": principal.ID, "display_name": principal.DisplayName, "role": principal.Role},
 		"tenant":      map[string]string{"id": tenantFrom(r.Context()), "name": "K. Kulazhanov University"},
-		"permissions": permissions, "locale": "ru-KZ", "timezone": "Asia/Qyzylorda", "auth_mode": "demo",
+		"permissions": permissions, "locale": "ru-KZ", "timezone": "Asia/Qyzylorda", "auth_mode": s.authMode,
 	})
 }
 
 func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
-	s.json(w, http.StatusOK, s.store.Overview(tenantFrom(r.Context())))
+	overview, err := s.store.Overview(r.Context(), tenantFrom(r.Context()))
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, overview)
 }
 
 func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
@@ -164,12 +200,16 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 		Query: r.URL.Query().Get("q"), Category: r.URL.Query().Get("category"),
 		Severity: intQuery(r, "severity"), Limit: intQuery(r, "limit"),
 	}
-	items := s.store.ListEvents(tenantFrom(r.Context()), filter)
+	items, err := s.store.ListEvents(r.Context(), tenantFrom(r.Context()), filter)
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
 	s.json(w, http.StatusOK, map[string]interface{}{"items": items, "total": len(items)})
 }
 
 func (s *Server) getEvent(w http.ResponseWriter, r *http.Request) {
-	event, err := s.store.GetEvent(tenantFrom(r.Context()), r.PathValue("eventID"))
+	event, err := s.store.GetEvent(r.Context(), tenantFrom(r.Context()), r.PathValue("eventID"))
 	if err != nil {
 		s.handleDomainError(w, r, err)
 		return
@@ -197,20 +237,28 @@ func (s *Server) ingestEvent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listFindings(w http.ResponseWriter, r *http.Request) {
-	items := s.store.ListFindings(tenantFrom(r.Context()), r.URL.Query().Get("event_id"), intQuery(r, "limit"))
+	items, err := s.store.ListFindings(r.Context(), tenantFrom(r.Context()), r.URL.Query().Get("event_id"), intQuery(r, "limit"))
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
 	s.json(w, http.StatusOK, map[string]interface{}{"items": items, "total": len(items)})
 }
 
 func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
-	items := s.store.ListAlerts(tenantFrom(r.Context()), store.AlertFilter{
+	items, err := s.store.ListAlerts(r.Context(), tenantFrom(r.Context()), store.AlertFilter{
 		Status: r.URL.Query().Get("status"), Severity: core.Severity(strings.ToUpper(r.URL.Query().Get("severity"))),
 		Assignee: r.URL.Query().Get("assignee"), Query: r.URL.Query().Get("q"), Limit: intQuery(r, "limit"),
 	})
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
 	s.json(w, http.StatusOK, map[string]interface{}{"items": items, "total": len(items)})
 }
 
 func (s *Server) getAlert(w http.ResponseWriter, r *http.Request) {
-	alert, err := s.store.GetAlert(tenantFrom(r.Context()), r.PathValue("alertID"))
+	alert, err := s.store.GetAlert(r.Context(), tenantFrom(r.Context()), r.PathValue("alertID"))
 	if err != nil {
 		s.handleDomainError(w, r, err)
 		return
@@ -235,7 +283,7 @@ func (s *Server) updateAlert(w http.ResponseWriter, r *http.Request) {
 		request.Version = ifMatchVersion(r)
 	}
 	principal := principalFrom(r.Context())
-	alert, err := s.soc.UpdateAlert(tenantFrom(r.Context()), r.PathValue("alertID"), principal.ID, requestIDFrom(r.Context()), soc.AlertPatch{
+	alert, err := s.soc.UpdateAlert(r.Context(), tenantFrom(r.Context()), r.PathValue("alertID"), principal.ID, requestIDFrom(r.Context()), soc.AlertPatch{
 		Status: request.Status, Assignee: request.Assignee, Disposition: request.Disposition, Comment: request.Comment, Version: request.Version,
 	})
 	if err != nil {
@@ -247,15 +295,19 @@ func (s *Server) updateAlert(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listIncidents(w http.ResponseWriter, r *http.Request) {
-	items := s.store.ListIncidents(tenantFrom(r.Context()), store.IncidentFilter{
+	items, err := s.store.ListIncidents(r.Context(), tenantFrom(r.Context()), store.IncidentFilter{
 		Status: r.URL.Query().Get("status"), Severity: core.Severity(strings.ToUpper(r.URL.Query().Get("severity"))),
 		Query: r.URL.Query().Get("q"), Limit: intQuery(r, "limit"),
 	})
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
 	s.json(w, http.StatusOK, map[string]interface{}{"items": items, "total": len(items)})
 }
 
 func (s *Server) getIncident(w http.ResponseWriter, r *http.Request) {
-	incident, err := s.store.GetIncident(tenantFrom(r.Context()), r.PathValue("incidentID"))
+	incident, err := s.store.GetIncident(r.Context(), tenantFrom(r.Context()), r.PathValue("incidentID"))
 	if err != nil {
 		s.handleDomainError(w, r, err)
 		return
@@ -276,7 +328,7 @@ func (s *Server) createIncident(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal := principalFrom(r.Context())
-	incident, duplicate, err := s.soc.CreateIncident(tenantFrom(r.Context()), principal.ID, soc.CreateIncidentInput{
+	incident, duplicate, err := s.soc.CreateIncident(r.Context(), tenantFrom(r.Context()), principal.ID, soc.CreateIncidentInput{
 		Title: request.Title, Summary: request.Summary, Assignee: request.Assignee,
 		AlertIDs: request.AlertIDs, RequestID: requestIDFrom(r.Context()),
 	})
@@ -308,7 +360,7 @@ func (s *Server) updateIncident(w http.ResponseWriter, r *http.Request) {
 		request.Version = ifMatchVersion(r)
 	}
 	principal := principalFrom(r.Context())
-	incident, err := s.soc.UpdateIncident(tenantFrom(r.Context()), r.PathValue("incidentID"), principal.ID, soc.IncidentPatch{
+	incident, err := s.soc.UpdateIncident(r.Context(), tenantFrom(r.Context()), r.PathValue("incidentID"), principal.ID, soc.IncidentPatch{
 		Status: request.Status, Assignee: request.Assignee, Disposition: request.Disposition,
 		ClosureReason: request.ClosureReason, Comment: request.Comment, Version: request.Version, RequestID: requestIDFrom(r.Context()),
 	})
@@ -321,14 +373,27 @@ func (s *Server) updateIncident(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listRules(w http.ResponseWriter, r *http.Request) {
-	items := s.store.ListRules()
+	items, err := s.store.ListRules(r.Context())
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
 	s.json(w, http.StatusOK, map[string]interface{}{"items": items, "total": len(items)})
 }
 
 func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) {
 	tenantID := tenantFrom(r.Context())
-	items := s.store.ListAudit(tenantID, intQuery(r, "limit"))
-	s.json(w, http.StatusOK, map[string]interface{}{"items": items, "total": len(items), "chain_valid": s.store.VerifyAudit(tenantID)})
+	items, err := s.store.ListAudit(r.Context(), tenantID, intQuery(r, "limit"))
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	chainValid, err := s.store.VerifyAudit(r.Context(), tenantID)
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": items, "total": len(items), "chain_valid": chainValid})
 }
 
 func (s *Server) resetDemo(w http.ResponseWriter, r *http.Request) {

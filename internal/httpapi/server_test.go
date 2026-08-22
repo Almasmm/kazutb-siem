@@ -19,10 +19,7 @@ import (
 )
 
 func TestEndToEndIngestReadAndTenantDenial(t *testing.T) {
-	memory := store.NewMemory()
-	engine := pipeline.New(memory)
-	service := soc.New(memory)
-	handler := New(memory, engine, service, auth.NewDemoAuthenticator(), slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	_, _, handler := newTestStack(t)
 
 	payload := []byte(`{
 		"event_id":"http-e2e-1","category":"process_activity","activity_name":"Process created",
@@ -67,10 +64,7 @@ func TestEndToEndIngestReadAndTenantDenial(t *testing.T) {
 }
 
 func TestOptimisticConcurrencyReturnsPreconditionFailed(t *testing.T) {
-	memory := store.NewMemory()
-	engine := pipeline.New(memory)
-	service := soc.New(memory)
-	handler := New(memory, engine, service, auth.NewDemoAuthenticator(), slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	_, engine, handler := newTestStack(t)
 	result, err := engine.Ingest(context.Background(), "university-kulazhanov", mustEvent(t, `{
 		"event_id":"evt-version","category":"process_activity",
 		"source":{"vendor":"Microsoft","product":"Sysmon","type":"endpoint"},
@@ -91,10 +85,7 @@ func TestOptimisticConcurrencyReturnsPreconditionFailed(t *testing.T) {
 }
 
 func TestBodyLimitsAndMutationMassAssignmentProtection(t *testing.T) {
-	memory := store.NewMemory()
-	engine := pipeline.New(memory)
-	service := soc.New(memory)
-	handler := New(memory, engine, service, auth.NewDemoAuthenticator(), slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	_, engine, handler := newTestStack(t)
 
 	oversized := httptest.NewRequest(http.MethodPost, "/api/v1/events", strings.NewReader(`{"category":"`+strings.Repeat("x", (1<<20)+32)+`"}`))
 	oversized.Header.Set("Authorization", "Bearer kcsp-demo-collector")
@@ -129,4 +120,17 @@ func mustEvent(t *testing.T, value string) (event core.CanonicalEvent) {
 		t.Fatal(err)
 	}
 	return event
+}
+
+func newTestStack(t *testing.T) (*store.Memory, *pipeline.Engine, http.Handler) {
+	t.Helper()
+	memory := store.NewMemory()
+	repository := store.WrapMemory(memory)
+	engine, err := pipeline.New(context.Background(), repository)
+	if err != nil {
+		t.Fatalf("create detection engine: %v", err)
+	}
+	service := soc.New(repository)
+	handler := New(repository, engine, service, auth.NewDemoAuthenticator(), slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	return memory, engine, handler
 }

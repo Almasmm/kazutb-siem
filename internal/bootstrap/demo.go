@@ -12,14 +12,16 @@ import (
 )
 
 type DemoSeeder struct {
-	Store    *store.Memory
+	Store    store.Repository
 	Pipeline *pipeline.Engine
 	SOC      *soc.Service
 }
 
 func (s DemoSeeder) Seed(ctx context.Context) error {
 	tenantID := core.DefaultTenantID
-	s.Store.ResetTenant(tenantID)
+	if err := s.Store.ResetTenant(ctx, tenantID); err != nil {
+		return fmt.Errorf("reset demo tenant: %w", err)
+	}
 	s.Pipeline.ResetTenant(tenantID)
 	now := time.Now().UTC()
 
@@ -79,12 +81,15 @@ func (s DemoSeeder) Seed(ctx context.Context) error {
 		}
 	}
 
-	alerts := s.Store.ListAlerts(tenantID, store.AlertFilter{Limit: 100})
+	alerts, err := s.Store.ListAlerts(ctx, tenantID, store.AlertFilter{Limit: 100})
+	if err != nil {
+		return fmt.Errorf("list seeded alerts: %w", err)
+	}
 	for _, alert := range alerts {
 		if alert.Rule.ID != pipeline.PowerShellRuleID {
 			continue
 		}
-		incident, _, err := s.SOC.CreateIncident(tenantID, "system:demo-seed", soc.CreateIncidentInput{
+		incident, _, err := s.SOC.CreateIncident(ctx, tenantID, "system:demo-seed", soc.CreateIncidentInput{
 			Title:    "Possible PowerShell compromise on dc-01",
 			Summary:  "Encoded PowerShell and a download cradle executed under a privileged identity on a critical domain controller.",
 			Assignee: "Данияр Нұрлан", AlertIDs: []string{alert.ID}, RequestID: "demo-seed",
@@ -92,11 +97,11 @@ func (s DemoSeeder) Seed(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("seed incident: %w", err)
 		}
-		incident, err = s.SOC.UpdateIncident(tenantID, incident.ID, "system:demo-seed", soc.IncidentPatch{Status: "TRIAGE", Version: incident.Version, RequestID: "demo-seed"})
+		incident, err = s.SOC.UpdateIncident(ctx, tenantID, incident.ID, "system:demo-seed", soc.IncidentPatch{Status: "TRIAGE", Version: incident.Version, RequestID: "demo-seed"})
 		if err != nil {
 			return fmt.Errorf("seed incident triage: %w", err)
 		}
-		_, err = s.SOC.UpdateIncident(tenantID, incident.ID, "system:demo-seed", soc.IncidentPatch{
+		_, err = s.SOC.UpdateIncident(ctx, tenantID, incident.ID, "system:demo-seed", soc.IncidentPatch{
 			Status: "INVESTIGATION", Comment: "Scope review started; preserving endpoint and identity telemetry.", Version: incident.Version, RequestID: "demo-seed",
 		})
 		if err != nil {
@@ -104,9 +109,11 @@ func (s DemoSeeder) Seed(ctx context.Context) error {
 		}
 		break
 	}
-	s.Store.AppendAudit(core.AuditEntry{
+	if _, err := s.Store.AppendAudit(ctx, core.AuditEntry{
 		TenantID: tenantID, Actor: "system:bootstrap", Action: "demo.seeded", ResourceType: "tenant", ResourceID: tenantID,
 		Outcome: "success", Metadata: map[string]interface{}{"profile": "embedded-dev", "events": len(events)},
-	})
+	}); err != nil {
+		return fmt.Errorf("append demo audit: %w", err)
+	}
 	return nil
 }

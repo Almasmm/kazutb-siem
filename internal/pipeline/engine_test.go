@@ -11,7 +11,7 @@ import (
 
 func TestSuspiciousPowerShellCreatesExplainableFindingAndAlert(t *testing.T) {
 	memory := store.NewMemory()
-	engine := New(memory)
+	engine := newTestEngine(t, memory)
 	result, err := engine.Ingest(context.Background(), "tenant-a", core.CanonicalEvent{
 		ID: "evt-1", EventTime: time.Now().UTC(), Category: "process_activity", ActivityName: "Process created",
 		Source:  core.EventSource{Vendor: "Microsoft", Product: "Sysmon", Type: "endpoint"},
@@ -44,7 +44,7 @@ func TestSuspiciousPowerShellCreatesExplainableFindingAndAlert(t *testing.T) {
 
 func TestBenignPowerShellIsStoredWithoutDetection(t *testing.T) {
 	memory := store.NewMemory()
-	engine := New(memory)
+	engine := newTestEngine(t, memory)
 	result, err := engine.Ingest(context.Background(), "tenant-a", core.CanonicalEvent{
 		ID: "evt-benign", Category: "process_activity",
 		Source:  core.EventSource{Vendor: "Microsoft", Product: "Sysmon", Type: "endpoint"},
@@ -63,7 +63,7 @@ func TestBenignPowerShellIsStoredWithoutDetection(t *testing.T) {
 
 func TestEventIDIsIdempotentPerTenant(t *testing.T) {
 	memory := store.NewMemory()
-	engine := New(memory)
+	engine := newTestEngine(t, memory)
 	event := core.CanonicalEvent{
 		ID: "stable-source-event", Category: "process_activity",
 		Source:  core.EventSource{Vendor: "Microsoft", Product: "Sysmon", Type: "endpoint"},
@@ -93,7 +93,7 @@ func TestEventIDIsIdempotentPerTenant(t *testing.T) {
 
 func TestAuthenticationThresholdFiresOnFifthFailure(t *testing.T) {
 	memory := store.NewMemory()
-	engine := New(memory)
+	engine := newTestEngine(t, memory)
 	now := time.Now().UTC()
 	for i := 0; i < 5; i++ {
 		result, err := engine.Ingest(context.Background(), "tenant-a", core.CanonicalEvent{
@@ -118,7 +118,7 @@ func TestAuthenticationThresholdFiresOnFifthFailure(t *testing.T) {
 
 func TestTenantComesFromAuthenticatedContextNotPayload(t *testing.T) {
 	memory := store.NewMemory()
-	engine := New(memory)
+	engine := newTestEngine(t, memory)
 	result, err := engine.Ingest(context.Background(), "tenant-a", core.CanonicalEvent{
 		ID: "evt-spoof", TenantID: "tenant-b", Category: "network_activity",
 		Source: core.EventSource{Vendor: "Test", Product: "Fixture", Type: "network"},
@@ -141,4 +141,13 @@ func hasFactor(factors []core.RiskFactor, code string) bool {
 		}
 	}
 	return false
+}
+
+func newTestEngine(t *testing.T, memory *store.Memory) *Engine {
+	t.Helper()
+	engine, err := New(context.Background(), store.WrapMemory(memory))
+	if err != nil {
+		t.Fatalf("create detection engine: %v", err)
+	}
+	return engine
 }
