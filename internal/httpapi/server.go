@@ -175,6 +175,10 @@ func (s *Server) routes() {
 		s.mux.Handle("GET /api/v1/soar/executions", s.protect("soar.playbooks.read", http.HandlerFunc(s.listSOARExecutions)))
 		s.mux.Handle("POST /api/v1/soar/executions", s.protect("soar.playbooks.execute", http.HandlerFunc(s.startSOARExecution)))
 		s.mux.Handle("GET /api/v1/soar/executions/{executionID}", s.protect("soar.playbooks.read", http.HandlerFunc(s.getSOARExecution)))
+		s.mux.Handle("POST /api/v1/soar/executions/{executionID}/nodes/{nodeID}/complete", s.protect("soar.playbooks.execute", http.HandlerFunc(s.completeSOARManualTask)))
+		s.mux.Handle("GET /api/v1/soar/approvals", s.protect("soar.actions.approve", http.HandlerFunc(s.listSOARApprovals)))
+		s.mux.Handle("POST /api/v1/soar/approvals/{approvalID}/decisions", s.protect("soar.actions.approve", http.HandlerFunc(s.decideSOARApproval)))
+		s.mux.Handle("GET /api/v1/soar/action-attempts", s.protect("soar.playbooks.read", http.HandlerFunc(s.listSOARActionAttempts)))
 	}
 	s.mux.Handle("GET /api/v1/findings", s.protect("siem.findings.read", http.HandlerFunc(s.listFindings)))
 	s.mux.Handle("GET /api/v1/alerts", s.protect("soc.alerts.read", http.HandlerFunc(s.listAlerts)))

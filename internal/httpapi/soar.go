@@ -174,6 +174,74 @@ func (s *Server) getSOARExecution(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, execution)
 }
 
+func (s *Server) listSOARApprovals(w http.ResponseWriter, r *http.Request) {
+	items, err := s.soar.Approvals(r.Context(), tenantFrom(r.Context()), core.SOARApprovalFilter{
+		Status:      strings.TrimSpace(r.URL.Query().Get("status")),
+		ExecutionID: strings.TrimSpace(r.URL.Query().Get("execution_id")), Limit: intQuery(r, "limit"),
+	})
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": items, "total": len(items)})
+}
+
+func (s *Server) decideSOARApproval(w http.ResponseWriter, r *http.Request) {
+	var request soar.ApprovalDecisionRequest
+	if err := decodeJSON(w, r, &request); err != nil {
+		s.handleDecodeError(w, r, "Invalid SOAR approval decision", err)
+		return
+	}
+	principal := principalFrom(r.Context())
+	approval, err := s.soar.DecideApproval(r.Context(), tenantFrom(r.Context()),
+		r.PathValue("approvalID"), principal.ID, request)
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	if err := s.auditSOAR(r, principal.ID, "soar.approval."+strings.ToLower(request.Decision),
+		"soar_approval", approval.ID, map[string]interface{}{
+			"execution_id": approval.ExecutionID, "status": approval.Status, "risk_level": approval.RiskLevel,
+		}); err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, approval)
+}
+
+func (s *Server) completeSOARManualTask(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Output map[string]interface{} `json:"output"`
+	}
+	if err := decodeJSON(w, r, &request); err != nil {
+		s.handleDecodeError(w, r, "Invalid SOAR manual task completion", err)
+		return
+	}
+	principal := principalFrom(r.Context())
+	execution, err := s.soar.CompleteManualTask(r.Context(), tenantFrom(r.Context()),
+		r.PathValue("executionID"), r.PathValue("nodeID"), principal.ID, request.Output)
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	if err := s.auditSOAR(r, principal.ID, "soar.manual_task.completed", "soar_execution", execution.ID,
+		map[string]interface{}{"node_id": r.PathValue("nodeID"), "status": execution.Status}); err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, execution)
+}
+
+func (s *Server) listSOARActionAttempts(w http.ResponseWriter, r *http.Request) {
+	items, err := s.soar.ActionAttempts(r.Context(), tenantFrom(r.Context()),
+		strings.TrimSpace(r.URL.Query().Get("execution_id")), intQuery(r, "limit"))
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": items, "total": len(items)})
+}
+
 func (s *Server) auditSOAR(r *http.Request, actor, action, resourceType, resourceID string, metadata map[string]interface{}) error {
 	_, err := s.store.AppendAudit(r.Context(), core.AuditEntry{
 		TenantID: tenantFrom(r.Context()), Actor: actor, Action: action, ResourceType: resourceType,

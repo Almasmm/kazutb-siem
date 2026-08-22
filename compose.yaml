@@ -177,6 +177,28 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  soar-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    command: ["/usr/local/bin/kcsp-soar-worker"]
+    environment:
+      KCSP_DATABASE_URL: postgres://kcsp:${KCSP_POSTGRES_PASSWORD}@postgres:5432/kcsp?sslmode=disable
+      KCSP_SOAR_WORKER_ID: kcsp-soar-worker-1
+      KCSP_SOAR_POLL_INTERVAL: 500ms
+      KCSP_SOAR_LEASE_DURATION: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   web:
     build:
       context: ./apps/web

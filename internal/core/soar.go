@@ -137,26 +137,82 @@ type SOARExecution struct {
 }
 
 type SOARNodeExecution struct {
-	ID          string                 `json:"node_execution_id"`
-	TenantID    string                 `json:"tenant_id"`
-	ExecutionID string                 `json:"execution_id"`
-	NodeID      string                 `json:"node_id"`
-	NodeType    string                 `json:"node_type"`
-	NodeName    string                 `json:"node_name"`
-	DependsOn   []string               `json:"depends_on"`
-	Config      map[string]interface{} `json:"config"`
-	Status      string                 `json:"status"`
-	Attempt     int                    `json:"attempt"`
-	AvailableAt time.Time              `json:"available_at"`
-	Output      map[string]interface{} `json:"output,omitempty"`
-	ErrorCode   string                 `json:"error_code,omitempty"`
-	ErrorDetail string                 `json:"error_detail,omitempty"`
-	LeaseOwner  string                 `json:"lease_owner,omitempty"`
-	LeaseUntil  *time.Time             `json:"lease_until,omitempty"`
-	StartedAt   *time.Time             `json:"started_at,omitempty"`
-	CompletedAt *time.Time             `json:"completed_at,omitempty"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
+	ID             string                 `json:"node_execution_id"`
+	TenantID       string                 `json:"tenant_id"`
+	ExecutionID    string                 `json:"execution_id"`
+	NodeID         string                 `json:"node_id"`
+	NodeType       string                 `json:"node_type"`
+	NodeName       string                 `json:"node_name"`
+	DependsOn      []string               `json:"depends_on"`
+	Config         map[string]interface{} `json:"config"`
+	TimeoutSeconds int                    `json:"timeout_seconds"`
+	Retry          SOARRetryPolicy        `json:"retry"`
+	Status         string                 `json:"status"`
+	Attempt        int                    `json:"attempt"`
+	AvailableAt    time.Time              `json:"available_at"`
+	Output         map[string]interface{} `json:"output,omitempty"`
+	ErrorCode      string                 `json:"error_code,omitempty"`
+	ErrorDetail    string                 `json:"error_detail,omitempty"`
+	LeaseOwner     string                 `json:"lease_owner,omitempty"`
+	LeaseUntil     *time.Time             `json:"lease_until,omitempty"`
+	StartedAt      *time.Time             `json:"started_at,omitempty"`
+	CompletedAt    *time.Time             `json:"completed_at,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
+}
+
+type SOARWorkItem struct {
+	Execution SOARExecution     `json:"execution"`
+	Node      SOARNodeExecution `json:"node"`
+}
+
+type SOARApprovalDecision struct {
+	Approver  string    `json:"approver"`
+	Decision  string    `json:"decision"`
+	Reason    string    `json:"reason"`
+	DecidedAt time.Time `json:"decided_at"`
+}
+
+type SOARApproval struct {
+	ID                string                 `json:"approval_id"`
+	TenantID          string                 `json:"tenant_id"`
+	ExecutionID       string                 `json:"execution_id"`
+	NodeExecutionID   string                 `json:"node_execution_id"`
+	RiskLevel         int                    `json:"risk_level"`
+	RequiredApprovals int                    `json:"required_approvals"`
+	Status            string                 `json:"status"`
+	RequestedBy       string                 `json:"requested_by"`
+	RequestedAt       time.Time              `json:"requested_at"`
+	ExpiresAt         time.Time              `json:"expires_at"`
+	DecidedAt         *time.Time             `json:"decided_at,omitempty"`
+	Decisions         []SOARApprovalDecision `json:"decisions"`
+}
+
+type SOARApprovalFilter struct {
+	Status      string
+	ExecutionID string
+	Limit       int
+}
+
+type SOARActionAttempt struct {
+	ID                 string                 `json:"action_attempt_id"`
+	TenantID           string                 `json:"tenant_id"`
+	ExecutionID        string                 `json:"execution_id"`
+	NodeExecutionID    string                 `json:"node_execution_id"`
+	IdempotencyKey     string                 `json:"idempotency_key"`
+	ConnectorID        string                 `json:"connector_id"`
+	ActionType         string                 `json:"action_type"`
+	RiskLevel          int                    `json:"risk_level"`
+	Mode               string                 `json:"mode"`
+	Status             string                 `json:"status"`
+	Request            map[string]interface{} `json:"request"`
+	Result             map[string]interface{} `json:"result"`
+	ErrorClass         string                 `json:"error_class,omitempty"`
+	ErrorDetail        string                 `json:"error_detail,omitempty"`
+	VerificationStatus string                 `json:"verification_status,omitempty"`
+	CompensationStatus string                 `json:"compensation_status,omitempty"`
+	CreatedAt          time.Time              `json:"created_at"`
+	UpdatedAt          time.Time              `json:"updated_at"`
 }
 
 type SOARExecutionFilter struct {

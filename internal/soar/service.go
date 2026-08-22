@@ -23,6 +23,13 @@ type Store interface {
 	ListSOARExecutions(context.Context, string, core.SOARExecutionFilter) ([]core.SOARExecution, error)
 }
 
+type RuntimeControlStore interface {
+	ListSOARApprovals(context.Context, string, core.SOARApprovalFilter) ([]core.SOARApproval, error)
+	DecideSOARApproval(context.Context, string, string, string, string, string) (core.SOARApproval, error)
+	CompleteSOARManualTask(context.Context, string, string, string, map[string]interface{}) (core.SOARExecution, error)
+	ListSOARActionAttempts(context.Context, string, string, int) ([]core.SOARActionAttempt, error)
+}
+
 type Service struct {
 	store     Store
 	validator *Validator
@@ -42,6 +49,11 @@ type ExecutionRequest struct {
 	TriggerResourceType string                 `json:"trigger_resource_type,omitempty"`
 	TriggerResourceID   string                 `json:"trigger_resource_id,omitempty"`
 	Context             map[string]interface{} `json:"context,omitempty"`
+}
+
+type ApprovalDecisionRequest struct {
+	Decision string `json:"decision"`
+	Reason   string `json:"reason"`
 }
 
 func NewService(store Store, validator *Validator) *Service {
@@ -182,4 +194,96 @@ func (s *Service) Executions(ctx context.Context, tenantID string, filter core.S
 	}
 	filter.Status = strings.ToUpper(strings.TrimSpace(filter.Status))
 	return s.store.ListSOARExecutions(ctx, tenantID, filter)
+}
+
+func (s *Service) Approvals(ctx context.Context, tenantID string, filter core.SOARApprovalFilter) ([]core.SOARApproval, error) {
+	runtimeStore, err := s.runtimeControlStore()
+	if err != nil {
+		return nil, err
+	}
+	filter.Status = strings.ToUpper(strings.TrimSpace(filter.Status))
+	switch filter.Status {
+	case "", "PENDING", "APPROVED", "REJECTED", "EXPIRED", "CANCELLED":
+	default:
+		return nil, fmt.Errorf("%w: unsupported approval status", ErrInvalidExecution)
+	}
+	filter.ExecutionID = strings.TrimSpace(filter.ExecutionID)
+	if filter.Limit <= 0 {
+		filter.Limit = 100
+	}
+	if filter.Limit > 500 {
+		filter.Limit = 500
+	}
+	return runtimeStore.ListSOARApprovals(ctx, tenantID, filter)
+}
+
+func (s *Service) DecideApproval(ctx context.Context, tenantID, approvalID, actor string,
+	request ApprovalDecisionRequest) (core.SOARApproval, error) {
+	runtimeStore, err := s.runtimeControlStore()
+	if err != nil {
+		return core.SOARApproval{}, err
+	}
+	approvalID = strings.TrimSpace(approvalID)
+	actor = strings.TrimSpace(actor)
+	request.Decision = strings.ToUpper(strings.TrimSpace(request.Decision))
+	request.Reason = strings.TrimSpace(request.Reason)
+	if approvalID == "" || actor == "" || (request.Decision != "APPROVE" && request.Decision != "REJECT") ||
+		len(request.Reason) < 2 || len(request.Reason) > 2000 {
+		return core.SOARApproval{}, fmt.Errorf("%w: approval, actor, APPROVE/REJECT, and a 2-2000 character reason are required", ErrInvalidExecution)
+	}
+	return runtimeStore.DecideSOARApproval(ctx, tenantID, approvalID, actor, request.Decision, request.Reason)
+}
+
+func (s *Service) CompleteManualTask(ctx context.Context, tenantID, executionID, nodeID, actor string,
+	output map[string]interface{}) (core.SOARExecution, error) {
+	runtimeStore, err := s.runtimeControlStore()
+	if err != nil {
+		return core.SOARExecution{}, err
+	}
+	executionID = strings.TrimSpace(executionID)
+	nodeID = strings.TrimSpace(nodeID)
+	actor = strings.TrimSpace(actor)
+	if executionID == "" || nodeID == "" || actor == "" {
+		return core.SOARExecution{}, fmt.Errorf("%w: execution, node, and actor are required", ErrInvalidExecution)
+	}
+	if output == nil {
+		output = map[string]interface{}{}
+	}
+	payload, err := json.Marshal(output)
+	if err != nil || len(payload) > 1<<20 {
+		return core.SOARExecution{}, fmt.Errorf("%w: manual task output must be valid JSON smaller than 1 MiB", ErrInvalidExecution)
+	}
+	snapshot := make(map[string]interface{}, len(output)+2)
+	for key, value := range output {
+		snapshot[key] = value
+	}
+	snapshot["completed_by"] = actor
+	snapshot["completed_at"] = s.now()
+	return runtimeStore.CompleteSOARManualTask(ctx, tenantID, executionID, nodeID, snapshot)
+}
+
+func (s *Service) ActionAttempts(ctx context.Context, tenantID, executionID string, limit int) ([]core.SOARActionAttempt, error) {
+	runtimeStore, err := s.runtimeControlStore()
+	if err != nil {
+		return nil, err
+	}
+	executionID = strings.TrimSpace(executionID)
+	if executionID == "" {
+		return nil, fmt.Errorf("%w: execution_id is required", ErrInvalidExecution)
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	return runtimeStore.ListSOARActionAttempts(ctx, tenantID, executionID, limit)
+}
+
+func (s *Service) runtimeControlStore() (RuntimeControlStore, error) {
+	runtimeStore, ok := s.store.(RuntimeControlStore)
+	if !ok {
+		return nil, fmt.Errorf("%w: durable SOAR runtime control is unavailable", ErrInvalidState)
+	}
+	return runtimeStore, nil
 }

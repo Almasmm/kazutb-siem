@@ -25,7 +25,7 @@ const soarExecutionColumns = `tenant_id,execution_id,playbook_id,playbook_versio
 	started_at,completed_at`
 
 const soarNodeColumns = `tenant_id,node_execution_id,execution_id,node_id,node_type,node_name,depends_on,
-	config,status,attempt,available_at,output,error_code,error_detail,lease_owner,lease_until,started_at,
+	config,timeout_seconds,retry_policy,status,attempt,available_at,output,error_code,error_detail,lease_owner,lease_until,started_at,
 	completed_at,created_at,updated_at`
 
 func (p *Postgres) CreateSOARPlaybook(ctx context.Context, playbook core.SOARPlaybook, version core.SOARPlaybookVersion) (core.SOARPlaybookDetails, error) {
@@ -278,18 +278,40 @@ func (p *Postgres) CreateSOARExecution(ctx context.Context, execution core.SOARE
 		if nodeConfig == nil {
 			nodeConfig = map[string]interface{}{}
 		}
+		timeoutSeconds := node.TimeoutSeconds
+		if timeoutSeconds <= 0 {
+			timeoutSeconds = 60
+		}
+		retryPolicy := node.Retry
+		if retryPolicy.MaximumAttempts <= 0 {
+			retryPolicy.MaximumAttempts = 1
+		}
+		if retryPolicy.BackoffSeconds <= 0 {
+			retryPolicy.BackoffSeconds = 1
+		}
+		if retryPolicy.MaximumBackoff <= 0 {
+			retryPolicy.MaximumBackoff = 60
+		}
+		if retryPolicy.MaximumBackoff < retryPolicy.BackoffSeconds {
+			retryPolicy.MaximumBackoff = retryPolicy.BackoffSeconds
+		}
 		dependsOn, _ := json.Marshal(dependencies)
 		config, _ := json.Marshal(nodeConfig)
+		retry, err := json.Marshal(retryPolicy)
+		if err != nil {
+			return core.SOARExecution{}, false, fmt.Errorf("encode SOAR retry policy %s: %w", node.ID, err)
+		}
 		status := "PENDING"
 		if len(node.DependsOn) == 0 {
 			status = "READY"
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO soar_node_executions(
-			tenant_id,node_execution_id,execution_id,node_id,node_type,node_name,depends_on,config,status,
+			tenant_id,node_execution_id,execution_id,node_id,node_type,node_name,depends_on,config,
+			timeout_seconds,retry_policy,status,
 			attempt,available_at,created_at,updated_at)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$10,$10)`,
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,0,$12,$12,$12)`,
 			execution.TenantID, core.NewID("snx"), execution.ID, node.ID, node.Type, node.Name,
-			dependsOn, config, status, execution.CreatedAt); err != nil {
+			dependsOn, config, timeoutSeconds, retry, status, execution.CreatedAt); err != nil {
 			return core.SOARExecution{}, false, fmt.Errorf("insert SOAR node snapshot %s: %w", node.ID, err)
 		}
 	}
@@ -415,10 +437,10 @@ func scanSOARExecution(row threatRow) (core.SOARExecution, error) {
 
 func scanSOARNodeExecution(row threatRow) (core.SOARNodeExecution, error) {
 	var item core.SOARNodeExecution
-	var dependsOn, config, output []byte
+	var dependsOn, config, retry, output []byte
 	err := row.Scan(&item.TenantID, &item.ID, &item.ExecutionID, &item.NodeID, &item.NodeType,
-		&item.NodeName, &dependsOn, &config, &item.Status, &item.Attempt, &item.AvailableAt, &output,
-		&item.ErrorCode, &item.ErrorDetail, &item.LeaseOwner, &item.LeaseUntil, &item.StartedAt,
+		&item.NodeName, &dependsOn, &config, &item.TimeoutSeconds, &retry, &item.Status, &item.Attempt,
+		&item.AvailableAt, &output, &item.ErrorCode, &item.ErrorDetail, &item.LeaseOwner, &item.LeaseUntil, &item.StartedAt,
 		&item.CompletedAt, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return core.SOARNodeExecution{}, err
@@ -428,6 +450,9 @@ func scanSOARNodeExecution(row threatRow) (core.SOARNodeExecution, error) {
 	}
 	if err := json.Unmarshal(config, &item.Config); err != nil {
 		return core.SOARNodeExecution{}, fmt.Errorf("decode SOAR node configuration: %w", err)
+	}
+	if err := json.Unmarshal(retry, &item.Retry); err != nil {
+		return core.SOARNodeExecution{}, fmt.Errorf("decode SOAR node retry policy: %w", err)
 	}
 	if err := json.Unmarshal(output, &item.Output); err != nil {
 		return core.SOARNodeExecution{}, fmt.Errorf("decode SOAR node output: %w", err)
