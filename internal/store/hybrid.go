@@ -258,6 +258,18 @@ func (h *Hybrid) MatchThreatIntelEvent(ctx context.Context, event core.Canonical
 	observables := threatintel.ExtractObservables(event)
 	return h.control.MatchThreatIntelObservables(ctx, event.TenantID, event.ID, event.EventTime, observables)
 }
+func (h *Hybrid) ObserveUEBAEvent(ctx context.Context, event core.CanonicalEvent) (*core.UEBAAnomaly, error) {
+	return h.control.ObserveUEBAEvent(ctx, event)
+}
+func (h *Hybrid) ListUEBAAnomalies(ctx context.Context, tenantID string, filter core.UEBAAnomalyFilter) ([]core.UEBAAnomaly, error) {
+	return h.control.ListUEBAAnomalies(ctx, tenantID, filter)
+}
+func (h *Hybrid) GetUEBABaseline(ctx context.Context, tenantID, entityType, entityID string) (core.UEBABaselineSummary, error) {
+	return h.control.GetUEBABaseline(ctx, tenantID, entityType, entityID)
+}
+func (h *Hybrid) UpdateUEBAAnomalyFeedback(ctx context.Context, tenantID, anomalyID, status, actor, reason string, version int) (core.UEBAAnomaly, error) {
+	return h.control.UpdateUEBAAnomalyFeedback(ctx, tenantID, anomalyID, status, actor, reason, version)
+}
 func (h *Hybrid) RetrosearchThreatIndicator(ctx context.Context, indicator core.ThreatIndicator, request core.ThreatIntelRetrosearchRequest) (core.ThreatIntelRetrosearchResult, error) {
 	started := time.Now()
 	expression, err := threatintel.RetrosearchExpression(indicator)

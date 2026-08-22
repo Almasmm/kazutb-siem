@@ -21,6 +21,7 @@ const (
 	PowerShellRuleID  = "KCSP-WIN-PS-001"
 	AuthRuleID        = "KCSP-AUTH-THRESHOLD-001"
 	ThreatIntelRuleID = "KCSP-TI-IOC-MATCH"
+	UEBARuleID        = "KCSP-UEBA-BEHAVIOR-DEVIATION"
 	authBaseRuleID    = "KCSP-AUTH-FAILURE-BASE"
 )
 
@@ -49,6 +50,10 @@ type threatIntelProvider interface {
 	MatchThreatIntelEvent(context.Context, core.CanonicalEvent) ([]core.ThreatIntelMatch, error)
 }
 
+type uebaProvider interface {
+	ObserveUEBAEvent(context.Context, core.CanonicalEvent) (*core.UEBAAnomaly, error)
+}
+
 // Repository is the data-plane port used by the embedded executor. Production
 // adapters can route events/findings to ClickHouse and control objects to PostgreSQL
 // without leaking those SDK types into the domain pipeline.
@@ -66,6 +71,7 @@ type detectionMatch struct {
 	Factors            []core.RiskFactor
 	EventIDs           []string
 	DedupDiscriminator string
+	ReferenceID        string
 }
 
 func New(ctx context.Context, repository Repository) (*Engine, error) {
@@ -94,6 +100,14 @@ func New(ctx context.Context, repository Repository) (*Engine, error) {
 			MITRE: []string{}, RequiredDataSources: []string{"Threat Intelligence", "Normalized security events"},
 			KnownFalsePositives: []string{"Shared infrastructure, stale intelligence, or low-confidence community feeds"},
 			Owner:               "KCSP Threat Intelligence", State: "PUBLISHED", UpdatedAt: now,
+		},
+		{
+			ID: UEBARuleID, Title: "Explainable behavior deviation",
+			Description: "Detects deterministic deviations from tenant-scoped rolling user and device baselines.",
+			Version:     "1.0.0", Severity: core.SeverityHigh, Confidence: 70,
+			MITRE: []string{}, RequiredDataSources: []string{"Normalized identity, endpoint, network, and process telemetry"},
+			KnownFalsePositives: []string{"Role changes, travel, onboarding, and newly deployed administrative tooling"},
+			Owner:               "KCSP UEBA", State: "PUBLISHED", UpdatedAt: now,
 		},
 	}
 	byID := make(map[string]core.DetectionRule, len(rules))
@@ -152,8 +166,11 @@ func (e *Engine) Ingest(ctx context.Context, tenantID string, input core.Canonic
 			action = "alert.created"
 		}
 		auditMetadata := map[string]interface{}{"event_id": stored.ID, "rule_id": finding.Rule.ID, "risk_score": finding.RiskScore}
-		if match.DedupDiscriminator != "" {
-			auditMetadata["threat_indicator_id"] = match.DedupDiscriminator
+		if match.Rule.ID == ThreatIntelRuleID && match.ReferenceID != "" {
+			auditMetadata["threat_indicator_id"] = match.ReferenceID
+		}
+		if match.Rule.ID == UEBARuleID && match.ReferenceID != "" {
+			auditMetadata["ueba_anomaly_id"] = match.ReferenceID
 		}
 		if _, err := e.store.AppendAudit(ctx, core.AuditEntry{
 			TenantID: tenantID, Actor: "system:detection-engine", Action: action,
@@ -220,7 +237,7 @@ func normalize(tenantID string, input core.CanonicalEvent) (core.CanonicalEvent,
 }
 
 func (e *Engine) detect(ctx context.Context, event core.CanonicalEvent) ([]detectionMatch, error) {
-	matches := make([]detectionMatch, 0, 2)
+	matches := make([]detectionMatch, 0, 3)
 	matchedRuleIDs := map[string]bool{}
 	if matchedFields, tokenFactors := suspiciousPowerShell(event); len(matchedFields) > 0 {
 		factors := []core.RiskFactor{
@@ -244,6 +261,13 @@ func (e *Engine) detect(ctx context.Context, event core.CanonicalEvent) ([]detec
 		return nil, fmt.Errorf("evaluate threat intelligence: %w", err)
 	}
 	matches = append(matches, threatMatches...)
+	behaviorMatch, err := e.matchUEBA(ctx, event)
+	if err != nil {
+		return nil, fmt.Errorf("evaluate behavior baseline: %w", err)
+	}
+	if behaviorMatch != nil {
+		matches = append(matches, *behaviorMatch)
+	}
 	dynamicRules, err := e.rulesForTenant(ctx, event.TenantID)
 	if err != nil {
 		return nil, fmt.Errorf("load published detection content: %w", err)
@@ -369,10 +393,39 @@ func (e *Engine) matchThreatIntelligence(ctx context.Context, event core.Canonic
 		factors = append(factors, contextFactors(event)...)
 		matches = append(matches, detectionMatch{
 			Rule: rule, MatchedFields: item.fields, Factors: factors,
-			EventIDs: []string{event.ID}, DedupDiscriminator: indicator.IndicatorID,
+			EventIDs: []string{event.ID}, DedupDiscriminator: indicator.IndicatorID, ReferenceID: indicator.IndicatorID,
 		})
 	}
 	return matches, nil
+}
+
+func (e *Engine) matchUEBA(ctx context.Context, event core.CanonicalEvent) (*detectionMatch, error) {
+	provider, ok := e.store.(uebaProvider)
+	if !ok {
+		return nil, nil
+	}
+	anomaly, err := provider.ObserveUEBAEvent(ctx, event)
+	if err != nil || anomaly == nil {
+		return nil, err
+	}
+	rule := e.rules[UEBARuleID]
+	rule.Title = anomaly.Title
+	rule.Severity = anomaly.Severity
+	rule.Confidence = anomaly.Confidence
+	fields := make([]string, 0, len(anomaly.Features))
+	seen := map[string]bool{}
+	for _, feature := range anomaly.Features {
+		if feature.Field != "" && !seen[feature.Field] {
+			fields = append(fields, feature.Field)
+			seen[feature.Field] = true
+		}
+	}
+	return &detectionMatch{
+		Rule: rule, MatchedFields: fields, EventIDs: []string{event.ID},
+		Factors: []core.RiskFactor{{Code: "behavior_anomaly", Label: "Explainable rolling-baseline deviation",
+			Delta: min(75, max(0, anomaly.RiskScore)), SourceReference: anomaly.ID}},
+		DedupDiscriminator: anomaly.EntityType + ":" + anomaly.EntityID, ReferenceID: anomaly.ID,
+	}, nil
 }
 
 func (e *Engine) rulesForTenant(ctx context.Context, tenantID string) ([]*detection.CompiledRule, error) {

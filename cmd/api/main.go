@@ -25,6 +25,7 @@ import (
 	"github.com/kcsp/platform/internal/soc"
 	"github.com/kcsp/platform/internal/store"
 	"github.com/kcsp/platform/internal/threatintel"
+	"github.com/kcsp/platform/internal/ueba"
 )
 
 func main() {
@@ -89,6 +90,7 @@ func run(logger *slog.Logger) error {
 	evidenceService := evidence.NewService(repository, blobStore, evidence.Config{MaximumBytes: maximumEvidenceBytes})
 	threatIntelService := threatintel.NewService(repository)
 	soarService := soar.NewService(repository, nil)
+	uebaService := ueba.NewService(repository)
 	publisher, err := ingest.OpenKafkaPublisher(startupContext, kafkaConfig("kcsp-api"))
 	if err != nil {
 		return err
@@ -126,6 +128,7 @@ func run(logger *slog.Logger) error {
 			EvidenceService:    evidenceService,
 			ThreatIntelService: threatIntelService,
 			SOARService:        soarService,
+			UEBAService:        uebaService,
 			RequireRegisteredCollectors: strings.EqualFold(
 				envOr("KCSP_REQUIRE_REGISTERED_COLLECTORS", strconv.FormatBool(authMode == "oidc")), "true",
 			),

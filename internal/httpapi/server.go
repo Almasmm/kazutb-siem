@@ -24,6 +24,7 @@ import (
 	"github.com/kcsp/platform/internal/soc"
 	"github.com/kcsp/platform/internal/store"
 	"github.com/kcsp/platform/internal/threatintel"
+	"github.com/kcsp/platform/internal/ueba"
 )
 
 type contextKey string
@@ -55,6 +56,7 @@ type Server struct {
 	evidence          *evidence.Service
 	threatIntel       *threatintel.Service
 	soar              *soar.Service
+	ueba              *ueba.Service
 }
 
 type Authenticator interface {
@@ -74,6 +76,7 @@ type Config struct {
 	EvidenceService             *evidence.Service
 	ThreatIntelService          *threatintel.Service
 	SOARService                 *soar.Service
+	UEBAService                 *ueba.Service
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -88,7 +91,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		gateway: config.Gateway, allowDirectIngest: config.AllowDirectIngest,
 		collectors: config.CollectorRegistry, requireCollectors: config.RequireRegisteredCollectors,
 		detections: config.DetectionService, hunts: config.HuntStore, retention: config.RetentionStore,
-		evidence: config.EvidenceService, threatIntel: config.ThreatIntelService, soar: config.SOARService,
+		evidence: config.EvidenceService, threatIntel: config.ThreatIntelService, soar: config.SOARService, ueba: config.UEBAService,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -186,6 +189,11 @@ func (s *Server) routes() {
 		s.mux.Handle("POST /api/v1/soar/connectors/{connectorID}/disable", s.protect("soar.connectors.manage", http.HandlerFunc(s.disableSOARConnector)))
 		s.mux.Handle("POST /api/v1/soar/connectors/{connectorID}/tests", s.protect("soar.connectors.test", http.HandlerFunc(s.queueSOARConnectorTest)))
 		s.mux.Handle("GET /api/v1/soar/connectors/{connectorID}/tests", s.protect("soar.connectors.read", http.HandlerFunc(s.listSOARConnectorTests)))
+	}
+	if s.ueba != nil {
+		s.mux.Handle("GET /api/v1/ueba/anomalies", s.protect("ueba.read", http.HandlerFunc(s.listUEBAAnomalies)))
+		s.mux.Handle("GET /api/v1/ueba/entities/{entityType}/{entityID}", s.protect("ueba.read", http.HandlerFunc(s.getUEBABaseline)))
+		s.mux.Handle("POST /api/v1/ueba/anomalies/{anomalyID}/feedback", s.protect("ueba.feedback", http.HandlerFunc(s.updateUEBAFeedback)))
 	}
 	s.mux.Handle("GET /api/v1/findings", s.protect("siem.findings.read", http.HandlerFunc(s.listFindings)))
 	s.mux.Handle("GET /api/v1/alerts", s.protect("soc.alerts.read", http.HandlerFunc(s.listAlerts)))
@@ -819,6 +827,10 @@ func (s *Server) handleDomainError(w http.ResponseWriter, r *http.Request, err e
 		s.problem(w, r, http.StatusPreconditionFailed, "version_conflict", "The resource changed", "Refresh the resource and retry with its current version.")
 	case errors.Is(err, store.ErrAlreadyExists):
 		s.problem(w, r, http.StatusConflict, "already_exists", "Resource already exists", "A resource with this identity already exists in the tenant.")
+	case errors.Is(err, ueba.ErrInvalidFilter):
+		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_ueba_filter", "Invalid UEBA filter", err.Error())
+	case errors.Is(err, ueba.ErrInvalidFeedback):
+		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_ueba_feedback", "Invalid UEBA feedback", err.Error())
 	case errors.Is(err, detection.ErrInvalidRule):
 		s.problem(w, r, http.StatusBadRequest, "invalid_detection_rule", "Invalid detection rule", err.Error())
 	case errors.Is(err, detection.ErrValidationFailed):
