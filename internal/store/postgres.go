@@ -144,7 +144,7 @@ func (p *Postgres) ResetTenant(ctx context.Context, tenantID string) error {
 		return fmt.Errorf("begin tenant reset: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	for _, table := range []string{"audit_entries", "incidents", "alerts", "findings", "security_events", "collectors", "hunt_executions", "saved_hunts", "evidence_custody_entries", "evidence_items", "detection_correlation_emissions", "detection_correlation_observations", "detection_rule_versions", "tenant_retention_policies"} {
+	for _, table := range []string{"audit_entries", "incidents", "alerts", "findings", "security_events", "collectors", "hunt_executions", "saved_hunts", "evidence_custody_entries", "evidence_items", "threat_intel_matches", "threat_intel_indicator_sources", "threat_intel_indicators", "threat_intel_feeds", "detection_correlation_emissions", "detection_correlation_observations", "detection_rule_versions", "tenant_retention_policies"} {
 		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE tenant_id=$1", tenantID); err != nil {
 			return fmt.Errorf("reset tenant table %s: %w", table, err)
 		}

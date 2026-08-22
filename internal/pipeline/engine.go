@@ -18,9 +18,10 @@ import (
 var ErrInvalidEvent = errors.New("invalid event")
 
 const (
-	PowerShellRuleID = "KCSP-WIN-PS-001"
-	AuthRuleID       = "KCSP-AUTH-THRESHOLD-001"
-	authBaseRuleID   = "KCSP-AUTH-FAILURE-BASE"
+	PowerShellRuleID  = "KCSP-WIN-PS-001"
+	AuthRuleID        = "KCSP-AUTH-THRESHOLD-001"
+	ThreatIntelRuleID = "KCSP-TI-IOC-MATCH"
+	authBaseRuleID    = "KCSP-AUTH-FAILURE-BASE"
 )
 
 type Engine struct {
@@ -44,6 +45,10 @@ type correlationStateStore interface {
 	ObserveCorrelation(context.Context, core.CorrelationObservation) (core.CorrelationEvaluation, error)
 }
 
+type threatIntelProvider interface {
+	MatchThreatIntelEvent(context.Context, core.CanonicalEvent) ([]core.ThreatIntelMatch, error)
+}
+
 // Repository is the data-plane port used by the embedded executor. Production
 // adapters can route events/findings to ClickHouse and control objects to PostgreSQL
 // without leaking those SDK types into the domain pipeline.
@@ -56,10 +61,11 @@ type Repository interface {
 }
 
 type detectionMatch struct {
-	Rule          core.DetectionRule
-	MatchedFields []string
-	Factors       []core.RiskFactor
-	EventIDs      []string
+	Rule               core.DetectionRule
+	MatchedFields      []string
+	Factors            []core.RiskFactor
+	EventIDs           []string
+	DedupDiscriminator string
 }
 
 func New(ctx context.Context, repository Repository) (*Engine, error) {
@@ -80,6 +86,14 @@ func New(ctx context.Context, repository Repository) (*Engine, error) {
 			MITRE: []string{"T1110"}, RequiredDataSources: []string{"AD", "VPN", "RADIUS"},
 			KnownFalsePositives: []string{"Stale credentials on a managed service or device"},
 			Owner:               "KCSP Detection Engineering", State: "PUBLISHED", UpdatedAt: now,
+		},
+		{
+			ID: ThreatIntelRuleID, Title: "Threat intelligence IOC match",
+			Description: "Matches canonical event observables against active, tenant-scoped threat indicators.",
+			Version:     "1.0.0", Severity: core.SeverityMedium, Confidence: 70,
+			MITRE: []string{}, RequiredDataSources: []string{"Threat Intelligence", "Normalized security events"},
+			KnownFalsePositives: []string{"Shared infrastructure, stale intelligence, or low-confidence community feeds"},
+			Owner:               "KCSP Threat Intelligence", State: "PUBLISHED", UpdatedAt: now,
 		},
 	}
 	byID := make(map[string]core.DetectionRule, len(rules))
@@ -127,7 +141,7 @@ func (e *Engine) Ingest(ctx context.Context, tenantID string, input core.Canonic
 		}
 		result.Findings = append(result.Findings, finding)
 
-		candidate, dedupKey := makeAlert(stored, finding, match.EventIDs)
+		candidate, dedupKey := makeAlert(stored, finding, match.EventIDs, match.DedupDiscriminator)
 		alert, created, err := e.store.UpsertAlert(ctx, candidate, dedupKey, 15*time.Minute)
 		if err != nil {
 			return core.IngestResult{}, fmt.Errorf("persist alert: %w", err)
@@ -137,10 +151,14 @@ func (e *Engine) Ingest(ctx context.Context, tenantID string, input core.Canonic
 		if created {
 			action = "alert.created"
 		}
+		auditMetadata := map[string]interface{}{"event_id": stored.ID, "rule_id": finding.Rule.ID, "risk_score": finding.RiskScore}
+		if match.DedupDiscriminator != "" {
+			auditMetadata["threat_indicator_id"] = match.DedupDiscriminator
+		}
 		if _, err := e.store.AppendAudit(ctx, core.AuditEntry{
 			TenantID: tenantID, Actor: "system:detection-engine", Action: action,
 			ResourceType: "alert", ResourceID: alert.ID, Outcome: "success",
-			Metadata: map[string]interface{}{"event_id": stored.ID, "rule_id": finding.Rule.ID, "risk_score": finding.RiskScore},
+			Metadata: auditMetadata,
 		}); err != nil {
 			return core.IngestResult{}, fmt.Errorf("append detection audit: %w", err)
 		}
@@ -221,6 +239,11 @@ func (e *Engine) detect(ctx context.Context, event core.CanonicalEvent) ([]detec
 	if threshold.Triggered {
 		matches = append(matches, detectionMatch{Rule: e.rules[AuthRuleID], MatchedFields: fields, Factors: factors, EventIDs: threshold.EventIDs})
 	}
+	threatMatches, err := e.matchThreatIntelligence(ctx, event)
+	if err != nil {
+		return nil, fmt.Errorf("evaluate threat intelligence: %w", err)
+	}
+	matches = append(matches, threatMatches...)
 	dynamicRules, err := e.rulesForTenant(ctx, event.TenantID)
 	if err != nil {
 		return nil, fmt.Errorf("load published detection content: %w", err)
@@ -292,6 +315,62 @@ func (e *Engine) detect(ctx context.Context, event core.CanonicalEvent) ([]detec
 		}
 		factors = append(factors, contextFactors(event)...)
 		matches = append(matches, detectionMatch{Rule: compiled.Rule, MatchedFields: matchedFields, Factors: factors, EventIDs: correlated.EventIDs})
+	}
+	return matches, nil
+}
+
+func (e *Engine) matchThreatIntelligence(ctx context.Context, event core.CanonicalEvent) ([]detectionMatch, error) {
+	provider, ok := e.store.(threatIntelProvider)
+	if !ok {
+		return nil, nil
+	}
+	intelligence, err := provider.MatchThreatIntelEvent(ctx, event)
+	if err != nil {
+		return nil, err
+	}
+	type aggregate struct {
+		indicator core.ThreatIntelMatch
+		fields    []string
+		seen      map[string]bool
+	}
+	byIndicator := make(map[string]*aggregate, len(intelligence))
+	order := make([]string, 0, len(intelligence))
+	for _, indicator := range intelligence {
+		item, exists := byIndicator[indicator.IndicatorID]
+		if !exists {
+			item = &aggregate{indicator: indicator, seen: map[string]bool{}}
+			byIndicator[indicator.IndicatorID] = item
+			order = append(order, indicator.IndicatorID)
+		}
+		if indicator.MatchedField != "" && !item.seen[indicator.MatchedField] {
+			item.seen[indicator.MatchedField] = true
+			item.fields = append(item.fields, indicator.MatchedField)
+		}
+	}
+	matches := make([]detectionMatch, 0, len(order))
+	for _, indicatorID := range order {
+		item := byIndicator[indicatorID]
+		indicator := item.indicator
+		reputationDelta := 5
+		switch indicator.Reputation {
+		case "MALICIOUS":
+			reputationDelta = 25
+		case "SUSPICIOUS":
+			reputationDelta = 15
+		}
+		rule := e.rules[ThreatIntelRuleID]
+		rule.Confidence = indicator.Confidence
+		rule.Title = fmt.Sprintf("Threat intelligence %s match", strings.ToLower(string(indicator.Type)))
+		factors := []core.RiskFactor{
+			{Code: "base_severity", Label: "Active threat intelligence match", Delta: 35, SourceReference: ThreatIntelRuleID},
+			{Code: "ioc_confidence", Label: "Indicator confidence", Delta: max(5, indicator.Confidence/5), SourceReference: indicator.IndicatorID},
+			{Code: "threat_intelligence", Label: indicator.Reputation + " indicator reputation", Delta: reputationDelta, SourceReference: indicator.IndicatorID},
+		}
+		factors = append(factors, contextFactors(event)...)
+		matches = append(matches, detectionMatch{
+			Rule: rule, MatchedFields: item.fields, Factors: factors,
+			EventIDs: []string{event.ID}, DedupDiscriminator: indicator.IndicatorID,
+		})
 	}
 	return matches, nil
 }
@@ -444,7 +523,7 @@ func (e *Engine) makeFinding(event core.CanonicalEvent, match detectionMatch) co
 	}
 }
 
-func makeAlert(event core.CanonicalEvent, finding core.Finding, correlatedEventIDs []string) (core.Alert, string) {
+func makeAlert(event core.CanonicalEvent, finding core.Finding, correlatedEventIDs []string, dedupDiscriminator string) (core.Alert, string) {
 	now := time.Now().UTC()
 	eventIDs := make([]string, 0, len(correlatedEventIDs)+1)
 	seenEventIDs := map[string]bool{}
@@ -465,6 +544,9 @@ func makeAlert(event core.CanonicalEvent, finding core.Finding, correlatedEventI
 		entity = core.EntitySummary{Type: "ip", Name: event.SrcEndpoint.IP}
 	}
 	dedupKey := finding.Rule.ID + "|" + entity.Type + "|" + entity.Name
+	if dedupDiscriminator != "" {
+		dedupKey += "|" + dedupDiscriminator
+	}
 	return core.Alert{
 		ID: core.NewID("alt"), TenantID: event.TenantID, Title: finding.Title,
 		Severity: finding.Severity, RiskScore: finding.RiskScore, RiskBreakdown: finding.RiskBreakdown,

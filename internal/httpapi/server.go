@@ -22,6 +22,7 @@ import (
 	"github.com/kcsp/platform/internal/platform/auth"
 	"github.com/kcsp/platform/internal/soc"
 	"github.com/kcsp/platform/internal/store"
+	"github.com/kcsp/platform/internal/threatintel"
 )
 
 type contextKey string
@@ -51,6 +52,7 @@ type Server struct {
 	hunts             store.HuntStore
 	retention         store.RetentionStore
 	evidence          *evidence.Service
+	threatIntel       *threatintel.Service
 }
 
 type Authenticator interface {
@@ -68,6 +70,7 @@ type Config struct {
 	HuntStore                   store.HuntStore
 	RetentionStore              store.RetentionStore
 	EvidenceService             *evidence.Service
+	ThreatIntelService          *threatintel.Service
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -82,7 +85,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		gateway: config.Gateway, allowDirectIngest: config.AllowDirectIngest,
 		collectors: config.CollectorRegistry, requireCollectors: config.RequireRegisteredCollectors,
 		detections: config.DetectionService, hunts: config.HuntStore, retention: config.RetentionStore,
-		evidence: config.EvidenceService,
+		evidence: config.EvidenceService, threatIntel: config.ThreatIntelService,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -142,6 +145,18 @@ func (s *Server) routes() {
 		s.mux.Handle("GET /api/v1/evidence/{evidenceID}/content", s.protect("soc.evidence.read", http.HandlerFunc(s.downloadEvidence)))
 		s.mux.Handle("POST /api/v1/evidence/{evidenceID}/verify", s.protect("soc.evidence.read", http.HandlerFunc(s.verifyEvidence)))
 		s.mux.Handle("GET /api/v1/evidence/{evidenceID}/custody", s.protect("soc.evidence.read", http.HandlerFunc(s.listEvidenceCustody)))
+	}
+	if s.threatIntel != nil {
+		s.mux.Handle("GET /api/v1/threat-intel/feeds", s.protect("ti.indicators.read", http.HandlerFunc(s.listThreatIntelFeeds)))
+		s.mux.Handle("POST /api/v1/threat-intel/feeds", s.protect("ti.indicators.manage", http.HandlerFunc(s.createThreatIntelFeed)))
+		s.mux.Handle("GET /api/v1/threat-intel/feeds/{feedID}", s.protect("ti.indicators.read", http.HandlerFunc(s.getThreatIntelFeed)))
+		s.mux.Handle("PATCH /api/v1/threat-intel/feeds/{feedID}", s.protect("ti.indicators.manage", http.HandlerFunc(s.updateThreatIntelFeed)))
+		s.mux.Handle("GET /api/v1/threat-intel/indicators", s.protect("ti.indicators.read", http.HandlerFunc(s.listThreatIndicators)))
+		s.mux.Handle("POST /api/v1/threat-intel/indicators", s.protect("ti.indicators.manage", http.HandlerFunc(s.upsertThreatIndicator)))
+		s.mux.Handle("GET /api/v1/threat-intel/indicators/{indicatorID}", s.protect("ti.indicators.read", http.HandlerFunc(s.getThreatIndicator)))
+		s.mux.Handle("PATCH /api/v1/threat-intel/indicators/{indicatorID}", s.protect("ti.indicators.manage", http.HandlerFunc(s.updateThreatIndicatorState)))
+		s.mux.Handle("GET /api/v1/threat-intel/indicators/{indicatorID}/matches", s.protect("ti.indicators.read", http.HandlerFunc(s.listThreatIndicatorMatches)))
+		s.mux.Handle("GET /api/v1/threat-intel/matches", s.protect("ti.indicators.read", http.HandlerFunc(s.listThreatIndicatorMatches)))
 	}
 	s.mux.Handle("GET /api/v1/findings", s.protect("siem.findings.read", http.HandlerFunc(s.listFindings)))
 	s.mux.Handle("GET /api/v1/alerts", s.protect("soc.alerts.read", http.HandlerFunc(s.listAlerts)))
@@ -791,6 +806,10 @@ func (s *Server) handleDomainError(w http.ResponseWriter, r *http.Request, err e
 		s.problem(w, r, http.StatusConflict, "evidence_conflict", "Evidence conflict", err.Error())
 	case errors.Is(err, evidence.ErrEvidenceIntegrity):
 		s.problem(w, r, http.StatusConflict, "evidence_integrity_failed", "Evidence integrity check failed", err.Error())
+	case errors.Is(err, threatintel.ErrInvalidFeed):
+		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_threat_intel_feed", "Invalid threat intelligence feed", err.Error())
+	case errors.Is(err, threatintel.ErrInvalidIndicator):
+		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_threat_indicator", "Invalid threat indicator", err.Error())
 	case errors.Is(err, soc.ErrInvalidTransition):
 		s.problem(w, r, http.StatusConflict, "invalid_transition", "Invalid state transition", err.Error())
 	case errors.Is(err, soc.ErrClosureDetails), errors.Is(err, soc.ErrNoAlerts), errors.Is(err, pipeline.ErrInvalidEvent), errors.Is(err, ingest.ErrInvalidEnvelope):

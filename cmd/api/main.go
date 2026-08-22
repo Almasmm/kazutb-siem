@@ -23,6 +23,7 @@ import (
 	"github.com/kcsp/platform/internal/platform/auth"
 	"github.com/kcsp/platform/internal/soc"
 	"github.com/kcsp/platform/internal/store"
+	"github.com/kcsp/platform/internal/threatintel"
 )
 
 func main() {
@@ -85,6 +86,7 @@ func run(logger *slog.Logger) error {
 		return errors.New("KCSP_EVIDENCE_MAX_BYTES must be a positive integer")
 	}
 	evidenceService := evidence.NewService(repository, blobStore, evidence.Config{MaximumBytes: maximumEvidenceBytes})
+	threatIntelService := threatintel.NewService(repository)
 	publisher, err := ingest.OpenKafkaPublisher(startupContext, kafkaConfig("kcsp-api"))
 	if err != nil {
 		return err
@@ -114,12 +116,13 @@ func run(logger *slog.Logger) error {
 		seed,
 		httpapi.Config{
 			Profile: profile + "-distributed", AuthMode: authMode, Gateway: gateway,
-			AllowDirectIngest: profile == "development" || profile == "test",
-			CollectorRegistry: repository,
-			DetectionService:  detectionService,
-			HuntStore:         repository,
-			RetentionStore:    repository,
-			EvidenceService:   evidenceService,
+			AllowDirectIngest:  profile == "development" || profile == "test",
+			CollectorRegistry:  repository,
+			DetectionService:   detectionService,
+			HuntStore:          repository,
+			RetentionStore:     repository,
+			EvidenceService:    evidenceService,
+			ThreatIntelService: threatIntelService,
 			RequireRegisteredCollectors: strings.EqualFold(
 				envOr("KCSP_REQUIRE_REGISTERED_COLLECTORS", strconv.FormatBool(authMode == "oidc")), "true",
 			),

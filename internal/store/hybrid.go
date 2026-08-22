@@ -9,6 +9,7 @@ import (
 
 	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/ingest"
+	"github.com/kcsp/platform/internal/threatintel"
 )
 
 type Hybrid struct {
@@ -224,6 +225,38 @@ func (h *Hybrid) RecordEvidenceVerification(ctx context.Context, tenantID, evide
 }
 func (h *Hybrid) VerifyEvidenceCustody(ctx context.Context, tenantID, evidenceID string) (bool, error) {
 	return h.control.VerifyEvidenceCustody(ctx, tenantID, evidenceID)
+}
+
+func (h *Hybrid) CreateThreatIntelFeed(ctx context.Context, feed core.ThreatIntelFeed) (core.ThreatIntelFeed, error) {
+	return h.control.CreateThreatIntelFeed(ctx, feed)
+}
+func (h *Hybrid) GetThreatIntelFeed(ctx context.Context, tenantID, feedID string) (core.ThreatIntelFeed, error) {
+	return h.control.GetThreatIntelFeed(ctx, tenantID, feedID)
+}
+func (h *Hybrid) ListThreatIntelFeeds(ctx context.Context, tenantID string) ([]core.ThreatIntelFeed, error) {
+	return h.control.ListThreatIntelFeeds(ctx, tenantID)
+}
+func (h *Hybrid) UpdateThreatIntelFeed(ctx context.Context, feed core.ThreatIntelFeed) (core.ThreatIntelFeed, error) {
+	return h.control.UpdateThreatIntelFeed(ctx, feed)
+}
+func (h *Hybrid) UpsertThreatIndicator(ctx context.Context, indicator core.ThreatIndicator) (core.ThreatIndicator, bool, error) {
+	return h.control.UpsertThreatIndicator(ctx, indicator)
+}
+func (h *Hybrid) GetThreatIndicator(ctx context.Context, tenantID, indicatorID string) (core.ThreatIndicator, error) {
+	return h.control.GetThreatIndicator(ctx, tenantID, indicatorID)
+}
+func (h *Hybrid) ListThreatIndicators(ctx context.Context, tenantID string, filter core.ThreatIndicatorFilter) ([]core.ThreatIndicator, error) {
+	return h.control.ListThreatIndicators(ctx, tenantID, filter)
+}
+func (h *Hybrid) SetThreatIndicatorState(ctx context.Context, tenantID, indicatorID, state string, version int, actor string) (core.ThreatIndicator, error) {
+	return h.control.SetThreatIndicatorState(ctx, tenantID, indicatorID, state, version, actor)
+}
+func (h *Hybrid) ListThreatIntelMatches(ctx context.Context, tenantID, indicatorID, eventID string, limit int) ([]core.ThreatIntelMatch, error) {
+	return h.control.ListThreatIntelMatches(ctx, tenantID, indicatorID, eventID, limit)
+}
+func (h *Hybrid) MatchThreatIntelEvent(ctx context.Context, event core.CanonicalEvent) ([]core.ThreatIntelMatch, error) {
+	observables := threatintel.ExtractObservables(event)
+	return h.control.MatchThreatIntelObservables(ctx, event.TenantID, event.ID, event.EventTime, observables)
 }
 
 func (h *Hybrid) cachedRetentionPolicy(ctx context.Context, tenantID string) (core.RetentionPolicy, error) {
