@@ -13,6 +13,7 @@ import (
 
 	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/detection"
+	"github.com/kcsp/platform/internal/observability"
 )
 
 var ErrInvalidEvent = errors.New("invalid event")
@@ -130,11 +131,20 @@ func (e *Engine) ResetTenant(tenantID string) {
 	e.correlationMemory.ResetTenant(tenantID)
 }
 
-func (e *Engine) Ingest(ctx context.Context, tenantID string, input core.CanonicalEvent) (core.IngestResult, error) {
+func (e *Engine) Ingest(ctx context.Context, tenantID string, input core.CanonicalEvent) (result core.IngestResult, err error) {
+	started := time.Now()
+	observability.Default.EventReceived()
+	defer func() {
+		observability.Default.ObserveDetection(time.Since(started))
+		if err != nil {
+			observability.Default.EventFailed()
+		}
+	}()
 	event, err := normalize(tenantID, input)
 	if err != nil {
 		return core.IngestResult{}, err
 	}
+	observability.Default.EventParsed()
 	stored, duplicate, err := e.store.PutEvent(ctx, event)
 	if err != nil {
 		return core.IngestResult{}, fmt.Errorf("persist canonical event: %w", err)
@@ -147,7 +157,7 @@ func (e *Engine) Ingest(ctx context.Context, tenantID string, input core.Canonic
 	if err != nil {
 		return core.IngestResult{}, err
 	}
-	result := core.IngestResult{Event: stored, Findings: []core.Finding{}, Alerts: []core.Alert{}}
+	result = core.IngestResult{Event: stored, Findings: []core.Finding{}, Alerts: []core.Alert{}}
 	for _, match := range matches {
 		finding := e.makeFinding(stored, match)
 		if err := e.store.PutFinding(ctx, finding); err != nil {
@@ -164,6 +174,7 @@ func (e *Engine) Ingest(ctx context.Context, tenantID string, input core.Canonic
 		action := "alert.updated"
 		if created {
 			action = "alert.created"
+			observability.Default.AlertCreated()
 		}
 		auditMetadata := map[string]interface{}{"event_id": stored.ID, "rule_id": finding.Rule.ID, "risk_score": finding.RiskScore}
 		if match.Rule.ID == ThreatIntelRuleID && match.ReferenceID != "" {

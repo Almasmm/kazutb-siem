@@ -14,6 +14,7 @@ import (
 
 	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/ingest"
+	"github.com/kcsp/platform/internal/observability"
 	"github.com/kcsp/platform/internal/parser"
 	"github.com/kcsp/platform/internal/pipeline"
 	"github.com/kcsp/platform/internal/store"
@@ -28,6 +29,7 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
+	observability.Configure("processor", envOr("KCSP_VERSION", "development"))
 	startupContext, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	repository, err := store.OpenHybrid(startupContext, os.Getenv("KCSP_DATABASE_URL"), os.Getenv("KCSP_CLICKHOUSE_URL"))
@@ -59,6 +61,11 @@ func run(logger *slog.Logger) error {
 
 	runContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go func() {
+		if err := observability.Serve(runContext, envOr("KCSP_METRICS_ADDR", ":9090"), logger); err != nil {
+			logger.Error("processor metrics endpoint failed", "error", err)
+		}
+	}()
 	logger.Info("KCSP processor started", "group", envOr("KCSP_KAFKA_CONSUMER_GROUP", "kcsp-canonical-processing-v1"), "topic", publisher.RawTopic())
 	if err := processor.Run(runContext); err != nil && !errors.Is(err, context.Canceled) {
 		return err

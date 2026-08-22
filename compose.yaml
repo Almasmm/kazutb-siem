@@ -121,6 +121,7 @@ services:
       KCSP_MINIO_REGION: us-east-1
       KCSP_MINIO_SECURE: "false"
       KCSP_EVIDENCE_MAX_BYTES: 104857600
+      KCSP_VERSION: ${KCSP_VERSION:-development}
     ports:
       - "127.0.0.1:8080:8080"
     healthcheck:
@@ -161,6 +162,8 @@ services:
       KCSP_KAFKA_CONSUMER_GROUP: kcsp-canonical-processing-v1
       KCSP_KAFKA_PARTITIONS: 12
       KCSP_KAFKA_REPLICATION_FACTOR: 1
+      KCSP_METRICS_ADDR: ":9090"
+      KCSP_VERSION: ${KCSP_VERSION:-development}
     depends_on:
       postgres:
         condition: service_healthy
@@ -187,6 +190,8 @@ services:
       KCSP_SOAR_WORKER_ID: kcsp-soar-worker-1
       KCSP_SOAR_POLL_INTERVAL: 500ms
       KCSP_SOAR_LEASE_DURATION: 30s
+      KCSP_METRICS_ADDR: ":9091"
+      KCSP_VERSION: ${KCSP_VERSION:-development}
     depends_on:
       postgres:
         condition: service_healthy
@@ -216,6 +221,8 @@ services:
       KCSP_AI_CLOUD_MODEL: ${KCSP_AI_CLOUD_MODEL:-}
       KCSP_AI_CLOUD_ENDPOINT: ${KCSP_AI_CLOUD_ENDPOINT:-}
       KCSP_AI_CLOUD_API_KEY: ${KCSP_AI_CLOUD_API_KEY:-}
+      KCSP_METRICS_ADDR: ":9092"
+      KCSP_VERSION: ${KCSP_VERSION:-development}
     depends_on:
       postgres:
         condition: service_healthy
@@ -227,6 +234,48 @@ services:
       - /tmp
     cap_drop:
       - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - kcsp-prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      api:
+        condition: service_healthy
+      processor:
+        condition: service_started
+      soar-worker:
+        condition: service_started
+      ai-worker:
+        condition: service_started
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    environment:
+      GF_SECURITY_ADMIN_USER: ${KCSP_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${KCSP_GRAFANA_ADMIN_PASSWORD:?Set KCSP_GRAFANA_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - kcsp-grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3001:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
     security_opt:
       - no-new-privileges:true
 
@@ -259,3 +308,5 @@ volumes:
   kcsp-clickhouse-data:
   kcsp-clickhouse-logs:
   kcsp-minio-data:
+  kcsp-prometheus-data:
+  kcsp-grafana-data:

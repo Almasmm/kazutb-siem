@@ -12,6 +12,7 @@ import (
 
 	"github.com/kcsp/platform/internal/aisoc"
 	"github.com/kcsp/platform/internal/core"
+	"github.com/kcsp/platform/internal/observability"
 	"github.com/kcsp/platform/internal/store"
 )
 
@@ -24,6 +25,7 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
+	observability.Configure("ai-worker", envOr("KCSP_VERSION", "development"))
 	startupContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	repository, err := store.OpenHybrid(startupContext, os.Getenv("KCSP_DATABASE_URL"), os.Getenv("KCSP_CLICKHOUSE_URL"))
@@ -70,6 +72,11 @@ func run(logger *slog.Logger) error {
 	}, logger)
 	runContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go func() {
+		if err := observability.Serve(runContext, envOr("KCSP_METRICS_ADDR", ":9092"), logger); err != nil {
+			logger.Error("AI SOC metrics endpoint failed", "error", err)
+		}
+	}()
 	logger.Info("KCSP AI SOC worker started", "worker_id", workerID, "lease", lease,
 		"poll_interval", pollInterval, "cloud_configured", cloud != nil)
 	return worker.Run(runContext)

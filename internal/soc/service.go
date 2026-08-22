@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kcsp/platform/internal/core"
+	"github.com/kcsp/platform/internal/observability"
 	"github.com/kcsp/platform/internal/store"
 )
 
@@ -193,6 +194,7 @@ func (s *Service) CreateIncident(ctx context.Context, tenantID, actor string, in
 	}); err != nil {
 		return core.Incident{}, false, fmt.Errorf("append incident creation audit: %w", err)
 	}
+	observability.Default.IncidentCreated()
 	return created, false, nil
 }
 

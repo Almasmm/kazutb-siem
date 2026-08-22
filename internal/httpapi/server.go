@@ -19,6 +19,7 @@ import (
 	"github.com/kcsp/platform/internal/evidence"
 	"github.com/kcsp/platform/internal/hunt"
 	"github.com/kcsp/platform/internal/ingest"
+	"github.com/kcsp/platform/internal/observability"
 	"github.com/kcsp/platform/internal/pipeline"
 	"github.com/kcsp/platform/internal/platform/auth"
 	"github.com/kcsp/platform/internal/soar"
@@ -269,7 +270,9 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		}
 		started := time.Now()
 		ctx := context.WithValue(r.Context(), requestIDKey, requestID)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		recorder := &statusWriter{ResponseWriter: w}
+		next.ServeHTTP(recorder, r.WithContext(ctx))
+		observability.Default.ObserveAPI(time.Since(started))
 		s.logger.Debug("request completed", "method", r.Method, "path", r.URL.Path, "request_id", requestID, "duration", time.Since(started))
 	})
 }
@@ -298,17 +301,8 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
-	overview, err := s.store.Overview(r.Context(), core.DefaultTenantID)
-	if err != nil {
-		s.handleDomainError(w, r, err)
-		return
-	}
-	metrics := overview["metrics"].(map[string]interface{})
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	fmt.Fprintf(w, "# HELP kcsp_uptime_seconds KCSP API process uptime.\n# TYPE kcsp_uptime_seconds gauge\nkcsp_uptime_seconds %.0f\n", time.Since(s.startedAt).Seconds())
-	fmt.Fprintf(w, "# HELP kcsp_events_total Events durably stored during the last 24 hours.\n# TYPE kcsp_events_total gauge\nkcsp_events_total %v\n", metrics["events_24h"])
-	fmt.Fprintf(w, "# HELP kcsp_open_alerts Open alerts.\n# TYPE kcsp_open_alerts gauge\nkcsp_open_alerts %v\n", metrics["open_alerts"])
-	fmt.Fprintf(w, "# HELP kcsp_active_incidents Active incidents.\n# TYPE kcsp_active_incidents gauge\nkcsp_active_incidents %v\n", metrics["active_incidents"])
+	observability.Default.WritePrometheus(w)
 }
 
 func (s *Server) session(w http.ResponseWriter, r *http.Request) {

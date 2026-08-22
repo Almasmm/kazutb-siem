@@ -20,6 +20,7 @@ import (
 	"github.com/kcsp/platform/internal/evidence"
 	"github.com/kcsp/platform/internal/httpapi"
 	"github.com/kcsp/platform/internal/ingest"
+	"github.com/kcsp/platform/internal/observability"
 	"github.com/kcsp/platform/internal/pipeline"
 	"github.com/kcsp/platform/internal/platform/auth"
 	"github.com/kcsp/platform/internal/soar"
@@ -40,6 +41,7 @@ func main() {
 func run(logger *slog.Logger) error {
 	profile := envOr("KCSP_PROFILE", "production")
 	authMode := envOr("KCSP_AUTH_MODE", "oidc")
+	observability.Configure("api", envOr("KCSP_VERSION", "development"))
 	if authMode == "demo" && profile != "development" && profile != "test" {
 		return errors.New("demo authentication is forbidden outside development/test profiles")
 	}

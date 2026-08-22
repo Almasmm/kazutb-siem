@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kcsp/platform/internal/observability"
 	"github.com/kcsp/platform/internal/soar"
 	"github.com/kcsp/platform/internal/store"
 )
@@ -23,6 +24,7 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
+	observability.Configure("soar-worker", envOr("KCSP_VERSION", "development"))
 	startupContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	repository, err := store.OpenPostgres(startupContext, os.Getenv("KCSP_DATABASE_URL"))
@@ -50,6 +52,11 @@ func run(logger *slog.Logger) error {
 	}, logger)
 	runContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go func() {
+		if err := observability.Serve(runContext, envOr("KCSP_METRICS_ADDR", ":9091"), logger); err != nil {
+			logger.Error("SOAR metrics endpoint failed", "error", err)
+		}
+	}()
 	logger.Info("KCSP SOAR worker started", "worker_id", workerID, "lease", lease, "poll_interval", pollInterval)
 	return worker.Run(runContext)
 }
@@ -64,4 +71,11 @@ func durationEnv(key string, fallback time.Duration) (time.Duration, error) {
 		return 0, fmt.Errorf("%s must be a positive Go duration", key)
 	}
 	return parsed, nil
+}
+
+func envOr(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
 }

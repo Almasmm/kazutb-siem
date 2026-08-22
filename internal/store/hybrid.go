@@ -9,6 +9,7 @@ import (
 
 	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/ingest"
+	"github.com/kcsp/platform/internal/observability"
 	"github.com/kcsp/platform/internal/threatintel"
 )
 
@@ -108,6 +109,8 @@ func (h *Hybrid) ListRules(ctx context.Context) ([]core.DetectionRule, error) {
 	return h.control.ListRules(ctx)
 }
 func (h *Hybrid) PutRawEnvelope(ctx context.Context, envelope ingest.RawEnvelope) error {
+	started := time.Now()
+	defer func() { observability.Default.ObserveClickHouse(time.Since(started)) }()
 	policy, err := h.cachedRetentionPolicy(ctx, envelope.TenantID)
 	if err != nil {
 		return err
@@ -115,6 +118,8 @@ func (h *Hybrid) PutRawEnvelope(ctx context.Context, envelope ingest.RawEnvelope
 	return h.telemetry.PutRawEnvelopeWithExpiry(ctx, envelope, envelope.ReceivedAt.Add(time.Duration(policy.RawDays)*24*time.Hour))
 }
 func (h *Hybrid) PutEvent(ctx context.Context, event core.CanonicalEvent) (core.CanonicalEvent, bool, error) {
+	started := time.Now()
+	defer func() { observability.Default.ObserveClickHouse(time.Since(started)) }()
 	policy, err := h.cachedRetentionPolicy(ctx, event.TenantID)
 	if err != nil {
 		return core.CanonicalEvent{}, false, err
@@ -122,6 +127,8 @@ func (h *Hybrid) PutEvent(ctx context.Context, event core.CanonicalEvent) (core.
 	return h.telemetry.PutEventWithExpiry(ctx, event, event.EventTime.Add(time.Duration(policy.NormalizedDays)*24*time.Hour))
 }
 func (h *Hybrid) GetEvent(ctx context.Context, tenantID, eventID string) (core.CanonicalEvent, error) {
+	started := time.Now()
+	defer func() { observability.Default.ObserveClickHouse(time.Since(started)) }()
 	event, err := h.telemetry.GetEvent(ctx, tenantID, eventID)
 	if !errors.Is(err, ErrNotFound) {
 		return event, err
@@ -129,6 +136,8 @@ func (h *Hybrid) GetEvent(ctx context.Context, tenantID, eventID string) (core.C
 	return h.control.GetEvent(ctx, tenantID, eventID)
 }
 func (h *Hybrid) ListEvents(ctx context.Context, tenantID string, filter EventFilter) ([]core.CanonicalEvent, error) {
+	started := time.Now()
+	defer func() { observability.Default.ObserveClickHouse(time.Since(started)) }()
 	current, err := h.telemetry.ListEvents(ctx, tenantID, filter)
 	if err != nil {
 		return nil, err

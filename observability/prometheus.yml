@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: kcsp-api
+    static_configs:
+      - targets: ["api:8080"]
+  - job_name: kcsp-processor
+    static_configs:
+      - targets: ["processor:9090"]
+  - job_name: kcsp-soar-worker
+    static_configs:
+      - targets: ["soar-worker:9091"]
+  - job_name: kcsp-ai-worker
+    static_configs:
+      - targets: ["ai-worker:9092"]
