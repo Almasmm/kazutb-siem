@@ -54,6 +54,10 @@ services:
     build:
       context: ./apps/web
       dockerfile: Dockerfile
+      args:
+        VITE_AUTH_MODE: demo
+        VITE_API_TOKEN: kcsp-demo-l2
+        VITE_TENANT_ID: university-kulazhanov
     ports:
       - "127.0.0.1:3000:8080"
     depends_on:

@@ -6,6 +6,12 @@ export const kk = {
     environment: "On-premise",
     protected: "Қорғалған контур",
   },
+  auth: {
+    loading: "Тіркелгі тексерілуде", loadingHint: "Университеттің сәйкестендіру провайдерімен қорғалған сессия орнатылуда.",
+    signInTitle: "Қорғалған SOC жүйесіне кіру", signInHint: "Университет тіркелгісімен кіріңіз. Қолжетімділік tenant және SOC рөлімен шектеледі.",
+    signIn: "SSO арқылы жалғастыру", signOut: "Шығу", errorTitle: "Тұлғаны растау мүмкін болмады",
+    failed: "Сәйкестендіру провайдері аутентификацияны аяқтамады.", notConfigured: "Бұл KCSP өрістетуі үшін OIDC бапталмаған.",
+  },
   nav: {
     operations: "Операциялар", intelligence: "Талдау", governance: "Басқару", soc: "SOC панелі",
     alerts: "Ескертулер кезегі", hunt: "Іздеу / Hunt", incidents: "Инциденттер", rules: "Анықтау ережелері", audit: "Аудит",

@@ -32,10 +32,7 @@ func main() {
 func run(logger *slog.Logger) error {
 	profile := envOr("KCSP_PROFILE", "production")
 	authMode := envOr("KCSP_AUTH_MODE", "oidc")
-	if authMode != "demo" {
-		return fmt.Errorf("auth mode %q is not configured yet; set KCSP_AUTH_MODE=demo only in development", authMode)
-	}
-	if profile != "development" && profile != "test" {
+	if authMode == "demo" && profile != "development" && profile != "test" {
 		return errors.New("demo authentication is forbidden outside development/test profiles")
 	}
 
@@ -57,6 +54,10 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	socService := soc.New(repository)
+	authenticator, err := configureAuthenticator(startupContext, profile, authMode)
+	if err != nil {
+		return err
+	}
 
 	var seed func(context.Context) error
 	if strings.EqualFold(os.Getenv("KCSP_DEMO_SEED"), "true") {
@@ -71,7 +72,7 @@ func run(logger *slog.Logger) error {
 		repository,
 		engine,
 		socService,
-		auth.NewDemoAuthenticator(),
+		authenticator,
 		logger,
 		seed,
 		httpapi.Config{Profile: profile + "-postgres", AuthMode: authMode},
@@ -98,6 +99,26 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("serve HTTP: %w", err)
 	}
 	return nil
+}
+
+func configureAuthenticator(ctx context.Context, profile, mode string) (httpapi.Authenticator, error) {
+	switch mode {
+	case "demo":
+		if profile != "development" && profile != "test" {
+			return nil, errors.New("demo authentication is forbidden outside development/test profiles")
+		}
+		return auth.NewDemoAuthenticator(), nil
+	case "oidc":
+		return auth.NewOIDCAuthenticator(ctx, auth.OIDCConfig{
+			IssuerURL:       os.Getenv("KCSP_OIDC_ISSUER_URL"),
+			ClientID:        os.Getenv("KCSP_OIDC_CLIENT_ID"),
+			TenantClaim:     os.Getenv("KCSP_OIDC_TENANT_CLAIM"),
+			RolesClaim:      os.Getenv("KCSP_OIDC_ROLES_CLAIM"),
+			PermissionClaim: os.Getenv("KCSP_OIDC_PERMISSION_CLAIM"),
+		})
+	default:
+		return nil, fmt.Errorf("unsupported KCSP_AUTH_MODE %q", mode)
+	}
 }
 
 func envOr(key, fallback string) string {

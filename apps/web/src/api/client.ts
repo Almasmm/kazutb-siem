@@ -9,10 +9,9 @@ import type {
   OverviewDto,
   RuleDto,
 } from "./types";
+import { getAccessToken, getTenantId } from "../auth/session";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "/api/v1").replace(/\/$/, "");
-const API_TOKEN = import.meta.env.VITE_API_TOKEN || "kcsp-demo-l2";
-const TENANT_ID = import.meta.env.VITE_TENANT_ID || "university-kulazhanov";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -52,9 +51,11 @@ async function request<T>(
   params?: Record<string, QueryValue>,
 ): Promise<T> {
   const headers = new Headers(init.headers);
+	const accessToken = getAccessToken();
+	if (!accessToken) throw new ApiError(401, { title: "Authentication required", detail: "No active KCSP session." });
   headers.set("Accept", "application/json");
-  headers.set("Authorization", `Bearer ${API_TOKEN}`);
-  headers.set("X-KCSP-Tenant-ID", TENANT_ID);
+  headers.set("Authorization", `Bearer ${accessToken}`);
+  headers.set("X-KCSP-Tenant-ID", getTenantId());
   if (init.body) headers.set("Content-Type", "application/json");
 
   let response: Response;
@@ -198,4 +199,4 @@ export const api = {
     getList<AuditDto>("/audit", params, signal).then((page) => ({ ...page, items: page.items.map(normalizeAudit) })),
 };
 
-export const apiConfig = { base: API_BASE, tenantId: TENANT_ID };
+export const apiConfig = { base: API_BASE, get tenantId() { return getTenantId(); } };

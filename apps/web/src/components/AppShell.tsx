@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Globe2,
   LayoutDashboard,
+  LogOut,
   Menu,
   Radar,
   Search,
@@ -18,6 +19,7 @@ import { useTranslation } from "react-i18next";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { apiConfig } from "../api/client";
 import { TENANT_TIME_ZONE } from "../utils/format";
+import { useAuth } from "../auth/AuthProvider";
 
 const navGroups = [
   {
@@ -55,6 +57,7 @@ export function AppShell() {
   const [languageOpen, setLanguageOpen] = useState(false);
   const { t, i18n } = useTranslation();
   const location = useLocation();
+	const { mode, user, signOut } = useAuth();
   const route = Object.keys(pageKeys).find((key) => location.pathname.startsWith(key)) || "/soc";
   const currentPageKey = pageKeys[route] || "nav.soc";
   const language = i18n.resolvedLanguage?.slice(0, 2).toUpperCase() || "RU";
@@ -120,11 +123,19 @@ export function AppShell() {
                 </div>
               )}
             </div>
-            <div className="analyst-avatar" title="SOC L2">AL</div>
+            {mode === "oidc" && <button className="icon-button" type="button" onClick={() => void signOut()} title={t("auth.signOut")}><LogOut size={17} /></button>}
+            <div className="analyst-avatar" title={`${user?.displayName || "KCSP"} · ${user?.role || ""}`}>{initials(user?.displayName)}</div>
           </div>
         </header>
         <main className="main-content"><Outlet /></main>
       </div>
     </div>
   );
+}
+
+function initials(name = "KCSP"): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const first = parts[0] || "KC";
+  const last = parts.at(-1) || first;
+  return (parts.length > 1 ? first.slice(0, 1) + last.slice(0, 1) : first.slice(0, 2)).toUpperCase();
 }

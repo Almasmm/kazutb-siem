@@ -6,6 +6,12 @@ export const en = {
     environment: "On-premise",
     protected: "Protected environment",
   },
+  auth: {
+    loading: "Verifying identity", loadingHint: "Establishing a trusted session with the university identity provider.",
+    signInTitle: "Enter the protected SOC", signInHint: "Authenticate with your university account. Access is restricted by tenant and SOC role.",
+    signIn: "Continue with SSO", signOut: "Sign out", errorTitle: "Identity verification failed",
+    failed: "The identity provider could not complete authentication.", notConfigured: "OIDC is not configured for this KCSP deployment.",
+  },
   nav: {
     operations: "Operations",
     intelligence: "Intelligence",
