@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kcsp/platform/internal/aisoc"
 	"github.com/kcsp/platform/internal/bootstrap"
 	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/detection"
@@ -91,6 +92,7 @@ func run(logger *slog.Logger) error {
 	threatIntelService := threatintel.NewService(repository)
 	soarService := soar.NewService(repository, nil)
 	uebaService := ueba.NewService(repository)
+	aiSOCService := aisoc.NewService(repository)
 	publisher, err := ingest.OpenKafkaPublisher(startupContext, kafkaConfig("kcsp-api"))
 	if err != nil {
 		return err
@@ -129,6 +131,7 @@ func run(logger *slog.Logger) error {
 			ThreatIntelService: threatIntelService,
 			SOARService:        soarService,
 			UEBAService:        uebaService,
+			AISOCService:       aiSOCService,
 			RequireRegisteredCollectors: strings.EqualFold(
 				envOr("KCSP_REQUIRE_REGISTERED_COLLECTORS", strconv.FormatBool(authMode == "oidc")), "true",
 			),

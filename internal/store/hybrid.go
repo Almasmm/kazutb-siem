@@ -270,6 +270,36 @@ func (h *Hybrid) GetUEBABaseline(ctx context.Context, tenantID, entityType, enti
 func (h *Hybrid) UpdateUEBAAnomalyFeedback(ctx context.Context, tenantID, anomalyID, status, actor, reason string, version int) (core.UEBAAnomaly, error) {
 	return h.control.UpdateUEBAAnomalyFeedback(ctx, tenantID, anomalyID, status, actor, reason, version)
 }
+func (h *Hybrid) GetAISOCPolicy(ctx context.Context, tenantID string) (core.AISOCPolicy, error) {
+	return h.control.GetAISOCPolicy(ctx, tenantID)
+}
+func (h *Hybrid) UpdateAISOCPolicy(ctx context.Context, policy core.AISOCPolicy, version int) (core.AISOCPolicy, error) {
+	return h.control.UpdateAISOCPolicy(ctx, policy, version)
+}
+func (h *Hybrid) CreateAISOCRequest(ctx context.Context, request core.AISOCRequest) (core.AISOCRequest, bool, error) {
+	return h.control.CreateAISOCRequest(ctx, request)
+}
+func (h *Hybrid) GetAISOCRequest(ctx context.Context, tenantID, requestID string) (core.AISOCRequestDetails, error) {
+	return h.control.GetAISOCRequest(ctx, tenantID, requestID)
+}
+func (h *Hybrid) ListAISOCRequests(ctx context.Context, tenantID string, filter core.AISOCRequestFilter) ([]core.AISOCRequest, error) {
+	return h.control.ListAISOCRequests(ctx, tenantID, filter)
+}
+func (h *Hybrid) CreateAISOCDecision(ctx context.Context, decision core.AISOCDecision) (core.AISOCDecision, error) {
+	return h.control.CreateAISOCDecision(ctx, decision)
+}
+func (h *Hybrid) ClaimAISOCRequest(ctx context.Context, workerID, tenantID string, lease time.Duration) (core.AISOCRequest, bool, error) {
+	return h.control.ClaimAISOCRequest(ctx, workerID, tenantID, lease)
+}
+func (h *Hybrid) CompleteAISOCRequest(ctx context.Context, request core.AISOCRequest, workerID string) (core.AISOCRequest, error) {
+	return h.control.CompleteAISOCRequest(ctx, request, workerID)
+}
+func (h *Hybrid) FinishAISOCRequestFailure(ctx context.Context, tenantID, requestID, workerID,
+	status, class, detail string, documents []core.AISOCContextDocument, digest string,
+	redactions int, injectionDetected bool) (core.AISOCRequest, error) {
+	return h.control.FinishAISOCRequestFailure(ctx, tenantID, requestID, workerID, status, class,
+		detail, documents, digest, redactions, injectionDetected)
+}
 func (h *Hybrid) RetrosearchThreatIndicator(ctx context.Context, indicator core.ThreatIndicator, request core.ThreatIntelRetrosearchRequest) (core.ThreatIntelRetrosearchResult, error) {
 	started := time.Now()
 	expression, err := threatintel.RetrosearchExpression(indicator)

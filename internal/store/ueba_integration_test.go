@@ -31,9 +31,9 @@ func TestPostgresUEBABaselineFeedbackAndTenantIsolation(t *testing.T) {
 		repository.Close()
 		t.Fatal(err)
 	}
-	started := time.Now().UTC().Add(-4 * time.Hour).Truncate(time.Minute)
+	started := time.Now().UTC().Add(-time.Hour).Truncate(time.Hour)
 	for index := 0; index < 50; index++ {
-		event := integrationUEBAEvent(tenantID, "training-"+time.Duration(index).String(), started.Add(time.Duration(index)*time.Minute), "workstation-01", "10.0.0.10", "powershell.exe", "intranet.local")
+		event := integrationUEBAEvent(tenantID, "training-"+time.Duration(index).String(), started.Add(time.Duration(index)*time.Second), "workstation-01", "10.0.0.10", "powershell.exe", "intranet.local")
 		if _, _, err := repository.PutEvent(ctx, event); err != nil {
 			repository.Close()
 			t.Fatal(err)

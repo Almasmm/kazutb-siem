@@ -199,6 +199,37 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  ai-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    command: ["/usr/local/bin/kcsp-ai-worker"]
+    environment:
+      KCSP_DATABASE_URL: postgres://kcsp:${KCSP_POSTGRES_PASSWORD}@postgres:5432/kcsp?sslmode=disable
+      KCSP_CLICKHOUSE_URL: clickhouse://kcsp:${KCSP_CLICKHOUSE_PASSWORD}@clickhouse:9000/kcsp
+      KCSP_AI_WORKER_ID: kcsp-ai-worker-1
+      KCSP_AI_POLL_INTERVAL: 500ms
+      KCSP_AI_LEASE_DURATION: 90s
+      KCSP_AI_LOCAL_MODEL: ${KCSP_AI_LOCAL_MODEL:-kcsp-grounded-rules-v1}
+      KCSP_AI_LOCAL_ENDPOINT: ${KCSP_AI_LOCAL_ENDPOINT:-}
+      KCSP_AI_LOCAL_API_KEY: ${KCSP_AI_LOCAL_API_KEY:-}
+      KCSP_AI_CLOUD_MODEL: ${KCSP_AI_CLOUD_MODEL:-}
+      KCSP_AI_CLOUD_ENDPOINT: ${KCSP_AI_CLOUD_ENDPOINT:-}
+      KCSP_AI_CLOUD_API_KEY: ${KCSP_AI_CLOUD_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   web:
     build:
       context: ./apps/web

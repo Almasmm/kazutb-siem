@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kcsp/platform/internal/aisoc"
 	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/detection"
 	"github.com/kcsp/platform/internal/evidence"
@@ -57,6 +58,7 @@ type Server struct {
 	threatIntel       *threatintel.Service
 	soar              *soar.Service
 	ueba              *ueba.Service
+	aiSOC             *aisoc.Service
 }
 
 type Authenticator interface {
@@ -77,6 +79,7 @@ type Config struct {
 	ThreatIntelService          *threatintel.Service
 	SOARService                 *soar.Service
 	UEBAService                 *ueba.Service
+	AISOCService                *aisoc.Service
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -91,7 +94,8 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		gateway: config.Gateway, allowDirectIngest: config.AllowDirectIngest,
 		collectors: config.CollectorRegistry, requireCollectors: config.RequireRegisteredCollectors,
 		detections: config.DetectionService, hunts: config.HuntStore, retention: config.RetentionStore,
-		evidence: config.EvidenceService, threatIntel: config.ThreatIntelService, soar: config.SOARService, ueba: config.UEBAService,
+		evidence: config.EvidenceService, threatIntel: config.ThreatIntelService, soar: config.SOARService,
+		ueba: config.UEBAService, aiSOC: config.AISOCService,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -194,6 +198,14 @@ func (s *Server) routes() {
 		s.mux.Handle("GET /api/v1/ueba/anomalies", s.protect("ueba.read", http.HandlerFunc(s.listUEBAAnomalies)))
 		s.mux.Handle("GET /api/v1/ueba/entities/{entityType}/{entityID}", s.protect("ueba.read", http.HandlerFunc(s.getUEBABaseline)))
 		s.mux.Handle("POST /api/v1/ueba/anomalies/{anomalyID}/feedback", s.protect("ueba.feedback", http.HandlerFunc(s.updateUEBAFeedback)))
+	}
+	if s.aiSOC != nil {
+		s.mux.Handle("GET /api/v1/ai-soc/policy", s.protect("ai.read", http.HandlerFunc(s.getAISOCPolicy)))
+		s.mux.Handle("PATCH /api/v1/ai-soc/policy", s.protect("ai.policy.manage", http.HandlerFunc(s.updateAISOCPolicy)))
+		s.mux.Handle("GET /api/v1/ai-soc/requests", s.protect("ai.read", http.HandlerFunc(s.listAISOCRequests)))
+		s.mux.Handle("POST /api/v1/ai-soc/requests", s.protect("ai.request", http.HandlerFunc(s.createAISOCRequest)))
+		s.mux.Handle("GET /api/v1/ai-soc/requests/{requestID}", s.protect("ai.read", http.HandlerFunc(s.getAISOCRequest)))
+		s.mux.Handle("POST /api/v1/ai-soc/requests/{requestID}/decisions", s.protect("ai.decide", http.HandlerFunc(s.decideAISOCRequest)))
 	}
 	s.mux.Handle("GET /api/v1/findings", s.protect("siem.findings.read", http.HandlerFunc(s.listFindings)))
 	s.mux.Handle("GET /api/v1/alerts", s.protect("soc.alerts.read", http.HandlerFunc(s.listAlerts)))
@@ -827,6 +839,16 @@ func (s *Server) handleDomainError(w http.ResponseWriter, r *http.Request, err e
 		s.problem(w, r, http.StatusPreconditionFailed, "version_conflict", "The resource changed", "Refresh the resource and retry with its current version.")
 	case errors.Is(err, store.ErrAlreadyExists):
 		s.problem(w, r, http.StatusConflict, "already_exists", "Resource already exists", "A resource with this identity already exists in the tenant.")
+	case errors.Is(err, store.ErrAISOCIdempotencyMismatch):
+		s.problem(w, r, http.StatusConflict, "ai_idempotency_mismatch", "AI request conflict", "The idempotency key was already used with a different request.")
+	case errors.Is(err, aisoc.ErrInvalidRequest):
+		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_ai_request", "Invalid AI SOC request", err.Error())
+	case errors.Is(err, aisoc.ErrInvalidPolicy):
+		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_ai_policy", "Invalid AI SOC policy", err.Error())
+	case errors.Is(err, aisoc.ErrInvalidDecision):
+		s.problem(w, r, http.StatusConflict, "invalid_ai_decision", "Invalid AI SOC decision", err.Error())
+	case errors.Is(err, aisoc.ErrPolicyDisabled), errors.Is(err, aisoc.ErrCloudDisabled):
+		s.problem(w, r, http.StatusConflict, "ai_policy_blocked", "AI request blocked by policy", err.Error())
 	case errors.Is(err, ueba.ErrInvalidFilter):
 		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_ueba_filter", "Invalid UEBA filter", err.Error())
 	case errors.Is(err, ueba.ErrInvalidFeedback):
