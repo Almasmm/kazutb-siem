@@ -1,0 +1,81 @@
+package auth
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+)
+
+var (
+	ErrUnauthenticated = errors.New("authentication required")
+	ErrTenantDenied    = errors.New("tenant access denied")
+)
+
+type Principal struct {
+	ID             string
+	DisplayName    string
+	Role           string
+	Permissions    map[string]bool
+	AllowedTenants map[string]bool
+	PlatformScope  bool
+}
+
+func (p Principal) Can(permission string) bool {
+	return p.Permissions["*"] || p.Permissions[permission]
+}
+
+func (p Principal) CanAccessTenant(tenantID string) bool {
+	return tenantID != "" && (p.PlatformScope || p.AllowedTenants[tenantID])
+}
+
+type DemoAuthenticator struct {
+	tokens map[string]Principal
+}
+
+func NewDemoAuthenticator() *DemoAuthenticator {
+	read := []string{
+		"platform.overview.read", "siem.events.read", "siem.findings.read",
+		"soc.alerts.read", "soc.incidents.read", "detection.rules.read",
+	}
+	l2 := append(append([]string{}, read...), "soc.alerts.manage", "soc.incidents.create", "soc.incidents.manage", "platform.audit.read")
+	return &DemoAuthenticator{tokens: map[string]Principal{
+		"kcsp-demo-l1":        principal("user-soc-l1", "Айдана Сәрсен", "SOC L1", append(read, "soc.alerts.manage", "soc.incidents.create")),
+		"kcsp-demo-l2":        principal("user-soc-l2", "Данияр Нұрлан", "SOC L2", l2),
+		"kcsp-demo-auditor":   principal("user-auditor", "Internal Auditor", "Auditor", []string{"platform.overview.read", "platform.audit.read", "soc.alerts.read", "soc.incidents.read"}),
+		"kcsp-demo-collector": principal("svc-http-collector", "HTTP Collector", "Service Account", []string{"siem.events.ingest"}),
+		"kcsp-demo-admin": {
+			ID:             "user-platform-admin",
+			DisplayName:    "KCSP Administrator",
+			Role:           "Platform Administrator",
+			Permissions:    map[string]bool{"*": true},
+			AllowedTenants: map[string]bool{},
+			PlatformScope:  true,
+		},
+	}}
+}
+
+func principal(id, name, role string, permissions []string) Principal {
+	perms := make(map[string]bool, len(permissions))
+	for _, permission := range permissions {
+		perms[permission] = true
+	}
+	return Principal{
+		ID:             id,
+		DisplayName:    name,
+		Role:           role,
+		Permissions:    perms,
+		AllowedTenants: map[string]bool{"university-kulazhanov": true},
+	}
+}
+
+func (a *DemoAuthenticator) Authenticate(r *http.Request) (Principal, error) {
+	value := strings.TrimSpace(r.Header.Get("Authorization"))
+	if !strings.HasPrefix(value, "Bearer ") {
+		return Principal{}, ErrUnauthenticated
+	}
+	principal, ok := a.tokens[strings.TrimSpace(strings.TrimPrefix(value, "Bearer "))]
+	if !ok {
+		return Principal{}, ErrUnauthenticated
+	}
+	return principal, nil
+}

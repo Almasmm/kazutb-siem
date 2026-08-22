@@ -1,0 +1,23 @@
+{
+  "event_id": "fixture-sysmon-negative-001",
+  "category": "process_activity",
+  "activity_name": "Process created",
+  "source": {
+    "vendor": "Microsoft",
+    "product": "Sysmon",
+    "type": "endpoint"
+  },
+  "user": {
+    "name": "KUTB\\it.operator",
+    "is_privileged": false
+  },
+  "device": {
+    "hostname": "it-ws-17",
+    "criticality": 2
+  },
+  "process": {
+    "name": "powershell.exe",
+    "command_line": "powershell.exe Get-Service -Name Spooler"
+  }
+}
+

@@ -1,0 +1,158 @@
+asyncapi: 2.6.0
+id: urn:kcsp:contracts:asyncapi:v0.1
+info:
+  title: KCSP intended event-stream port
+  version: 0.1.0
+  description: |
+    Design contract for a future Kafka EventBus adapter.
+
+    The executable `embedded-dev` profile does not open these channels, emit domain
+    notifications, run a broker, guarantee delivery, or support replay. Its pipeline
+    calls in-memory repositories synchronously. This document reserves message shapes
+    and topic responsibilities so later adapters have an explicit review target; it is
+    not part of V0.1 runtime acceptance.
+  contact:
+    name: KCSP engineering
+    url: https://kcsp.local
+    email: engineering@kcsp.local
+  license:
+    name: Proprietary - development contract
+tags:
+  - name: intended-production-port
+    description: Non-executable Kafka boundary proposed for a later milestone.
+defaultContentType: application/json
+
+servers:
+  intendedKafka:
+    url: kafka.example.invalid:9092
+    protocol: kafka
+    description: Non-routable placeholder. No Kafka adapter exists in V0.1.
+    tags:
+      - name: intended-production-port
+    x-kcsp-implemented: false
+
+channels:
+  kcsp.events.canonical.v1:
+    description: Intended tenant-keyed canonical event input for a future detection worker.
+    servers: [intendedKafka]
+    subscribe:
+      operationId: consumeCanonicalEvent
+      summary: Future KCSP worker consumes a canonical event.
+      message:
+        $ref: '#/components/messages/CanonicalEventV1'
+  kcsp.findings.v1:
+    description: Intended immutable Finding output from a future detection worker.
+    servers: [intendedKafka]
+    publish:
+      operationId: publishFinding
+      summary: Future KCSP worker publishes a Finding.
+      message:
+        $ref: '#/components/messages/FindingV1'
+  kcsp.alerts.v1:
+    description: Intended Alert create/update stream for control-plane consumers.
+    servers: [intendedKafka]
+    publish:
+      operationId: publishAlertChange
+      summary: Future KCSP worker publishes an Alert snapshot after an accepted change.
+      message:
+        $ref: '#/components/messages/AlertChangedV1'
+  kcsp.incidents.v1:
+    description: Intended Incident create/update stream for downstream integrations.
+    servers: [intendedKafka]
+    publish:
+      operationId: publishIncidentChange
+      summary: Future KCSP control plane publishes an Incident snapshot.
+      message:
+        $ref: '#/components/messages/IncidentChangedV1'
+
+components:
+  messages:
+    CanonicalEventV1:
+      messageId: kcsp.canonical-event.v1
+      name: CanonicalEventV1
+      title: Canonical Event V1
+      summary: Intended future stream input; HTTP direct ingest is executable today.
+      contentType: application/json
+      headers:
+        $ref: '#/components/schemas/MessageHeaders'
+      payload:
+        $ref: '../openapi/kcsp-v0.1.yaml#/components/schemas/CanonicalEvent'
+    FindingV1:
+      messageId: kcsp.finding.v1
+      name: FindingV1
+      title: Finding V1
+      contentType: application/json
+      headers:
+        $ref: '#/components/schemas/MessageHeaders'
+      payload:
+        $ref: '../openapi/kcsp-v0.1.yaml#/components/schemas/Finding'
+    AlertChangedV1:
+      messageId: kcsp.alert-changed.v1
+      name: AlertChangedV1
+      title: Alert changed V1
+      contentType: application/json
+      headers:
+        $ref: '#/components/schemas/MessageHeaders'
+      payload:
+        $ref: '../openapi/kcsp-v0.1.yaml#/components/schemas/Alert'
+    IncidentChangedV1:
+      messageId: kcsp.incident-changed.v1
+      name: IncidentChangedV1
+      title: Incident changed V1
+      contentType: application/json
+      headers:
+        $ref: '#/components/schemas/MessageHeaders'
+      payload:
+        $ref: '../openapi/kcsp-v0.1.yaml#/components/schemas/Incident'
+
+  schemas:
+    MessageHeaders:
+      type: object
+      additionalProperties: false
+      required:
+        - message_id
+        - message_type
+        - schema_version
+        - occurred_at
+        - tenant_id
+        - correlation_id
+        - aggregate_type
+        - aggregate_id
+        - aggregate_version
+      properties:
+        message_id: { type: string }
+        message_type:
+          type: string
+          enum:
+            - event.canonical
+            - finding.created
+            - alert.created
+            - alert.updated
+            - incident.created
+            - incident.updated
+        schema_version: { type: string, enum: ['1'] }
+        occurred_at: { type: string, format: date-time }
+        tenant_id: { type: string }
+        correlation_id: { type: string }
+        causation_id: { type: string }
+        aggregate_type:
+          type: string
+          enum: [event, finding, alert, incident]
+        aggregate_id: { type: string }
+        aggregate_version:
+          type: integer
+          minimum: 1
+
+x-kcsp-runtime-status:
+  profile: embedded-dev
+  implemented: false
+  executable_transport: none
+  executable_delivery: synchronous-direct-calls
+  intended_adapter: Kafka
+  unresolved_before_implementation:
+    - topic partition keys and tenant isolation
+    - authentication and authorization
+    - schema registry and compatibility policy
+    - at-least-once delivery and idempotent consumers
+    - ordering, replay, backpressure, quarantine, and poison messages
+    - outbox boundary for PostgreSQL control-plane mutations

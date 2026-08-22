@@ -1,0 +1,11 @@
+.tools/
+.cache/
+.env
+*.log
+coverage.out
+coverage
+bin/
+dist/
+node_modules/
+apps/web/node_modules/
+apps/web/dist/

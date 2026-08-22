@@ -1,0 +1,1390 @@
+openapi: 3.1.0
+info:
+  title: KCSP Embedded Vertical Slice API
+  version: 0.1.0
+  summary: Executable development contract for the Event-to-Incident slice.
+  description: |
+    This contract describes the executable `embedded-dev` profile. The API runs one
+    synchronous ingest/detection/SOC pipeline and stores state in process memory.
+
+    Authentication and authorization use hard-coded demonstration Bearer tokens plus
+    the required `X-KCSP-Tenant-ID` membership check. These tokens are public test data,
+    not secrets and not production OIDC. Runtime state and the SHA-256 audit chain are
+    lost on restart. The profile is not suitable for real telemetry or an untrusted
+    network.
+
+    Kafka, ClickHouse, PostgreSQL, and OIDC are intended future adapters behind ports;
+    they are not implemented by V0.1.
+  contact:
+    name: KCSP engineering
+  license:
+    name: Proprietary - development contract
+    identifier: LicenseRef-KCSP-Development
+servers:
+  - url: http://127.0.0.1:8080
+    description: Loopback-published embedded development API
+security:
+  - demoBearer: []
+tags:
+  - name: Session
+    description: Effective development identity, tenant, permissions, locale, and timezone.
+  - name: Overview
+    description: Tenant-scoped operational summary of the embedded profile.
+  - name: Events
+    description: Direct canonical-event ingest and immutable Event reads.
+  - name: Findings
+    description: Immutable detection results.
+  - name: Alerts
+    description: Risk-scored analyst triage objects.
+  - name: Incidents
+    description: Analyst-created investigations and lifecycle state.
+  - name: Rules
+    description: Read-only embedded detection rules.
+  - name: Audit
+    description: Per-tenant volatile SHA-256 chained audit history.
+  - name: Demo
+    description: Embedded-profile lifecycle helpers that never exist in a production deployment.
+
+paths:
+  /api/v1/session:
+    parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+    get:
+      tags: [Session]
+      operationId: getSession
+      summary: Return the effective demo principal and tenant context.
+      x-kcsp-permission: platform.overview.read
+      responses:
+        '200':
+          description: Effective local session.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [principal, tenant, permissions, locale, timezone, auth_mode]
+                properties:
+                  principal:
+                    type: object
+                    required: [id, display_name, role]
+                    properties:
+                      id: { type: string }
+                      display_name: { type: string }
+                      role: { type: string }
+                  tenant:
+                    type: object
+                    required: [id, name]
+                    properties:
+                      id: { type: string }
+                      name: { type: string }
+                  permissions:
+                    type: array
+                    items: { type: string }
+                  locale: { type: string, example: ru-KZ }
+                  timezone: { type: string, example: Asia/Qyzylorda }
+                  auth_mode: { type: string, const: demo }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/demo/reset:
+    parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+    post:
+      tags: [Demo]
+      operationId: resetDemoProfile
+      summary: Replace volatile runtime state with the synthetic seed baseline.
+      description: Development-only endpoint protected by the platform-admin fixture token.
+      x-kcsp-permission: platform.demo.reset
+      responses:
+        '200':
+          description: Seed baseline restored.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, const: reset }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/overview:
+    parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+    get:
+      tags: [Overview]
+      operationId: getOverview
+      summary: Return the current tenant dashboard summary.
+      x-kcsp-permission: platform.overview.read
+      responses:
+        '200':
+          description: Overview generated from current in-memory state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Overview'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/events:
+    parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+    get:
+      tags: [Events]
+      operationId: listEvents
+      summary: List tenant events in reverse insertion order.
+      x-kcsp-permission: siem.events.read
+      parameters:
+        - $ref: '#/components/parameters/Query'
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: severity
+          in: query
+          schema: { type: integer }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Event list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Events]
+      operationId: ingestEvent
+      summary: Run one canonical event through the synchronous embedded pipeline.
+      description: |
+        The caller submits the canonical V0.1 envelope directly; V0.1 does not parse
+        raw Sysmon/XML/CEF input. The server overwrites `tenant_id`, `ingest_time`, and
+        `raw.hash`, and supplies defaults for missing event id, event time, collector,
+        schema version, parser, raw message, and raw reference.
+
+        A new event returns 201 with separate Event, Finding, and Alert objects. An
+        existing `event_id` in the same server-bound tenant returns 200 with
+        `duplicate: true` and empty Finding/Alert arrays.
+      x-kcsp-permission: siem.events.ingest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CanonicalEventInput'
+            examples:
+              suspiciousPowerShell:
+                summary: Synthetic canonical Sysmon process-creation event
+                value:
+                  event_id: fixture-sysmon-positive-001
+                  category: process_activity
+                  activity_name: Process created
+                  source:
+                    vendor: Microsoft
+                    product: Sysmon
+                    type: endpoint
+                  user:
+                    name: 'KUTB\administrator'
+                    is_privileged: true
+                  device:
+                    hostname: dc-01
+                    criticality: 5
+                  process:
+                    name: powershell.exe
+                    command_line: powershell.exe -NoP -EncodedCommand SQBFAFgA
+      responses:
+        '201':
+          description: A new Event was processed synchronously.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestResult'
+        '200':
+          description: The tenant already contains this `event_id`; no new detection objects were created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/events/{eventID}:
+    parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/EventId'
+    get:
+      tags: [Events]
+      operationId: getEvent
+      summary: Return one immutable canonical Event.
+      x-kcsp-permission: siem.events.read
+      responses:
+        '200':
+          description: Event found in the server-bound tenant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CanonicalEvent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/findings:
+    parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+    get:
+      tags: [Findings]
+      operationId: listFindings
+      summary: List immutable Findings, optionally for one Event.
+      x-kcsp-permission: siem.findings.read
+      parameters:
+        - name: event_id
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Finding list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/alerts:
+    parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+    get:
+      tags: [Alerts]
+      operationId: listAlerts
+      summary: List tenant Alerts requiring or recording triage.
+      x-kcsp-permission: soc.alerts.read
+      parameters:
+        - $ref: '#/components/parameters/Query'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/AlertStatus'
+        - name: severity
+          in: query
+          schema:
+            $ref: '#/components/schemas/Severity'
+        - name: assignee
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Alert list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/alerts/{alertID}:
+    parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/AlertId'
+    get:
+      tags: [Alerts]
+      operationId: getAlert
+      summary: Return one Alert with ETag version.
+      x-kcsp-permission: soc.alerts.read
+      responses:
+        '200':
+          description: Alert found.
+          headers:
+            ETag:
+              $ref: '#/components/headers/VersionETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags: [Alerts]
+      operationId: updateAlert
+      summary: Triage an Alert.
+      description: |
+        Supply the expected optimistic version either in `version` or `If-Match`.
+        A stale version returns 412. Closing requires a disposition. Unknown JSON
+        fields are rejected.
+      x-kcsp-permission: soc.alerts.manage
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertPatch'
+      responses:
+        '200':
+          description: Alert updated and an AuditEntry appended.
+          headers:
+            ETag:
+              $ref: '#/components/headers/VersionETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/incidents:
+    parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+    get:
+      tags: [Incidents]
+      operationId: listIncidents
+      summary: List tenant Incidents.
+      x-kcsp-permission: soc.incidents.read
+      parameters:
+        - $ref: '#/components/parameters/Query'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/IncidentStatus'
+        - name: severity
+          in: query
+          schema:
+            $ref: '#/components/schemas/Severity'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Incident list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Incidents]
+      operationId: createIncident
+      summary: Create an Incident from one or more Alerts.
+      description: |
+        Severity, risk, Event/Finding lineage, entities, and MITRE techniques are
+        derived from the referenced Alerts. Repeating the same normalized Alert set
+        returns the existing Incident with 200.
+      x-kcsp-permission: soc.incidents.create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentCreate'
+      responses:
+        '201':
+          description: Incident created and AuditEntry appended.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+        '200':
+          description: An Incident already exists for exactly this Alert set.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/incidents/{incidentID}:
+    parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/IncidentId'
+    get:
+      tags: [Incidents]
+      operationId: getIncident
+      summary: Return one Incident with timeline and ETag version.
+      x-kcsp-permission: soc.incidents.read
+      responses:
+        '200':
+          description: Incident found.
+          headers:
+            ETag:
+              $ref: '#/components/headers/VersionETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags: [Incidents]
+      operationId: updateIncident
+      summary: Progress an Incident through its lifecycle.
+      description: |
+        Supply the expected optimistic version either in `version` or `If-Match`.
+        A stale version returns 412; an illegal lifecycle transition returns 409.
+        Closing requires disposition and closure reason. Unknown fields are rejected.
+      x-kcsp-permission: soc.incidents.manage
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentPatch'
+      responses:
+        '200':
+          description: Incident updated; timeline and audit records appended.
+          headers:
+            ETag:
+              $ref: '#/components/headers/VersionETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/rules:
+    parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+    get:
+      tags: [Rules]
+      operationId: listRules
+      summary: List the two embedded, read-only V0.1 detection rules.
+      x-kcsp-permission: detection.rules.read
+      responses:
+        '200':
+          description: Rule list containing PowerShell and authentication-threshold rules.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/audit:
+    parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+    get:
+      tags: [Audit]
+      operationId: listAuditEntries
+      summary: List volatile per-tenant SHA-256 chained AuditEntries.
+      description: |
+        `chain_valid` recomputes the in-memory chain. The chain is unkeyed, volatile,
+        and not backed by WORM storage, so it is not forensic tamper evidence.
+      x-kcsp-permission: platform.audit.read
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Audit list and current chain verification result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    demoBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: KCSP-DEMO-TOKEN
+      description: |
+        Hard-coded development identity. Examples include `kcsp-demo-collector`,
+        `kcsp-demo-l1`, `kcsp-demo-l2`, `kcsp-demo-auditor`, and `kcsp-demo-admin`.
+        These values are public fixtures and must never be enabled in production.
+
+  parameters:
+    TenantHeader:
+      name: X-KCSP-Tenant-ID
+      in: header
+      required: true
+      description: Tenant requested by the caller and authorized against demo-token membership.
+      schema:
+        type: string
+        minLength: 1
+      example: university-kulazhanov
+    Query:
+      name: q
+      in: query
+      description: Case-insensitive in-memory substring search over resource-specific fields.
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      description: Maximum returned items; the embedded adapter defaults to 100 and caps at 500.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: Quoted or unquoted current integer version; used when body `version` is zero/omitted.
+      schema:
+        type: string
+        pattern: '^"?[1-9][0-9]*"?$'
+    EventId:
+      name: eventID
+      in: path
+      required: true
+      schema: { type: string }
+    AlertId:
+      name: alertID
+      in: path
+      required: true
+      schema: { type: string }
+    IncidentId:
+      name: incidentID
+      in: path
+      required: true
+      schema: { type: string }
+
+  headers:
+    RequestId:
+      description: Request correlation identifier.
+      schema: { type: string }
+    VersionETag:
+      description: Quoted current aggregate version.
+      schema:
+        type: string
+        pattern: '^"[1-9][0-9]*"$'
+
+  responses:
+    BadRequest:
+      description: Malformed JSON, unknown mutation field, or oversized request decoded as invalid input.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Missing or unknown demo Bearer token.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: Token lacks the operation permission or requested tenant membership.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Resource does not exist in the server-bound tenant.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: Invalid Alert/Incident lifecycle transition.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    PreconditionFailed:
+      description: Supplied aggregate version is stale.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    UnprocessableEntity:
+      description: Canonical Event or SOC command violates a domain invariant.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    InternalError:
+      description: Unexpected embedded adapter failure.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+    EventSource:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        vendor: { type: string }
+        product: { type: string }
+        type: { type: string }
+
+    SchemaRef:
+      type: object
+      additionalProperties: false
+      properties:
+        ocsf_version: { type: string }
+        class_uid: { type: integer }
+
+    UserRef:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        name: { type: string }
+        is_privileged: { type: boolean }
+
+    DeviceRef:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        hostname: { type: string }
+        ip: { type: string }
+        department: { type: string }
+        criticality: { type: integer }
+
+    EndpointRef:
+      type: object
+      additionalProperties: false
+      properties:
+        ip: { type: string }
+        port: { type: integer }
+        hostname: { type: string }
+
+    ProcessRef:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        pid: { type: integer }
+        command_line: { type: string }
+        parent_name: { type: string }
+
+    SecurityResult:
+      type: object
+      additionalProperties: false
+      properties:
+        action: { type: string }
+        outcome: { type: string }
+
+    RawRefInput:
+      type: object
+      additionalProperties: false
+      properties:
+        message: { type: string }
+        reference: { type: string }
+
+    RawRef:
+      type: object
+      additionalProperties: false
+      required: [hash]
+      properties:
+        message: { type: string }
+        hash:
+          type: string
+          pattern: '^sha256:[a-f0-9]{64}$'
+        reference: { type: string }
+
+    ParserRef:
+      type: object
+      additionalProperties: false
+      required: [id, version]
+      properties:
+        id: { type: string }
+        version: { type: string }
+
+    CanonicalEventInput:
+      type: object
+      description: Direct canonical V0.1 input; it is not a raw vendor-event parser contract.
+      required: [event_id, category, source]
+      properties:
+        event_id: { type: string, minLength: 1 }
+        tenant_id:
+          type: string
+          readOnly: true
+          description: Server-owned; any decoded value is overwritten by authenticated tenant context.
+        event_time: { type: string, format: date-time }
+        ingest_time: { type: string, format: date-time, readOnly: true }
+        collector_id: { type: string }
+        category: { type: string, minLength: 1 }
+        activity_name: { type: string }
+        source:
+          $ref: '#/components/schemas/EventSource'
+        schema:
+          $ref: '#/components/schemas/SchemaRef'
+        severity: { type: integer }
+        confidence: { type: integer }
+        user:
+          $ref: '#/components/schemas/UserRef'
+        device:
+          $ref: '#/components/schemas/DeviceRef'
+        src_endpoint:
+          $ref: '#/components/schemas/EndpointRef'
+        dst_endpoint:
+          $ref: '#/components/schemas/EndpointRef'
+        process:
+          $ref: '#/components/schemas/ProcessRef'
+        security_result:
+          $ref: '#/components/schemas/SecurityResult'
+        raw:
+          $ref: '#/components/schemas/RawRefInput'
+        metadata:
+          type: object
+          additionalProperties: true
+
+    CanonicalEvent:
+      type: object
+      required:
+        - event_id
+        - tenant_id
+        - event_time
+        - ingest_time
+        - collector_id
+        - category
+        - source
+        - schema
+        - severity
+        - confidence
+        - user
+        - device
+        - src_endpoint
+        - dst_endpoint
+        - process
+        - security_result
+        - raw
+        - parser
+      properties:
+        event_id: { type: string }
+        tenant_id: { type: string }
+        event_time: { type: string, format: date-time }
+        ingest_time: { type: string, format: date-time }
+        collector_id: { type: string }
+        category: { type: string }
+        activity_name: { type: string }
+        source:
+          $ref: '#/components/schemas/EventSource'
+        schema:
+          $ref: '#/components/schemas/SchemaRef'
+        severity: { type: integer }
+        confidence: { type: integer }
+        user:
+          $ref: '#/components/schemas/UserRef'
+        device:
+          $ref: '#/components/schemas/DeviceRef'
+        src_endpoint:
+          $ref: '#/components/schemas/EndpointRef'
+        dst_endpoint:
+          $ref: '#/components/schemas/EndpointRef'
+        process:
+          $ref: '#/components/schemas/ProcessRef'
+        security_result:
+          $ref: '#/components/schemas/SecurityResult'
+        raw:
+          $ref: '#/components/schemas/RawRef'
+        parser:
+          $ref: '#/components/schemas/ParserRef'
+        metadata:
+          type: object
+          additionalProperties: true
+
+    RiskFactor:
+      type: object
+      additionalProperties: false
+      required: [code, label, delta]
+      properties:
+        code: { type: string }
+        label: { type: string }
+        delta: { type: integer }
+        source_reference: { type: string }
+
+    RuleRef:
+      type: object
+      additionalProperties: false
+      required: [id, title, version]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        version: { type: string }
+
+    Finding:
+      type: object
+      additionalProperties: false
+      required:
+        - finding_id
+        - tenant_id
+        - event_id
+        - rule
+        - title
+        - severity
+        - confidence
+        - mitre
+        - matched_fields
+        - risk_score
+        - risk_breakdown
+        - created_at
+      properties:
+        finding_id: { type: string }
+        tenant_id: { type: string }
+        event_id: { type: string }
+        rule:
+          $ref: '#/components/schemas/RuleRef'
+        title: { type: string }
+        severity:
+          $ref: '#/components/schemas/Severity'
+        confidence: { type: integer }
+        mitre:
+          type: array
+          items: { type: string }
+        matched_fields:
+          type: array
+          items: { type: string }
+        risk_score: { type: integer, minimum: 0, maximum: 100 }
+        risk_breakdown:
+          type: array
+          items:
+            $ref: '#/components/schemas/RiskFactor'
+        created_at: { type: string, format: date-time }
+
+    SLAInfo:
+      type: object
+      additionalProperties: false
+      required: [acknowledge_by, breached]
+      properties:
+        acknowledge_by: { type: string, format: date-time }
+        breached: { type: boolean }
+        acknowledged_at: { type: string, format: date-time }
+
+    EntitySummary:
+      type: object
+      additionalProperties: false
+      required: [type, name]
+      properties:
+        type: { type: string }
+        id: { type: string }
+        name: { type: string }
+        label: { type: string }
+
+    AlertStatus:
+      type: string
+      enum: [NEW, ACKNOWLEDGED, IN_PROGRESS, CLOSED]
+
+    Disposition:
+      type: string
+      enum: [FALSE_POSITIVE, BENIGN_TRUE_POSITIVE, DUPLICATE, ESCALATED, ACCEPTED_RISK]
+
+    Alert:
+      type: object
+      additionalProperties: false
+      required:
+        - alert_id
+        - tenant_id
+        - title
+        - severity
+        - risk_score
+        - risk_breakdown
+        - status
+        - rule
+        - mitre
+        - entity
+        - finding_ids
+        - event_ids
+        - event_count
+        - first_seen
+        - last_seen
+        - sla
+        - version
+        - created_at
+        - updated_at
+      properties:
+        alert_id: { type: string }
+        tenant_id: { type: string }
+        title: { type: string }
+        severity:
+          $ref: '#/components/schemas/Severity'
+        risk_score: { type: integer, minimum: 0, maximum: 100 }
+        risk_breakdown:
+          type: array
+          items:
+            $ref: '#/components/schemas/RiskFactor'
+        status:
+          $ref: '#/components/schemas/AlertStatus'
+        disposition:
+          $ref: '#/components/schemas/Disposition'
+        assignee: { type: string }
+        rule:
+          $ref: '#/components/schemas/RuleRef'
+        mitre:
+          type: array
+          items: { type: string }
+        entity:
+          $ref: '#/components/schemas/EntitySummary'
+        finding_ids:
+          type: array
+          items: { type: string }
+        event_ids:
+          type: array
+          items: { type: string }
+        event_count: { type: integer, minimum: 1 }
+        first_seen: { type: string, format: date-time }
+        last_seen: { type: string, format: date-time }
+        sla:
+          $ref: '#/components/schemas/SLAInfo'
+        version: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    AlertPatch:
+      type: object
+      additionalProperties: false
+      description: Contract clients must send `version` or `If-Match` even though either field is transport-optional.
+      properties:
+        status:
+          $ref: '#/components/schemas/AlertStatus'
+        assignee: { type: string }
+        disposition:
+          $ref: '#/components/schemas/Disposition'
+        comment: { type: string }
+        version: { type: integer, minimum: 1 }
+
+    TimelineEntry:
+      type: object
+      additionalProperties: false
+      required: [id, type, message, actor, created_at]
+      properties:
+        id: { type: string }
+        type: { type: string }
+        message: { type: string }
+        actor: { type: string }
+        created_at: { type: string, format: date-time }
+        data:
+          type: object
+          additionalProperties: true
+
+    IncidentStatus:
+      type: string
+      enum: [NEW, TRIAGE, INVESTIGATION, CONTAINMENT, ERADICATION, RECOVERY, CLOSED]
+
+    Incident:
+      type: object
+      additionalProperties: false
+      required:
+        - incident_id
+        - tenant_id
+        - title
+        - summary
+        - severity
+        - status
+        - alert_ids
+        - finding_ids
+        - event_ids
+        - entities
+        - mitre
+        - risk_score
+        - timeline
+        - sla
+        - allowed_transitions
+        - version
+        - created_at
+        - updated_at
+      properties:
+        incident_id: { type: string }
+        tenant_id: { type: string }
+        title: { type: string }
+        summary: { type: string }
+        severity:
+          $ref: '#/components/schemas/Severity'
+        status:
+          $ref: '#/components/schemas/IncidentStatus'
+        disposition:
+          $ref: '#/components/schemas/Disposition'
+        closure_reason: { type: string }
+        assignee: { type: string }
+        alert_ids:
+          type: array
+          items: { type: string }
+        finding_ids:
+          type: array
+          items: { type: string }
+        event_ids:
+          type: array
+          items: { type: string }
+        entities:
+          type: array
+          items:
+            $ref: '#/components/schemas/EntitySummary'
+        mitre:
+          type: array
+          items: { type: string }
+        risk_score: { type: integer, minimum: 0, maximum: 100 }
+        timeline:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimelineEntry'
+        sla:
+          $ref: '#/components/schemas/SLAInfo'
+        allowed_transitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/IncidentStatus'
+        version: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    IncidentCreate:
+      type: object
+      additionalProperties: false
+      required: [alert_ids]
+      properties:
+        title: { type: string }
+        summary: { type: string }
+        assignee: { type: string }
+        alert_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string }
+
+    IncidentPatch:
+      type: object
+      additionalProperties: false
+      description: Contract clients must send `version` or `If-Match` even though either field is transport-optional.
+      properties:
+        status:
+          $ref: '#/components/schemas/IncidentStatus'
+        assignee: { type: string }
+        disposition:
+          $ref: '#/components/schemas/Disposition'
+        closure_reason: { type: string }
+        comment: { type: string }
+        version: { type: integer, minimum: 1 }
+
+    DetectionRule:
+      type: object
+      additionalProperties: false
+      required:
+        - rule_id
+        - title
+        - description
+        - version
+        - severity
+        - confidence
+        - mitre
+        - required_data_sources
+        - known_false_positives
+        - owner
+        - state
+        - updated_at
+      properties:
+        rule_id: { type: string }
+        title: { type: string }
+        description: { type: string }
+        version: { type: string }
+        severity:
+          $ref: '#/components/schemas/Severity'
+        confidence: { type: integer }
+        mitre:
+          type: array
+          items: { type: string }
+        required_data_sources:
+          type: array
+          items: { type: string }
+        known_false_positives:
+          type: array
+          items: { type: string }
+        owner: { type: string }
+        state: { type: string, enum: [PUBLISHED] }
+        updated_at: { type: string, format: date-time }
+
+    AuditEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - audit_id
+        - tenant_id
+        - actor
+        - action
+        - resource_type
+        - resource_id
+        - outcome
+        - previous_hash
+        - hash
+        - created_at
+      properties:
+        audit_id: { type: string }
+        tenant_id: { type: string }
+        actor: { type: string }
+        action: { type: string }
+        resource_type: { type: string }
+        resource_id: { type: string }
+        outcome: { type: string }
+        request_id: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+        previous_hash:
+          type: string
+          pattern: '^$|^[a-f0-9]{64}$'
+        hash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        created_at: { type: string, format: date-time }
+
+    Overview:
+      type: object
+      additionalProperties: false
+      required: [tenant, metrics, severity_distribution, top_rules, platform, generated_at]
+      properties:
+        tenant:
+          type: object
+          additionalProperties: false
+          required: [id, name]
+          properties:
+            id: { type: string }
+            name: { type: string }
+        metrics:
+          type: object
+          additionalProperties: false
+          required: [events_24h, open_alerts, critical_alerts, unassigned_alerts, active_incidents, detection_latency_ms]
+          properties:
+            events_24h: { type: integer }
+            open_alerts: { type: integer }
+            critical_alerts: { type: integer }
+            unassigned_alerts: { type: integer }
+            active_incidents: { type: integer }
+            detection_latency_ms: { type: integer }
+        severity_distribution:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [severity, count]
+            properties:
+              severity:
+                $ref: '#/components/schemas/Severity'
+              count: { type: integer }
+        top_rules:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [title, count]
+            properties:
+              title: { type: string }
+              count: { type: integer }
+        platform:
+          type: object
+          additionalProperties: false
+          required: [status, profile, ingest_eps, sources_healthy, sources_total, parser_errors_24h]
+          properties:
+            status: { type: string, const: OPERATIONAL }
+            profile: { type: string, const: embedded-dev }
+            ingest_eps: { type: number }
+            sources_healthy: { type: integer }
+            sources_total: { type: integer }
+            parser_errors_24h: { type: integer }
+        generated_at: { type: string, format: date-time }
+
+    IngestResult:
+      type: object
+      additionalProperties: false
+      required: [event, findings, alerts, duplicate]
+      properties:
+        event:
+          $ref: '#/components/schemas/CanonicalEvent'
+        findings:
+          type: array
+          items:
+            $ref: '#/components/schemas/Finding'
+        alerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Alert'
+        duplicate: { type: boolean }
+
+    EventList:
+      type: object
+      additionalProperties: false
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalEvent'
+        total: { type: integer, minimum: 0 }
+    FindingList:
+      type: object
+      additionalProperties: false
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Finding'
+        total: { type: integer, minimum: 0 }
+    AlertList:
+      type: object
+      additionalProperties: false
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Alert'
+        total: { type: integer, minimum: 0 }
+    IncidentList:
+      type: object
+      additionalProperties: false
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Incident'
+        total: { type: integer, minimum: 0 }
+    RuleList:
+      type: object
+      additionalProperties: false
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DetectionRule'
+        total: { type: integer, minimum: 0 }
+    AuditList:
+      type: object
+      additionalProperties: false
+      required: [items, total, chain_valid]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEntry'
+        total: { type: integer, minimum: 0 }
+        chain_valid: { type: boolean }
+
+    Severity:
+      type: string
+      enum: [INFORMATIONAL, LOW, MEDIUM, HIGH, CRITICAL]
+
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail, code, trace_id]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        detail: { type: string }
+        code: { type: string }
+        trace_id: { type: string }
+
+x-kcsp-runtime:
+  profile: embedded-dev
+  process_model: single-api-process
+  pipeline: synchronous
+  state: in-memory
+  auth: hard-coded-demo-bearer-rbac
+  tenant_binding: bearer-membership-plus-required-header
+  audit: volatile-unkeyed-sha256-chain
+  production_ready: false
+  intended_adapters:
+    event_bus: Kafka
+    event_store: ClickHouse
+    control_store: PostgreSQL
+    identity_provider: OIDC

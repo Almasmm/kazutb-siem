@@ -1,0 +1,23 @@
+{
+  "event_id": "fixture-sysmon-positive-001",
+  "category": "process_activity",
+  "activity_name": "Process created",
+  "source": {
+    "vendor": "Microsoft",
+    "product": "Sysmon",
+    "type": "endpoint"
+  },
+  "user": {
+    "name": "KUTB\\administrator",
+    "is_privileged": true
+  },
+  "device": {
+    "hostname": "dc-01",
+    "criticality": 5
+  },
+  "process": {
+    "name": "powershell.exe",
+    "command_line": "powershell.exe -NoP -EncodedCommand SQBFAFgA"
+  }
+}
+

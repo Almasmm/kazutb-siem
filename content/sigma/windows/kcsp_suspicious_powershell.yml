@@ -1,0 +1,33 @@
+title: KCSP Suspicious PowerShell Execution
+id: e6bd95cd-6d9e-4e8e-90d2-f764a8a5ab61
+status: test
+description: Detects encoded or download-oriented PowerShell command lines in process creation telemetry.
+author: KCSP Detection Engineering
+date: 2026-08-17
+modified: 2026-08-17
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_image:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+  selection_command:
+    CommandLine|contains:
+      - 'EncodedCommand'
+      - 'FromBase64String'
+      - 'DownloadString'
+      - 'Invoke-WebRequest'
+  condition: selection_image and selection_command
+falsepositives:
+  - Approved administration and software deployment tooling
+level: high
+tags:
+  - attack.execution
+  - attack.t1059.001
+custom:
+  kcsp_rule_id: KCSP-WIN-PS-001
+  kcsp_executor: embedded-stateless-v0.1
+  kcsp_version: 1.0.0
+
