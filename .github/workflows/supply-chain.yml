@@ -9,6 +9,7 @@ on:
       - "cmd/agent/**"
       - "internal/agent/**"
       - "ops/agent/**"
+      - "ops/web/**"
       - "ops/supply-chain/**"
       - ".gitattributes"
       - ".github/workflows/release.yml"
@@ -22,6 +23,7 @@ on:
       - "cmd/agent/**"
       - "internal/agent/**"
       - "ops/agent/**"
+      - "ops/web/**"
       - "ops/supply-chain/**"
       - ".gitattributes"
       - ".github/workflows/release.yml"
@@ -63,4 +65,5 @@ jobs:
             ops/agent/linux/build-package.sh \
             ops/agent/linux/install.sh \
             ops/agent/linux/uninstall.sh \
-            ops/agent/linux/self-test.sh
+            ops/agent/linux/self-test.sh \
+            ops/web/security-headers-self-test.sh

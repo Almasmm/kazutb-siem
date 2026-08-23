@@ -102,6 +102,11 @@ data:
       timeZone: {{ .Values.config.web.tenantTimeZone | quote }}
     });
   default.conf: |
+    map $uri $kcsp_cache_control {
+        default "no-store";
+        ~^/assets/ "public, max-age=31536000, immutable";
+    }
+
     server {
         listen 8080;
         server_name _;
@@ -120,7 +125,6 @@ data:
         location = /config.js {
             access_log off;
             default_type application/javascript;
-            add_header Cache-Control "no-store";
             try_files $uri =404;
         }
 
@@ -139,20 +143,19 @@ data:
 
         location /assets/ {
             try_files $uri =404;
-            expires 1y;
-            add_header Cache-Control "public, immutable";
         }
 
         location / {
             try_files $uri $uri/ /index.html;
-            add_header Cache-Control "no-store";
         }
 
+        add_header Cache-Control $kcsp_cache_control always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header X-Frame-Options "DENY" always;
         add_header Referrer-Policy "no-referrer" always;
         add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
         add_header Cross-Origin-Opener-Policy "same-origin" always;
         add_header Cross-Origin-Resource-Policy "same-origin" always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' {{ regexFind "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?" .Values.config.auth.oidc.issuerURL }}; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self' {{ regexFind "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?" .Values.config.auth.oidc.issuerURL }}; frame-src 'self' {{ regexFind "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?" .Values.config.auth.oidc.issuerURL }}; frame-ancestors 'none'; manifest-src 'self'; worker-src 'self'" always;
     }

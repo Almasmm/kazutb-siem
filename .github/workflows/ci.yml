@@ -109,6 +109,22 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - name: Build hardened web runtime image
+        working-directory: .
+        run: docker build --file apps/web/Dockerfile --tag kcsp-web:ci apps/web
+      - name: Validate runtime security headers and cache policy
+        working-directory: .
+        run: |
+          docker run --detach --name kcsp-web-ci --add-host api:127.0.0.1 --publish 127.0.0.1:18080:8080 kcsp-web:ci
+          trap 'docker rm --force kcsp-web-ci >/dev/null 2>&1 || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18080/healthz >/dev/null; then
+              break
+            fi
+            [[ "$attempt" -lt 30 ]]
+            sleep 1
+          done
+          bash ops/web/security-headers-self-test.sh http://127.0.0.1:18080
 
   disaster-recovery:
     runs-on: ubuntu-latest

@@ -76,7 +76,7 @@
               "type": "object",
               "required": ["issuerURL", "clientID", "rolesClaim", "permissionClaim", "tenantClaim", "scope"],
               "properties": {
-                "issuerURL": {"type": "string", "minLength": 1},
+                "issuerURL": {"type": "string", "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*)?$"},
                 "clientID": {"type": "string", "minLength": 1},
                 "rolesClaim": {"type": "string", "minLength": 1},
                 "permissionClaim": {"type": "string", "minLength": 1},
