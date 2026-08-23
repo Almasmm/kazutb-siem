@@ -30,7 +30,7 @@ data:
   KCSP_COLLECTOR_TENANT_ID: {{ .Values.global.tenant.id | quote }}
   KCSP_COLLECTOR_OAUTH_TOKEN_URL: {{ .Values.config.networkCollector.oauthTokenURL | quote }}
   KCSP_COLLECTOR_OAUTH_SCOPES: {{ .Values.config.networkCollector.oauthScopes | quote }}
-  KCSP_COLLECTOR_ALLOW_INSECURE_HTTP: "true"
+  KCSP_COLLECTOR_ALLOW_INSECURE_HTTP: {{ ternary "true" "false" .Values.config.networkCollector.allowInsecureHTTP | quote }}
   KCSP_COLLECTOR_SYSLOG_UDP_ADDR: {{ .Values.config.networkCollector.syslog.udpAddress | quote }}
   KCSP_COLLECTOR_SYSLOG_TCP_ADDR: {{ .Values.config.networkCollector.syslog.tcpAddress | quote }}
   KCSP_COLLECTOR_SYSLOG_TLS_ADDR: {{ .Values.config.networkCollector.syslog.tlsAddress | quote }}

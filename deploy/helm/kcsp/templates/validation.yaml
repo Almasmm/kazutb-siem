@@ -1,0 +1,51 @@
+{{- if eq .Values.global.profile "production" }}
+{{- if ne .Values.config.auth.mode "oidc" }}
+{{- fail "production requires config.auth.mode=oidc" }}
+{{- end }}
+{{- if ne .Values.config.web.authMode "oidc" }}
+{{- fail "production requires config.web.authMode=oidc" }}
+{{- end }}
+{{- if not .Values.config.auth.oidc.requireMFA }}
+{{- fail "production requires config.auth.oidc.requireMFA=true" }}
+{{- end }}
+{{- if not (hasPrefix "https://" .Values.config.auth.oidc.issuerURL) }}
+{{- fail "production requires an HTTPS OIDC issuer URL" }}
+{{- end }}
+{{- if not .Values.config.minio.secure }}
+{{- fail "production requires config.minio.secure=true" }}
+{{- end }}
+{{- if not .Values.config.kafka.tls.enabled }}
+{{- fail "production requires config.kafka.tls.enabled=true" }}
+{{- end }}
+{{- if lt (int .Values.config.kafka.replicationFactor) 3 }}
+{{- fail "production requires config.kafka.replicationFactor>=3" }}
+{{- end }}
+{{- if and .Values.ingress.enabled (eq (len .Values.ingress.tls) 0) }}
+{{- fail "production ingress requires at least one TLS configuration" }}
+{{- end }}
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.tls }}
+{{- if not .secretName }}
+{{- fail "each production ingress TLS configuration requires secretName" }}
+{{- end }}
+{{- if eq (len .hosts) 0 }}
+{{- fail "each production ingress TLS configuration requires at least one host" }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.workloads.collector.enabled }}
+{{- if and (not .Values.config.networkCollector.allowInsecureHTTP) (not (hasPrefix "https://" .Values.config.networkCollector.serverURL)) }}
+{{- fail "collector serverURL must use HTTPS unless allowInsecureHTTP=true is explicitly set" }}
+{{- end }}
+{{- if and (or .Values.config.networkCollector.syslog.udpAddress .Values.config.networkCollector.syslog.tcpAddress) (not .Values.config.networkCollector.allowInsecureSyslog) }}
+{{- fail "plaintext UDP/TCP syslog requires allowInsecureSyslog=true; prefer mTLS syslog" }}
+{{- end }}
+{{- if and .Values.config.networkCollector.syslog.tlsAddress (not .Values.config.networkCollector.tls.existingSecret) }}
+{{- fail "config.networkCollector.tls.existingSecret is required for TLS syslog" }}
+{{- end }}
+{{- if and (eq .Values.config.networkCollector.service.type "LoadBalancer") (eq (len .Values.config.networkCollector.service.loadBalancerSourceRanges) 0) }}
+{{- fail "collector LoadBalancer requires explicit loadBalancerSourceRanges" }}
+{{- end }}
+{{- end }}

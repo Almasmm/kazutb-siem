@@ -71,7 +71,7 @@
           "type": "object",
           "required": ["mode", "oidc"],
           "properties": {
-            "mode": {"type": "string", "enum": ["oidc", "trusted_headers", "development"]},
+            "mode": {"type": "string", "enum": ["oidc", "demo"]},
             "oidc": {
               "type": "object",
               "required": ["issuerURL", "clientID", "rolesClaim", "permissionClaim", "tenantClaim", "scope"],

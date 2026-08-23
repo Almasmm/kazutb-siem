@@ -93,6 +93,8 @@ config:
     agentEnrollmentRatePerMinute: 600
   networkCollector:
     serverURL: ""
+    allowInsecureHTTP: false
+    allowInsecureSyslog: false
     oauthTokenURL: https://identity.example.edu/realms/kcsp/protocol/openid-connect/token
     oauthScopes: openid profile
     queueMaxBytes: 10737418240
@@ -493,7 +495,10 @@ ingress:
     - host: soc.example.edu
       path: /
       pathType: Prefix
-  tls: []
+  tls:
+    - secretName: kcsp-ingress-tls
+      hosts:
+        - soc.example.edu
 
 observability:
   serviceMonitor:
