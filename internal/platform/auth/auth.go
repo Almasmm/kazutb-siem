@@ -40,6 +40,7 @@ func NewDemoAuthenticator() *DemoAuthenticator {
 		"soc.alerts.read", "soc.incidents.read", "detection.rules.read", "platform.collectors.read", "siem.rules.read",
 		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage",
 		"siem.parsers.read",
+		"siem.mitre.read",
 		"platform.retention.read",
 		"soc.evidence.read",
 		"soc.cases.read",

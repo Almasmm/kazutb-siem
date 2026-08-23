@@ -17,6 +17,7 @@ export const kk = {
     alerts: "Ескертулер кезегі", hunt: "Іздеу / Hunt", incidents: "Инциденттер", cases: "Кейстер", rules: "Анықтау ережелері", collectors: "Коллекторлар",
     assets: "Активтер мен нысандар",
     parsers: "Parser Studio",
+    mitre: "MITRE қамтуы",
     threatIntel: "Threat Intelligence", ueba: "UEBA", evidence: "Дәлелдер", soar: "SOAR", aiSoc: "AI SOC", system: "Жүйе", audit: "Аудит",
   },
   common: {
@@ -179,6 +180,12 @@ export const kk = {
     parser: "Парсер", format: "Envelope форматы", tests: "Тесттер", newVersion: "Жаңа нұсқа", validate: "Тексеру", publish: "Жариялау", compiler: "Компилятор", mappedFields: "Сәйкестенген өрістер",
     validation: "Тексеру есебі", validationPassed: "Жариялауға дайын", validationRequired: "Тексеру қажет", testsPassed: "тест өтті", mapping: "OCSF сәйкестігі", simulator: "Үлгі симуляторы", runSample: "Үлгіні іске қосу",
     createTitle: "Парсер жобасын құру", inputKind: "Кіріс түрі", mappingJson: "Source-to-OCSF сәйкестігі (JSON)", defaultsJson: "OCSF әдепкі мәндері (JSON)", regressionSample: "Регрессиялық үлгі", expectedFields: "Күтілетін OCSF өрістері (JSON)",
+  },
+  mitrePage: {
+    eyebrow: "Анықтауды бақылау", title: "MITRE ATT&CK қамтуы", subtitle: "Rule-to-technique қамтуы, дереккөз дайындығы, инцидент жиілігі және шабуыл тізбегіндегі тәуекел.",
+    coverage: "Салмақталған қамту", covered: "Қамтылған", partial: "Жартылай", gaps: "Қамту бос орындары", gapsShort: "бос орын", rules: "ереже", collectors: "коллектор", incidents: "инцидент", techniques: "техника",
+    noTechniques: "Бұл көрініске сәйкес техника жоқ", detections: "детект", riskPerTechnique: "Инцидент тәуекелі", averageRisk: "Орташа тәуекел", maximumRisk: "Ең жоғары тәуекел", dataDependencies: "Дерек тәуелділігі",
+    detectionsPerTechnique: "Техника детектері", noDetections: "Техникаға детект сәйкестендірілмеген", dataSources: "Дереккөз тәуелділігі", noDependencies: "Ережелер дереккөз тәуелділігін көрсетпейді.", sourceMissing: "Қажетті телеметрия қолжетімсіз",
   },
   severity: { critical: "Сындарлы", high: "Жоғары", medium: "Орташа", low: "Төмен", informational: "Ақпараттық", unknown: "Берілмеген" },
   status: {

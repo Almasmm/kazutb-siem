@@ -768,3 +768,32 @@ export interface ParserSimulationDto {
   event: EventDto;
   fields: Record<string, string>;
 }
+
+export interface MITRETechniqueDto {
+  technique_id: string;
+  name: string;
+  tactics: string[];
+  status: "COVERED" | "PARTIAL" | "GAP";
+  rules: Array<{ rule_id: string; title: string; version: string; severity: Severity; confidence: number }>;
+  data_sources: Array<{ name: string; available: boolean; collectors: string[] }>;
+  missing_data_sources: string[];
+  incident_count: number;
+  average_risk: number;
+  maximum_risk: number;
+}
+
+export interface MITRECoverageDto {
+  framework: string;
+  catalog_version: string;
+  techniques: MITRETechniqueDto[];
+  tactics: Array<{ tactic_id: string; name: string; techniques: number; covered: number; partial: number; gaps: number; coverage_percent: number }>;
+  total_techniques: number;
+  covered_techniques: number;
+  partial_techniques: number;
+  coverage_gaps: number;
+  coverage_percent: number;
+  published_rules: number;
+  active_collectors: number;
+  incident_count: number;
+  generated_at: string;
+}

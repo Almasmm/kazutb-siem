@@ -19,6 +19,7 @@ const SystemPage = lazy(() => import("./pages/SystemPage"));
 const CasesPage = lazy(() => import("./pages/CasesPage"));
 const AssetsPage = lazy(() => import("./pages/AssetsPage"));
 const ParserStudioPage = lazy(() => import("./pages/ParserStudioPage"));
+const MitreCoveragePage = lazy(() => import("./pages/MitreCoveragePage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 
 export default function App() {
@@ -43,6 +44,7 @@ export default function App() {
           <Route path="/cases" element={<CasesPage />} />
           <Route path="/assets" element={<AssetsPage />} />
           <Route path="/parsers" element={<ParserStudioPage />} />
+          <Route path="/mitre" element={<MitreCoveragePage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>

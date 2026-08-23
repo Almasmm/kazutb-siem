@@ -23,6 +23,7 @@ export const ru = {
     cases: "Кейсы",
     assets: "Активы и сущности",
     parsers: "Parser Studio",
+    mitre: "Покрытие MITRE",
     rules: "Детектирование",
     collectors: "Коллекторы",
     threatIntel: "Threat Intelligence",
@@ -305,6 +306,12 @@ export const ru = {
     parser: "Парсер", format: "Формат envelope", tests: "Тесты", newVersion: "Новая версия", validate: "Проверить", publish: "Опубликовать", compiler: "Компилятор", mappedFields: "Полей сопоставлено",
     validation: "Отчёт валидации", validationPassed: "Готов к публикации", validationRequired: "Требуется проверка", testsPassed: "тестов пройдено", mapping: "Сопоставление OCSF", simulator: "Симулятор образца", runSample: "Запустить образец",
     createTitle: "Создать черновик парсера", inputKind: "Тип входных данных", mappingJson: "Сопоставления source-to-OCSF (JSON)", defaultsJson: "Значения OCSF по умолчанию (JSON)", regressionSample: "Регрессионный образец", expectedFields: "Ожидаемые поля OCSF (JSON)",
+  },
+  mitrePage: {
+    eyebrow: "Контроль детектирования", title: "Покрытие MITRE ATT&CK", subtitle: "Живое покрытие rule-to-technique, готовность источников, частота инцидентов и риск по всей цепочке атаки.",
+    coverage: "Взвешенное покрытие", covered: "Покрыто", partial: "Частично", gaps: "Пробелы покрытия", gapsShort: "пробелов", rules: "правил", collectors: "коллекторов", incidents: "инцидентов", techniques: "техник",
+    noTechniques: "Техники для этого представления не найдены", detections: "детектов", riskPerTechnique: "Контекст риска инцидентов", averageRisk: "Средний риск", maximumRisk: "Максимальный риск", dataDependencies: "Зависимости данных",
+    detectionsPerTechnique: "Детекты по технике", noDetections: "На технику не сопоставлен ни один детект", dataSources: "Зависимости от источников данных", noDependencies: "Сопоставленные правила не объявляют зависимостей.", sourceMissing: "Необходимая телеметрия недоступна",
   },
   severity: {
     critical: "Критический",

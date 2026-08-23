@@ -21,6 +21,7 @@ import (
 	"github.com/kcsp/platform/internal/evidence"
 	"github.com/kcsp/platform/internal/hunt"
 	"github.com/kcsp/platform/internal/ingest"
+	"github.com/kcsp/platform/internal/mitre"
 	"github.com/kcsp/platform/internal/observability"
 	"github.com/kcsp/platform/internal/parser"
 	"github.com/kcsp/platform/internal/pipeline"
@@ -66,6 +67,7 @@ type Server struct {
 	cases             *cases.Service
 	entities          *entitygraph.Service
 	parsers           *parser.StudioService
+	mitre             *mitre.Service
 }
 
 type Authenticator interface {
@@ -90,6 +92,7 @@ type Config struct {
 	CasesService                *cases.Service
 	EntityService               *entitygraph.Service
 	ParserService               *parser.StudioService
+	MITREService                *mitre.Service
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -105,7 +108,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		collectors: config.CollectorRegistry, requireCollectors: config.RequireRegisteredCollectors,
 		detections: config.DetectionService, hunts: config.HuntStore, retention: config.RetentionStore,
 		evidence: config.EvidenceService, threatIntel: config.ThreatIntelService, soar: config.SOARService,
-		ueba: config.UEBAService, aiSOC: config.AISOCService, cases: config.CasesService, entities: config.EntityService, parsers: config.ParserService,
+		ueba: config.UEBAService, aiSOC: config.AISOCService, cases: config.CasesService, entities: config.EntityService, parsers: config.ParserService, mitre: config.MITREService,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -195,6 +198,9 @@ func (s *Server) routes() {
 		s.mux.Handle("POST /api/v1/parsers/{parserID}/versions/{version}/simulate", s.protect("siem.parsers.write", http.HandlerFunc(s.simulateParser)))
 		s.mux.Handle("POST /api/v1/parsers/{parserID}/versions/{version}/publish", s.protect("siem.parsers.publish", http.HandlerFunc(s.publishParser)))
 		s.mux.Handle("POST /api/v1/parsers/{parserID}/disable", s.protect("siem.parsers.publish", http.HandlerFunc(s.disableParser)))
+	}
+	if s.mitre != nil {
+		s.mux.Handle("GET /api/v1/mitre/coverage", s.protect("siem.mitre.read", http.HandlerFunc(s.mitreCoverage)))
 	}
 	if s.threatIntel != nil {
 		s.mux.Handle("GET /api/v1/threat-intel/feeds", s.protect("ti.indicators.read", http.HandlerFunc(s.listThreatIntelFeeds)))

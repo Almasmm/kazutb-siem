@@ -4,6 +4,7 @@ import type {
 	ParserContentDto,
 	ParserDescriptorDto,
 	ParserSimulationDto,
+	MITRECoverageDto,
   AlertDto,
   AISOCDecisionDto,
   AISOCPolicyDto,
@@ -294,6 +295,7 @@ export const api = {
   publishParser: (id: string, version: number) => request<ParserContentDto>(`/parsers/${encodeURIComponent(id)}/versions/${version}/publish`, { method: "POST" }),
   disableParser: (id: string) => request<ParserContentDto>(`/parsers/${encodeURIComponent(id)}/disable`, { method: "POST" }),
   simulateParser: (id: string, version: number, payload: string) => request<ParserSimulationDto>(`/parsers/${encodeURIComponent(id)}/versions/${version}/simulate`, { method: "POST", body: JSON.stringify({ payload }) }),
+  mitreCoverage: (signal?: AbortSignal) => request<MITRECoverageDto>("/mitre/coverage", { signal }),
   updateUEBAFeedback: (id: string, payload: { status: string; reason: string; version: number }) =>
     request<UEBAAnomalyDto>(`/ueba/anomalies/${encodeURIComponent(id)}/feedback`, {
       method: "POST",

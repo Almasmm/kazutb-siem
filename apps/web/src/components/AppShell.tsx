@@ -51,6 +51,7 @@ const navGroups = [
       { to: "/ueba", label: "nav.ueba", icon: UsersRound },
       { to: "/ai-soc", label: "nav.aiSoc", icon: BrainCircuit },
       { to: "/rules", label: "nav.rules", icon: Radar },
+      { to: "/mitre", label: "nav.mitre", icon: Crosshair },
       { to: "/parsers", label: "nav.parsers", icon: Braces },
     ],
   },
@@ -82,6 +83,7 @@ const pageKeys: Record<string, string> = {
   "/cases": "nav.cases",
   "/assets": "nav.assets",
   "/parsers": "nav.parsers",
+  "/mitre": "nav.mitre",
 };
 
 export function AppShell() {

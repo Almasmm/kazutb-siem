@@ -23,6 +23,7 @@ export const en = {
     cases: "Cases",
     assets: "Assets & entities",
     parsers: "Parser Studio",
+    mitre: "MITRE Coverage",
     rules: "Detections",
     collectors: "Collectors",
     threatIntel: "Threat Intelligence",
@@ -189,6 +190,12 @@ export const en = {
     parser: "Parser", format: "Envelope format", tests: "Tests", newVersion: "New version", validate: "Validate", publish: "Publish", compiler: "Compiler", mappedFields: "Mapped fields",
     validation: "Validation report", validationPassed: "Ready to publish", validationRequired: "Validation required", testsPassed: "tests passed", mapping: "OCSF mapping", simulator: "Sample simulator", runSample: "Run sample",
     createTitle: "Create parser draft", inputKind: "Input kind", mappingJson: "Source-to-OCSF mappings (JSON)", defaultsJson: "OCSF defaults (JSON)", regressionSample: "Regression sample payload", expectedFields: "Expected OCSF fields (JSON)",
+  },
+  mitrePage: {
+    eyebrow: "Detection assurance", title: "MITRE ATT&CK Coverage", subtitle: "Live rule-to-technique coverage, data-source readiness, incident frequency and risk across the enterprise attack lifecycle.",
+    coverage: "Weighted coverage", covered: "Covered", partial: "Partial", gaps: "Coverage gaps", gapsShort: "gaps", rules: "rules", collectors: "collectors", incidents: "incidents", techniques: "techniques",
+    noTechniques: "No techniques match this view", detections: "detections", riskPerTechnique: "Incident risk context", averageRisk: "Average risk", maximumRisk: "Maximum risk", dataDependencies: "Data dependencies",
+    detectionsPerTechnique: "Detections per technique", noDetections: "No detection mapped to this technique", dataSources: "Data-source dependencies", noDependencies: "Mapped rules declare no data-source dependency.", sourceMissing: "Required telemetry is not available",
   },
   severity: { critical: "Critical", high: "High", medium: "Medium", low: "Low", informational: "Informational", unknown: "Not set" },
   status: {

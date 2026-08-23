@@ -1,0 +1,30 @@
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { CircleDot, Crosshair, DatabaseZap, Radar, ShieldCheck, TriangleAlert } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { api } from "../api/client";
+import type { MITRETechniqueDto } from "../api/types";
+import { DetailRow, Drawer, EmptyState, ErrorState, LoadingState, MetricCard, PageHeader, RiskScore, SeverityBadge, StatusBadge } from "../components/ui";
+import { formatFullDateTime } from "../utils/format";
+
+export default function MitreCoveragePage() {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState("");
+  const [tactic, setTactic] = useState("");
+  const [selected, setSelected] = useState<MITRETechniqueDto | null>(null);
+  const coverage = useQuery({ queryKey: ["mitre-coverage"], queryFn: ({ signal }) => api.mitreCoverage(signal), refetchInterval: 30_000 });
+  const tactics = coverage.data?.tactics || [];
+  const techniques = useMemo(() => (coverage.data?.techniques || []).filter((item) => (!status || item.status === status) && (!tactic || item.tactics.includes(tactic))), [coverage.data, status, tactic]);
+  return <div className="page mitre-page">
+    <PageHeader eyebrow={t("mitrePage.eyebrow")} title={t("mitrePage.title")} subtitle={t("mitrePage.subtitle")} />
+    <section className="metrics-grid compact-metrics"><MetricCard label={t("mitrePage.coverage")} value={`${coverage.data?.coverage_percent || 0}%`} icon={Radar} tone={(coverage.data?.coverage_percent || 0) >= 70 ? "good" : "critical"} /><MetricCard label={t("mitrePage.covered")} value={coverage.data?.covered_techniques || 0} icon={ShieldCheck} tone="good" /><MetricCard label={t("mitrePage.partial")} value={coverage.data?.partial_techniques || 0} icon={TriangleAlert} /><MetricCard label={t("mitrePage.gaps")} value={coverage.data?.coverage_gaps || 0} icon={Crosshair} tone={(coverage.data?.coverage_gaps || 0) ? "critical" : "good"} /></section>
+    <section className="panel mitre-summary"><div><span>{coverage.data?.framework || "MITRE ATT&CK"}</span><strong>{coverage.data?.published_rules || 0} {t("mitrePage.rules")} · {coverage.data?.active_collectors || 0} {t("mitrePage.collectors")} · {coverage.data?.incident_count || 0} {t("mitrePage.incidents")}</strong></div><div className="coverage-rail"><span style={{ width: `${coverage.data?.coverage_percent || 0}%` }} /></div><small>{coverage.data ? formatFullDateTime(coverage.data.generated_at) : "—"}</small></section>
+    {coverage.isPending ? <section className="panel"><LoadingState rows={10} /></section> : coverage.isError ? <section className="panel"><ErrorState error={coverage.error} onRetry={() => void coverage.refetch()} /></section> : <><section className="tactic-strip">{tactics.map((item) => <button type="button" key={item.tactic_id} className={tactic === item.name ? "active" : ""} onClick={() => setTactic((current) => current === item.name ? "" : item.name)}><span>{item.tactic_id}</span><strong>{item.name}</strong><div><i style={{ width: `${item.coverage_percent}%` }} /></div><small>{item.coverage_percent}% · {item.gaps} {t("mitrePage.gapsShort")}</small></button>)}</section><section className="filter-bar panel"><label className="select-field"><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">{t("common.status")}: {t("common.all")}</option><option>COVERED</option><option>PARTIAL</option><option>GAP</option></select></label><span className="filter-count">{techniques.length} / {coverage.data?.total_techniques || 0} {t("mitrePage.techniques")}</span></section><section className="panel technique-matrix">{!techniques.length ? <EmptyState title={t("mitrePage.noTechniques")} icon={Radar} /> : techniques.map((item) => <button type="button" key={item.technique_id} className={`technique-cell status-${item.status.toLowerCase()}`} onClick={() => setSelected(item)}><span>{item.technique_id}<StatusBadge value={item.status} /></span><strong>{item.name}</strong><small>{item.tactics.join(" · ")}</small><div><b>{item.rules.length}</b> {t("mitrePage.detections")}<b>{item.incident_count}</b> {t("mitrePage.incidents")}</div></button>)}</section></>}
+    <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} wide title={selected?.name || ""} eyebrow={selected ? `${selected.technique_id} · ${selected.tactics.join(" / ")}` : ""}>
+      {selected && <div className="detail-stack"><div className="mitre-drawer-lead"><StatusBadge value={selected.status} /><div><span>{t("mitrePage.riskPerTechnique")}</span><strong>{selected.incident_count} {t("mitrePage.incidents")}</strong></div><RiskScore value={selected.maximum_risk} /></div><dl className="detail-grid"><DetailRow label={t("mitrePage.averageRisk")}>{selected.average_risk}</DetailRow><DetailRow label={t("mitrePage.maximumRisk")}>{selected.maximum_risk}</DetailRow><DetailRow label={t("mitrePage.detections")}>{selected.rules.length}</DetailRow><DetailRow label={t("mitrePage.dataDependencies")}>{selected.data_sources.length}</DetailRow></dl>
+        <section className="detail-section"><h3>{t("mitrePage.detectionsPerTechnique")}</h3>{!selected.rules.length ? <EmptyState title={t("mitrePage.noDetections")} icon={CircleDot} /> : <div className="mitre-rule-list">{selected.rules.map((rule) => <div key={rule.rule_id}><SeverityBadge value={rule.severity} /><div><strong>{rule.title}</strong><small>{rule.rule_id} · v{rule.version} · {rule.confidence}%</small></div></div>)}</div>}</section>
+        <section className="detail-section"><h3>{t("mitrePage.dataSources")}</h3>{!selected.data_sources.length ? <p className="lead-description">{t("mitrePage.noDependencies")}</p> : <div className="data-source-readiness">{selected.data_sources.map((source) => <div key={source.name} className={source.available ? "available" : "missing"}>{source.available ? <ShieldCheck size={16} /> : <DatabaseZap size={16} />}<div><strong>{source.name}</strong><small>{source.available ? source.collectors.join(", ") : t("mitrePage.sourceMissing")}</small></div></div>)}</div>}</section>
+      </div>}
+    </Drawer>
+  </div>;
+}
