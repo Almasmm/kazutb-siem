@@ -45,9 +45,13 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer forwarder.Close()
-	source, err := telemetrySource(stateDirectory)
+	sources, err := telemetrySources(stateDirectory)
 	if err != nil {
 		return err
+	}
+	sourceNames := make([]string, 0, len(sources))
+	for _, source := range sources {
+		sourceNames = append(sourceNames, source.Name())
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -55,12 +59,12 @@ func run(logger *slog.Logger) error {
 	batchSize := int(envInt64("KCSP_AGENT_BATCH_SIZE", 100))
 	heartbeatInterval := envDuration("KCSP_AGENT_HEARTBEAT_INTERVAL", 30*time.Second)
 	nextHeartbeat := time.Time{}
-	logger.Info("KCSP lightweight agent started", "version", agentVersion, "source", source.Name(), "state_directory", stateDirectory)
+	logger.Info("KCSP lightweight agent started", "version", agentVersion, "sources", sourceNames, "state_directory", stateDirectory)
 	for {
 		if time.Now().After(nextHeartbeat) {
 			depth, queueBytes, _ := queue.Depth()
 			if collector, heartbeatErr := forwarder.Heartbeat(ctx, agentVersion, map[string]interface{}{
-				"os": runtime.GOOS, "arch": runtime.GOARCH, "source": source.Name(), "queue_depth": depth, "queue_bytes": queueBytes,
+				"os": runtime.GOOS, "arch": runtime.GOARCH, "sources": sourceNames, "queue_depth": depth, "queue_bytes": queueBytes,
 			}); heartbeatErr != nil {
 				logger.Warn("collector heartbeat failed", "error", heartbeatErr)
 			} else {
@@ -72,28 +76,36 @@ func run(logger *slog.Logger) error {
 			depth, bytes, _ := queue.Depth()
 			logger.Warn("KCSP gateway unavailable; events remain on disk", "error", err, "queue_depth", depth, "queue_bytes", bytes)
 		}
-		events, readErr := source.Read(ctx, batchSize)
-		if readErr != nil {
-			return readErr
-		}
-		persisted := 0
-		for _, event := range events {
-			if _, err := queue.Enqueue(event); err != nil {
-				if errors.Is(err, agent.ErrQueueFull) {
-					depth, bytes, _ := queue.Depth()
-					logger.Warn("agent queue limit reached; source checkpoint retained", "queue_depth", depth, "queue_bytes", bytes)
-					break
+		queueFull := false
+		for _, source := range sources {
+			events, readErr := source.Read(ctx, batchSize)
+			if readErr != nil {
+				logger.Warn("telemetry source read failed", "source", source.Name(), "error", readErr)
+				continue
+			}
+			persisted := 0
+			for _, event := range events {
+				if _, err := queue.Enqueue(event); err != nil {
+					if errors.Is(err, agent.ErrQueueFull) {
+						depth, bytes, _ := queue.Depth()
+						logger.Warn("agent queue limit reached; source checkpoint retained", "source", source.Name(), "queue_depth", depth, "queue_bytes", bytes)
+						queueFull = true
+						break
+					}
+					return err
 				}
-				return err
+				if err := source.CommitEvent(event); err != nil {
+					return err
+				}
+				persisted++
 			}
-			if err := source.CommitEvent(event); err != nil {
-				return err
+			if persisted > 0 {
+				last := events[persisted-1]
+				logger.Info("agent events persisted", "source", source.Name(), "count", persisted, "last_cursor", last.Cursor, "last_checkpoint", last.Checkpoint)
 			}
-			persisted++
-		}
-		if persisted > 0 {
-			last := events[persisted-1]
-			logger.Info("agent events persisted", "source", source.Name(), "count", persisted, "last_cursor", last.Cursor, "last_checkpoint", last.Checkpoint)
+			if queueFull {
+				break
+			}
 		}
 		timer := time.NewTimer(pollInterval)
 		select {
@@ -105,12 +117,25 @@ func run(logger *slog.Logger) error {
 	}
 }
 
-func telemetrySource(stateDirectory string) (agent.TelemetrySource, error) {
+func telemetrySources(stateDirectory string) ([]agent.TelemetrySource, error) {
 	name := strings.ToLower(strings.TrimSpace(os.Getenv("KCSP_AGENT_SOURCE")))
 	if name == "" || name == "auto" {
 		switch runtime.GOOS {
 		case "windows":
-			name = "sysmon"
+			sources := make([]agent.TelemetrySource, 0, 1+len(windowsEventChannels()))
+			sysmon, err := agent.NewSysmonSource(stateDirectory, os.Getenv("KCSP_AGENT_SYSMON_CHANNEL"))
+			if err != nil {
+				return nil, err
+			}
+			sources = append(sources, sysmon)
+			for _, channel := range windowsEventChannels() {
+				source, err := agent.NewWindowsEventSource(stateDirectory, channel)
+				if err != nil {
+					return nil, err
+				}
+				sources = append(sources, source)
+			}
+			return sources, nil
 		case "linux":
 			name = "journald"
 		default:
@@ -119,12 +144,56 @@ func telemetrySource(stateDirectory string) (agent.TelemetrySource, error) {
 	}
 	switch name {
 	case "sysmon":
-		return agent.NewSysmonSource(stateDirectory, os.Getenv("KCSP_AGENT_SYSMON_CHANNEL"))
+		source, err := agent.NewSysmonSource(stateDirectory, os.Getenv("KCSP_AGENT_SYSMON_CHANNEL"))
+		return singleSource(source, err)
 	case "journald":
-		return agent.NewJournalSource(stateDirectory, strings.Fields(os.Getenv("KCSP_AGENT_JOURNAL_MATCHES")))
+		source, err := agent.NewJournalSource(stateDirectory, strings.Fields(os.Getenv("KCSP_AGENT_JOURNAL_MATCHES")))
+		return singleSource(source, err)
+	case "windows-event-log":
+		sources := make([]agent.TelemetrySource, 0, len(windowsEventChannels()))
+		for _, channel := range windowsEventChannels() {
+			source, err := agent.NewWindowsEventSource(stateDirectory, channel)
+			if err != nil {
+				return nil, err
+			}
+			sources = append(sources, source)
+		}
+		return sources, nil
 	default:
 		return nil, fmt.Errorf("unsupported KCSP_AGENT_SOURCE %q", name)
 	}
+}
+
+func singleSource(source agent.TelemetrySource, err error) ([]agent.TelemetrySource, error) {
+	if err != nil {
+		return nil, err
+	}
+	return []agent.TelemetrySource{source}, nil
+}
+
+func windowsEventChannels() []string {
+	configured := strings.TrimSpace(os.Getenv("KCSP_AGENT_WINDOWS_CHANNELS"))
+	if configured == "" {
+		return []string{"Security", "System", "Microsoft-Windows-PowerShell/Operational", "Microsoft-Windows-Windows Defender/Operational"}
+	}
+	channels := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, channel := range strings.Split(configured, ";") {
+		channel = strings.TrimSpace(channel)
+		key := strings.ToLower(channel)
+		if channel == "" {
+			continue
+		}
+		if _, found := seen[key]; found {
+			continue
+		}
+		seen[key] = struct{}{}
+		channels = append(channels, channel)
+	}
+	if len(channels) == 0 {
+		return []string{"Security"}
+	}
+	return channels
 }
 
 func flush(ctx context.Context, queue *agent.DiskQueue, forwarder *agent.Forwarder, batchSize int) error {
