@@ -78,6 +78,7 @@ type Receipt struct {
 type Publisher interface {
 	Publish(context.Context, RawEnvelope) error
 	RawTopic() string
+	Health(context.Context) error
 }
 
 type Gateway struct {
@@ -88,6 +89,13 @@ type Gateway struct {
 
 func NewGateway(publisher Publisher, authenticator *EnvelopeAuthenticator) *Gateway {
 	return &Gateway{publisher: publisher, authenticator: authenticator, now: func() time.Time { return time.Now().UTC() }}
+}
+
+func (g *Gateway) Health(ctx context.Context) error {
+	if g == nil || g.publisher == nil {
+		return errors.New("ingest publisher is not configured")
+	}
+	return g.publisher.Health(ctx)
 }
 
 func (g *Gateway) SubmitJSON(ctx context.Context, tenantID, collectorID string, payload []byte) (Receipt, error) {

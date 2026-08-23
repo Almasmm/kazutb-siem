@@ -19,6 +19,9 @@ func (p *recordingPublisher) Publish(_ context.Context, envelope RawEnvelope) er
 }
 
 func (p *recordingPublisher) RawTopic() string { return "kcsp.test.raw.events.v1" }
+func (p *recordingPublisher) Health(context.Context) error {
+	return nil
+}
 
 func TestGatewayBindsTrustContextAndCreatesDeterministicIdentity(t *testing.T) {
 	publisher := &recordingPublisher{}

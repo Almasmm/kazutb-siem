@@ -404,6 +404,12 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, r, http.StatusServiceUnavailable, "dependency_unavailable", "Service unavailable", "PostgreSQL is not ready.")
 		return
 	}
+	if s.gateway != nil {
+		if err := s.gateway.Health(r.Context()); err != nil {
+			s.problem(w, r, http.StatusServiceUnavailable, "event_stream_unavailable", "Service unavailable", "Kafka event stream is not ready.")
+			return
+		}
+	}
 	auditValid, err := s.store.VerifyAudit(r.Context(), core.DefaultTenantID)
 	if err != nil {
 		s.handleDomainError(w, r, err)

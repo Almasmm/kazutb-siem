@@ -61,6 +61,13 @@ func (p *KafkaPublisher) Close()                  { p.client.Close() }
 func (p *KafkaPublisher) RawTopic() string        { return p.rawTopic }
 func (p *KafkaPublisher) DeadLetterTopic() string { return p.deadLetterTopic }
 
+func (p *KafkaPublisher) Health(ctx context.Context) error {
+	if err := p.client.Ping(ctx); err != nil {
+		return fmt.Errorf("ping Kafka: %w", err)
+	}
+	return nil
+}
+
 func (p *KafkaPublisher) Publish(ctx context.Context, envelope RawEnvelope) error {
 	payload, err := json.Marshal(envelope)
 	if err != nil {
