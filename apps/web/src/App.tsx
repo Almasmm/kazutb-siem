@@ -10,6 +10,12 @@ const IncidentsPage = lazy(() => import("./pages/IncidentsPage"));
 const RulesPage = lazy(() => import("./pages/RulesPage"));
 const AuditPage = lazy(() => import("./pages/AuditPage"));
 const CollectorsPage = lazy(() => import("./pages/CollectorsPage"));
+const ThreatIntelPage = lazy(() => import("./pages/ThreatIntelPage"));
+const UebaPage = lazy(() => import("./pages/UebaPage"));
+const EvidencePage = lazy(() => import("./pages/EvidencePage"));
+const SoarPage = lazy(() => import("./pages/SoarPage"));
+const AISocPage = lazy(() => import("./pages/AISocPage"));
+const SystemPage = lazy(() => import("./pages/SystemPage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 
 export default function App() {
@@ -25,6 +31,12 @@ export default function App() {
           <Route path="/rules" element={<RulesPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/collectors" element={<CollectorsPage />} />
+          <Route path="/threat-intel" element={<ThreatIntelPage />} />
+          <Route path="/ueba" element={<UebaPage />} />
+          <Route path="/evidence" element={<EvidencePage />} />
+          <Route path="/soar" element={<SoarPage />} />
+          <Route path="/ai-soc" element={<AISocPage />} />
+          <Route path="/system" element={<SystemPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>

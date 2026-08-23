@@ -1,0 +1,42 @@
+import { useDeferredValue, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Archive, CheckCircle2, Download, Fingerprint, Search, ShieldCheck } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { api } from "../api/client";
+import type { EvidenceDto } from "../api/types";
+import { DetailRow, Drawer, EmptyState, ErrorState, InlineNotice, LoadingState, MetricCard, PageHeader, StatusBadge, TableAction, Tag } from "../components/ui";
+import { formatDateTime, formatFullDateTime } from "../utils/format";
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+export default function EvidencePage() {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("");
+  const [incidentID, setIncidentID] = useState("");
+  const [selected, setSelected] = useState<EvidenceDto | null>(null);
+  const [reason, setReason] = useState("");
+  const deferredSearch = useDeferredValue(search);
+  const evidence = useQuery({ queryKey: ["evidence", status, incidentID], queryFn: ({ signal }) => api.evidence({ status, incident_id: incidentID, limit: 500 }, signal) });
+  const custody = useQuery({ queryKey: ["evidence-custody", selected?.evidence_id], queryFn: ({ signal }) => api.evidenceCustody(selected!.evidence_id, signal), enabled: Boolean(selected) });
+  const verify = useMutation({ mutationFn: () => api.verifyEvidence(selected!.evidence_id, reason.trim()), onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["evidence"] }); void queryClient.invalidateQueries({ queryKey: ["evidence-custody"] }); } });
+  const download = useMutation({ mutationFn: () => api.downloadEvidence(selected!.evidence_id, reason.trim()), onSuccess: (file) => { const url = URL.createObjectURL(file.blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = file.filename; anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); } });
+  const visible = useMemo(() => (evidence.data?.items || []).filter((item) => !deferredSearch || [item.filename, item.evidence_id, item.sha256, item.uploader, item.alert_id, item.event_id].filter(Boolean).join(" ").toLowerCase().includes(deferredSearch.toLowerCase())), [deferredSearch, evidence.data?.items]);
+  const verified = (evidence.data?.items || []).filter((item) => Boolean(item.verified_at)).length;
+
+  return <div className="page"><PageHeader eyebrow={t("evidencePage.eyebrow")} title={t("evidencePage.title")} subtitle={t("evidencePage.subtitle")} />
+    <section className="metrics-grid compact-metrics"><MetricCard label={t("evidencePage.objects")} value={evidence.data?.total || 0} icon={Archive} /><MetricCard label={t("evidencePage.verified")} value={verified} icon={ShieldCheck} tone="good" /><MetricCard label={t("evidencePage.legalHold")} value={(evidence.data?.items || []).filter((item) => item.legal_hold).length} icon={Fingerprint} /><MetricCard label={t("evidencePage.totalSize")} value={formatBytes((evidence.data?.items || []).reduce((sum, item) => sum + item.size, 0))} icon={Archive} /></section>
+    <section className="filter-bar panel"><label className="search-field grow"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("evidencePage.searchPlaceholder")} /></label><label className="search-field"><input value={incidentID} onChange={(event) => setIncidentID(event.target.value)} placeholder={t("evidencePage.incidentFilter")} /></label><label className="select-field"><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">{t("common.status")}: {t("common.all")}</option><option>AVAILABLE</option><option>QUARANTINED</option><option>FAILED</option></select></label></section>
+    <section className="panel table-panel">{evidence.isPending ? <LoadingState rows={8} /> : evidence.isError ? <ErrorState error={evidence.error} onRetry={() => void evidence.refetch()} /> : !visible.length ? <EmptyState title={t("evidencePage.noEvidence")} icon={Archive} /> : <div className="table-scroll"><table className="data-table"><thead><tr><th>{t("common.status")}</th><th>{t("evidencePage.file")}</th><th>{t("evidencePage.linkedTo")}</th><th>SHA-256</th><th>{t("evidencePage.size")}</th><th>{t("common.created")}</th><th /></tr></thead><tbody>{visible.map((item) => <tr key={item.evidence_id} className="clickable-row" onClick={() => { setSelected(item); setReason(""); verify.reset(); }}><td><StatusBadge value={item.status} /></td><td className="primary-cell"><strong>{item.filename}</strong><small>{item.content_type} · {item.evidence_id}</small></td><td>{item.incident_id || item.alert_id || item.event_id || "—"}</td><td className="mono-small">{item.sha256.slice(0, 16)}…</td><td>{formatBytes(item.size)}</td><td>{formatDateTime(item.created_at)}</td><td><TableAction /></td></tr>)}</tbody></table></div>}</section>
+    <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} wide title={selected?.filename || ""} eyebrow={selected?.evidence_id} footer={selected && <div className="action-row"><button className="button ghost" type="button" disabled={!reason.trim() || download.isPending} onClick={() => download.mutate()}><Download size={16} />{t("common.download")}</button><button className="button primary" type="button" disabled={!reason.trim() || verify.isPending} onClick={() => verify.mutate()}><Fingerprint size={16} />{t("common.verify")}</button></div>}>
+      {selected && <div className="detail-stack"><div className="drawer-lead"><StatusBadge value={selected.status} />{selected.legal_hold && <Tag tone="warning">LEGAL HOLD</Tag>}<strong>{selected.filename}</strong></div><p className="lead-description">{selected.description || t("common.notAvailable")}</p><dl className="detail-grid"><DetailRow label={t("evidencePage.size")}>{formatBytes(selected.size)}</DetailRow><DetailRow label={t("evidencePage.uploader")}>{selected.uploader || "—"}</DetailRow><DetailRow label={t("evidencePage.retainUntil")}>{formatFullDateTime(selected.retain_until)}</DetailRow><DetailRow label={t("evidencePage.verifiedAt")}>{formatFullDateTime(selected.verified_at)}</DetailRow><DetailRow label={t("evidencePage.linkedTo")}>{selected.incident_id || selected.alert_id || selected.event_id || "—"}</DetailRow><DetailRow label={t("common.created")}>{formatFullDateTime(selected.created_at)}</DetailRow></dl><section className="detail-section"><h3>SHA-256</h3><code className="hash-block">{selected.sha256}</code></section><label className="form-field"><span>{t("evidencePage.accessReason")}</span><textarea rows={2} value={reason} onChange={(event) => setReason(event.target.value)} placeholder={t("evidencePage.reasonPlaceholder")} /></label>{verify.isError && <ErrorState error={verify.error} compact />}{download.isError && <ErrorState error={download.error} compact />}{verify.data && <InlineNotice tone={verify.data.valid ? "success" : "warning"}><CheckCircle2 size={16} />{verify.data.valid ? t("evidencePage.integrityValid") : t("evidencePage.integrityInvalid")}</InlineNotice>}
+        <section className="detail-section"><h3>{t("evidencePage.custody")}</h3>{custody.isPending ? <LoadingState rows={4} compact /> : custody.isError ? <ErrorState error={custody.error} compact /> : custody.data && <><InlineNotice tone={custody.data.chain_valid ? "success" : "warning"}>{custody.data.chain_valid ? t("evidencePage.chainValid") : t("evidencePage.chainInvalid")}</InlineNotice><div className="timeline custody-chain">{custody.data.items.map((entry) => <div key={entry.custody_id}><span className="timeline-dot" /><div><strong>#{entry.sequence} · {entry.action}</strong><p>{entry.reason || t("common.notAvailable")}</p><small>{formatFullDateTime(entry.created_at)} · {entry.actor}</small></div></div>)}</div></>}</section>
+      </div>}
+    </Drawer>
+  </div>;
+}

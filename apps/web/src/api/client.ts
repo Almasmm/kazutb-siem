@@ -1,19 +1,39 @@
 import type {
   AlertDto,
+  AISOCDecisionDto,
+  AISOCPolicyDto,
+  AISOCRequestDetailsDto,
+  AISOCRequestDto,
   ApiProblem,
   AuditDto,
   CollectorDto,
   EventDto,
+  EvidenceCustodyResponse,
+  EvidenceDto,
+  EvidenceVerificationDto,
   FindingDto,
+  HealthDto,
   IncidentDto,
   ListResponse,
   OverviewDto,
+  RetentionPolicyDto,
   RuleDto,
+  SOARApprovalDto,
+  SOARConnectorDto,
+  SOARExecutionDto,
+  SOARPlaybookDto,
+  ThreatIndicatorDto,
+  ThreatIntelFeedDto,
+  ThreatIntelMatchDto,
+  ThreatRetrosearchDto,
+  UEBAAnomalyDto,
+  UEBABaselineDto,
 } from "./types";
 import { getAccessToken, getTenantId } from "../auth/session";
 import { runtimeConfig } from "../config/runtime";
 
 const API_BASE = runtimeConfig.apiBaseUrl.replace(/\/$/, "");
+const HEALTH_BASE = API_BASE.endsWith("/api/v1") ? API_BASE.slice(0, -7) : API_BASE;
 
 export class ApiError extends Error {
   readonly status: number;
@@ -58,7 +78,7 @@ async function request<T>(
   headers.set("Accept", "application/json");
   headers.set("Authorization", `Bearer ${accessToken}`);
   headers.set("X-KCSP-Tenant-ID", getTenantId());
-  if (init.body) headers.set("Content-Type", "application/json");
+  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
 
   let response: Response;
   try {
@@ -71,6 +91,38 @@ async function request<T>(
   }
   if (!response.ok) throw new ApiError(response.status, await parseProblem(response));
   if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}
+
+async function requestDownload(path: string, reason: string): Promise<{ blob: Blob; filename: string; sha256: string }> {
+  const headers = new Headers({ "X-KCSP-Access-Reason": reason, Accept: "application/octet-stream" });
+  const accessToken = getAccessToken();
+  if (!accessToken) throw new ApiError(401, { title: "Authentication required", detail: "No active KCSP session." });
+  headers.set("Authorization", `Bearer ${accessToken}`);
+  headers.set("X-KCSP-Tenant-ID", getTenantId());
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { headers });
+  } catch (cause) {
+    throw new ApiError(0, { title: "Network error", detail: cause instanceof Error ? cause.message : "Unable to reach the API" });
+  }
+  if (!response.ok) throw new ApiError(response.status, await parseProblem(response));
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const plain = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+  let filename = encoded || plain || "kcsp-evidence.bin";
+  try { filename = decodeURIComponent(filename); } catch { /* retain server-provided filename */ }
+  return { blob: await response.blob(), filename, sha256: response.headers.get("X-KCSP-SHA256") || "" };
+}
+
+async function publicRequest<T>(path: string, signal?: AbortSignal): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${HEALTH_BASE}${path}`, { signal, headers: { Accept: "application/json" } });
+  } catch (cause) {
+    throw new ApiError(0, { title: "Network error", detail: cause instanceof Error ? cause.message : "Unable to reach the API" });
+  }
+  if (!response.ok) throw new ApiError(response.status, await parseProblem(response));
   return (await response.json()) as T;
 }
 
@@ -200,6 +252,59 @@ export const api = {
   audit: (params?: Record<string, QueryValue>, signal?: AbortSignal) =>
     getList<AuditDto>("/audit", params, signal).then((page) => ({ ...page, items: page.items.map(normalizeAudit) })),
   collectors: (signal?: AbortSignal) => getList<CollectorDto>("/collectors", undefined, signal),
+  evidence: (params?: Record<string, QueryValue>, signal?: AbortSignal) => getList<EvidenceDto>("/evidence", params, signal),
+  evidenceCustody: (id: string, signal?: AbortSignal) =>
+    request<EvidenceCustodyResponse>(`/evidence/${encodeURIComponent(id)}/custody`, { signal }),
+  verifyEvidence: (id: string, reason: string) =>
+    request<EvidenceVerificationDto>(`/evidence/${encodeURIComponent(id)}/verify`, {
+      method: "POST",
+      headers: { "X-KCSP-Access-Reason": reason },
+    }),
+  downloadEvidence: (id: string, reason: string) => requestDownload(`/evidence/${encodeURIComponent(id)}/content`, reason),
+  threatFeeds: (signal?: AbortSignal) => getList<ThreatIntelFeedDto>("/threat-intel/feeds", undefined, signal),
+  threatIndicators: (params?: Record<string, QueryValue>, signal?: AbortSignal) =>
+    getList<ThreatIndicatorDto>("/threat-intel/indicators", params, signal),
+  threatMatches: (params?: Record<string, QueryValue>, signal?: AbortSignal) =>
+    getList<ThreatIntelMatchDto>("/threat-intel/matches", params, signal),
+  retrosearchThreatIndicator: (id: string, payload: { lookback_seconds: number; limit: number }) =>
+    request<ThreatRetrosearchDto>(`/threat-intel/indicators/${encodeURIComponent(id)}/retrosearch`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  uebaAnomalies: (params?: Record<string, QueryValue>, signal?: AbortSignal) =>
+    getList<UEBAAnomalyDto>("/ueba/anomalies", params, signal),
+  uebaBaseline: (entityType: string, entityID: string, signal?: AbortSignal) =>
+    request<UEBABaselineDto>(`/ueba/entities/${encodeURIComponent(entityType)}/${encodeURIComponent(entityID)}`, { signal }),
+  updateUEBAFeedback: (id: string, payload: { status: string; reason: string; version: number }) =>
+    request<UEBAAnomalyDto>(`/ueba/anomalies/${encodeURIComponent(id)}/feedback`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  soarPlaybooks: (signal?: AbortSignal) => getList<SOARPlaybookDto>("/soar/playbooks", undefined, signal),
+  soarExecutions: (params?: Record<string, QueryValue>, signal?: AbortSignal) =>
+    getList<SOARExecutionDto>("/soar/executions", params, signal),
+  soarApprovals: (params?: Record<string, QueryValue>, signal?: AbortSignal) =>
+    getList<SOARApprovalDto>("/soar/approvals", params, signal),
+  decideSOARApproval: (id: string, payload: { decision: string; reason: string }) =>
+    request<SOARApprovalDto>(`/soar/approvals/${encodeURIComponent(id)}/decisions`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  soarConnectors: (signal?: AbortSignal) => getList<SOARConnectorDto>("/soar/connectors", undefined, signal),
+  aiSOCPolicy: (signal?: AbortSignal) => request<AISOCPolicyDto>("/ai-soc/policy", { signal }),
+  aiSOCRequests: (params?: Record<string, QueryValue>, signal?: AbortSignal) =>
+    getList<AISOCRequestDto>("/ai-soc/requests", params, signal),
+  aiSOCRequest: (id: string, signal?: AbortSignal) =>
+    request<AISOCRequestDetailsDto>(`/ai-soc/requests/${encodeURIComponent(id)}`, { signal }),
+  decideAISOCRequest: (id: string, payload: { decision: string; reason: string }) =>
+    request<AISOCDecisionDto>(`/ai-soc/requests/${encodeURIComponent(id)}/decisions`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  retention: (signal?: AbortSignal) => request<RetentionPolicyDto>("/retention", { signal }),
+  updateRetention: (payload: Pick<RetentionPolicyDto, "raw_days" | "normalized_days" | "findings_days" | "evidence_days" | "version">) =>
+    request<RetentionPolicyDto>("/retention", { method: "PATCH", body: JSON.stringify(payload) }),
+  healthReady: (signal?: AbortSignal) => publicRequest<HealthDto>("/health/ready", signal),
 };
 
 export const apiConfig = { base: API_BASE, get tenantId() { return getTenantId(); } };

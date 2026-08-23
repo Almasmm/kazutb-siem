@@ -1,9 +1,12 @@
 import { useState } from "react";
 import {
   Activity,
+  Archive,
   BellRing,
+  BrainCircuit,
   ChevronDown,
   ClipboardList,
+  Crosshair,
   Globe2,
   LayoutDashboard,
   LogOut,
@@ -11,9 +14,12 @@ import {
   Radar,
   RadioTower,
   Search,
+  Settings2,
   Shield,
   ShieldAlert,
   ShieldCheck,
+  UsersRound,
+  Workflow,
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -29,19 +35,25 @@ const navGroups = [
       { to: "/soc", label: "nav.soc", icon: LayoutDashboard },
       { to: "/alerts", label: "nav.alerts", icon: ShieldAlert },
       { to: "/incidents", label: "nav.incidents", icon: BellRing },
+      { to: "/soar", label: "nav.soar", icon: Workflow },
     ],
   },
   {
     label: "nav.intelligence",
     items: [
       { to: "/hunt", label: "nav.hunt", icon: Search },
+      { to: "/threat-intel", label: "nav.threatIntel", icon: Crosshair },
+      { to: "/ueba", label: "nav.ueba", icon: UsersRound },
+      { to: "/ai-soc", label: "nav.aiSoc", icon: BrainCircuit },
       { to: "/rules", label: "nav.rules", icon: Radar },
     ],
   },
   {
     label: "nav.governance",
     items: [
+      { to: "/evidence", label: "nav.evidence", icon: Archive },
       { to: "/collectors", label: "nav.collectors", icon: RadioTower },
+      { to: "/system", label: "nav.system", icon: Settings2 },
       { to: "/audit", label: "nav.audit", icon: ClipboardList },
     ],
   },
@@ -55,6 +67,12 @@ const pageKeys: Record<string, string> = {
   "/rules": "nav.rules",
   "/audit": "nav.audit",
   "/collectors": "nav.collectors",
+  "/threat-intel": "nav.threatIntel",
+  "/ueba": "nav.ueba",
+  "/evidence": "nav.evidence",
+  "/soar": "nav.soar",
+  "/ai-soc": "nav.aiSoc",
+  "/system": "nav.system",
 };
 
 export function AppShell() {

@@ -260,3 +260,337 @@ export interface ApiProblem {
   message?: string;
   field_errors?: Record<string, string[]>;
 }
+
+export interface EvidenceDto {
+  evidence_id: string;
+  tenant_id?: string;
+  request_id?: string;
+  incident_id?: string;
+  alert_id?: string;
+  event_id?: string;
+  filename: string;
+  content_type: string;
+  description?: string;
+  size: number;
+  sha256: string;
+  status: string;
+  failure?: string;
+  retain_until?: string;
+  legal_hold?: boolean;
+  uploader?: string;
+  metadata?: Record<string, unknown>;
+  verified_at?: string;
+  custody_head_hash?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface EvidenceCustodyDto {
+  sequence: number;
+  custody_id: string;
+  evidence_id: string;
+  actor: string;
+  action: string;
+  reason: string;
+  request_id?: string;
+  metadata?: Record<string, unknown>;
+  previous_hash: string;
+  hash: string;
+  created_at: string;
+}
+
+export interface EvidenceVerificationDto {
+  evidence_id: string;
+  expected_sha256: string;
+  actual_sha256: string;
+  size: number;
+  valid: boolean;
+  verified_at: string;
+}
+
+export interface EvidenceCustodyResponse extends ListResponse<EvidenceCustodyDto> {
+  chain_valid: boolean;
+}
+
+export interface ThreatIntelFeedDto {
+  feed_id: string;
+  name: string;
+  kind: string;
+  description?: string;
+  state: string;
+  source_url?: string;
+  refresh_interval_seconds?: number;
+  default_confidence?: number;
+  tags?: string[];
+  version: number;
+  updated_at?: string;
+}
+
+export interface ThreatIndicatorDto {
+  indicator_id: string;
+  feed_id: string;
+  type: string;
+  value: string;
+  normalized_value?: string;
+  source?: string;
+  confidence: number;
+  reputation: string;
+  first_seen?: string;
+  last_seen?: string;
+  valid_until?: string;
+  tags?: string[];
+  campaign?: string;
+  malware?: string;
+  threat_actors?: string[];
+  description?: string;
+  state: string;
+  version: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ThreatIntelMatchDto {
+  match_id: string;
+  indicator_id: string;
+  indicator_version?: number;
+  feed_id?: string;
+  event_id: string;
+  type: string;
+  value: string;
+  matched_field: string;
+  matched_value: string;
+  confidence: number;
+  reputation: string;
+  matched_at: string;
+}
+
+export interface ThreatRetrosearchDto {
+  indicator_id: string;
+  start: string;
+  end: string;
+  candidate_events: number;
+  events_matched: number;
+  matches: ThreatIntelMatchDto[];
+  returned: number;
+  partial: boolean;
+  duration_micros: number;
+}
+
+export interface UEBAFeatureDto {
+  code: string;
+  field: string;
+  value?: string;
+  score: number;
+  baseline_frequency: number;
+  explanation: string;
+}
+
+export interface UEBAAnomalyDto {
+  anomaly_id: string;
+  event_id: string;
+  entity_type: string;
+  entity_id: string;
+  entity_name: string;
+  peer_group?: string;
+  title: string;
+  severity: Severity;
+  risk_score: number;
+  confidence: number;
+  features: UEBAFeatureDto[];
+  explanation?: Record<string, unknown>;
+  model_version: string;
+  feature_version?: string;
+  training_window_days?: number;
+  baseline_observations?: number;
+  status: string;
+  version: number;
+  feedback_by?: string;
+  feedback_reason?: string;
+  feedback_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface UEBABaselineDto {
+  entity_type: string;
+  entity_id: string;
+  entity_name: string;
+  peer_group?: string;
+  model_version: string;
+  feature_version?: string;
+  training_window_days: number;
+  observation_count: number;
+  first_seen?: string;
+  last_seen?: string;
+  drift_score: number;
+  drift_status: string;
+  updated_at?: string;
+}
+
+export interface SOARPlaybookDto {
+  playbook_id: string;
+  name: string;
+  description?: string;
+  state: string;
+  latest_version: number;
+  published_version?: number;
+  revision: number;
+  updated_by?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface SOARNodeExecutionDto {
+  node_execution_id: string;
+  node_id: string;
+  node_type: string;
+  node_name: string;
+  status: string;
+  attempt: number;
+  output?: Record<string, unknown>;
+  error_code?: string;
+  error_detail?: string;
+  started_at?: string;
+  completed_at?: string;
+  updated_at?: string;
+}
+
+export interface SOARExecutionDto {
+  execution_id: string;
+  playbook_id: string;
+  playbook_version: number;
+  request_id: string;
+  trigger_type: string;
+  trigger_resource_type?: string;
+  trigger_resource_id?: string;
+  context?: Record<string, unknown>;
+  status: string;
+  version: number;
+  triggered_by: string;
+  created_at: string;
+  updated_at?: string;
+  started_at?: string;
+  completed_at?: string;
+  nodes?: SOARNodeExecutionDto[];
+}
+
+export interface SOARApprovalDecisionDto {
+  approver: string;
+  decision: string;
+  reason: string;
+  decided_at: string;
+}
+
+export interface SOARApprovalDto {
+  approval_id: string;
+  execution_id: string;
+  node_execution_id: string;
+  risk_level: number;
+  required_approvals: number;
+  status: string;
+  requested_by: string;
+  requested_at: string;
+  expires_at: string;
+  decided_at?: string;
+  decisions?: SOARApprovalDecisionDto[];
+}
+
+export interface SOARConnectorDto {
+  connector_id: string;
+  name: string;
+  kind: string;
+  state: string;
+  endpoint: string;
+  auth_type: string;
+  allowed_actions?: string[];
+  timeout_seconds?: number;
+  rate_limit_per_minute?: number;
+  version: number;
+  health_status: string;
+  health_error_class?: string;
+  health_detail?: string;
+  last_tested_at?: string;
+  updated_at?: string;
+}
+
+export interface AISOCPolicyDto {
+  tenant_id: string;
+  enabled: boolean;
+  cloud_allowed: boolean;
+  pii_redaction: boolean;
+  maximum_context_items: number;
+  local_model: string;
+  cloud_model?: string;
+  version: number;
+  updated_by?: string;
+  updated_at?: string;
+}
+
+export interface AISOCRecommendationDto {
+  summary: string;
+  key_findings: string[];
+  investigation_steps: string[];
+  suggested_queries: string[];
+  sigma_draft?: string;
+  parser_draft?: string;
+  mitre: string[];
+  limitations: string[];
+  citations: Array<{ type: string; id: string }>;
+  confidence: number;
+  disclaimer: string;
+}
+
+export interface AISOCRequestDto {
+  request_id: string;
+  request_hash: string;
+  function: string;
+  question?: string;
+  context_refs?: Array<{ type: string; id: string }>;
+  status: string;
+  provider: string;
+  model: string;
+  recommendation?: AISOCRecommendationDto;
+  requested_by: string;
+  prompt_injection_detected?: boolean;
+  redaction_count?: number;
+  failure_class?: string;
+  failure_detail?: string;
+  attempt?: number;
+  version: number;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  updated_at?: string;
+}
+
+export interface AISOCDecisionDto {
+  decision_id: string;
+  request_id: string;
+  decision: string;
+  reason: string;
+  decided_by: string;
+  created_at: string;
+}
+
+export interface AISOCRequestDetailsDto {
+  request: AISOCRequestDto;
+  decision?: AISOCDecisionDto;
+}
+
+export interface RetentionPolicyDto {
+  tenant_id: string;
+  raw_days: number;
+  normalized_days: number;
+  findings_days: number;
+  evidence_days: number;
+  updated_by?: string;
+  version: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface HealthDto {
+  status?: string;
+  ready?: boolean;
+  [key: string]: unknown;
+}

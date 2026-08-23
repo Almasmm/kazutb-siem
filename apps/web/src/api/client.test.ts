@@ -51,4 +51,23 @@ describe("KCSP API client", () => {
       problem: { trace_id: "trace-123" },
     });
   });
+
+  it("binds advanced SOC actions to their protected endpoints", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
+      anomaly_id: "ueba-1", status: "CONFIRMED", version: 2,
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.updateUEBAFeedback("ueba-1", { status: "CONFIRMED", reason: "Validated by L2", version: 1 });
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toContain("/api/v1/ueba/anomalies/ueba-1/feedback");
+    expect((init as RequestInit).method).toBe("POST");
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+      status: "CONFIRMED", reason: "Validated by L2", version: 1,
+    });
+    const headers = new Headers((init as RequestInit).headers);
+    expect(headers.get("Authorization")).toBe("Bearer kcsp-demo-l2");
+    expect(headers.get("X-KCSP-Tenant-ID")).toBe("university-kulazhanov");
+  });
 });
