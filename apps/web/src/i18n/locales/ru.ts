@@ -21,6 +21,7 @@ export const ru = {
     hunt: "Поиск / Hunt",
     incidents: "Инциденты",
     cases: "Кейсы",
+    assets: "Активы и сущности",
     rules: "Детектирование",
     collectors: "Коллекторы",
     threatIntel: "Threat Intelligence",
@@ -288,6 +289,13 @@ export const ru = {
     evidenceAttached: "Доказательство зафиксировано и связано с кейсом.", noEvidence: "Доказательства не прикреплены", comments: "Комментарии",
     commentPlaceholder: "Зафиксировать заметку расследования", addComment: "Добавить комментарий", history: "История кейса",
     closeTitle: "Закрыть кейс расследования", closeHint: "Перед закрытием зафиксируйте подтверждённый результат, восстановление и выводы.", closureSummary: "Итог расследования",
+  },
+  assetsPage: {
+    eyebrow: "Граф сущностей безопасности", title: "Активы и Entity Graph", subtitle: "Живой tenant-scoped граф из нормализованной телеметрии для расследований и анализа контекста риска.",
+    entities: "Сущностей", managedAssets: "Управляемых активов", highRisk: "Высокий риск", observations: "Наблюдения",
+    searchPlaceholder: "Hostname, пользователь, IP, процесс или natural key", entityType: "Тип сущности", minimumRisk: "Минимальный риск", noEntities: "Сущности для этого представления не найдены",
+    entity: "Сущность", firstSeen: "Впервые замечено", lastSeen: "Последняя активность", naturalKey: "Естественный ключ", riskContext: "Текущий контекст",
+    relationshipGraph: "Граф связей", nodes: "узлов", relations: "связей", attributes: "Наблюдаемые атрибуты", eventPivots: "Переходы к исходным событиям",
   },
   severity: {
     critical: "Критический",

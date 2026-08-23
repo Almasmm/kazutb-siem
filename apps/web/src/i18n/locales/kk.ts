@@ -15,6 +15,7 @@ export const kk = {
   nav: {
     operations: "Операциялар", intelligence: "Талдау", governance: "Басқару", soc: "SOC панелі",
     alerts: "Ескертулер кезегі", hunt: "Іздеу / Hunt", incidents: "Инциденттер", cases: "Кейстер", rules: "Анықтау ережелері", collectors: "Коллекторлар",
+    assets: "Активтер мен нысандар",
     threatIntel: "Threat Intelligence", ueba: "UEBA", evidence: "Дәлелдер", soar: "SOAR", aiSoc: "AI SOC", system: "Жүйе", audit: "Аудит",
   },
   common: {
@@ -162,6 +163,13 @@ export const kk = {
     evidenceAttached: "Дәлел бекітіліп, кейспен байланыстырылды.", noEvidence: "Дәлелдер тіркелмеген", comments: "Пікірлер",
     commentPlaceholder: "Тергеу жазбасын енгізіңіз", addComment: "Пікір қосу", history: "Кейс тарихы",
     closeTitle: "Тергеу кейсін жабу", closeHint: "Жабу алдында расталған нәтиже, қалпына келтіру және қорытындыны жазыңыз.", closureSummary: "Тергеу қорытындысы",
+  },
+  assetsPage: {
+    eyebrow: "Қауіпсіздік нысандарының графы", title: "Активтер және Entity Graph", subtitle: "Тергеу мен тәуекел контекстіне арналған қалыптандырылған телеметриядан құрылған tenant-scoped граф.",
+    entities: "Нысандар", managedAssets: "Басқарылатын активтер", highRisk: "Жоғары тәуекел", observations: "Бақылаулар",
+    searchPlaceholder: "Hostname, пайдаланушы, IP, процесс немесе natural key", entityType: "Нысан түрі", minimumRisk: "Ең төмен тәуекел", noEntities: "Бұл көрініске сәйкес нысандар жоқ",
+    entity: "Нысан", firstSeen: "Алғаш байқалды", lastSeen: "Соңғы белсенділік", naturalKey: "Табиғи кілт", riskContext: "Ағымдағы контекст",
+    relationshipGraph: "Байланыстар графы", nodes: "түйін", relations: "байланыс", attributes: "Бақыланған атрибуттар", eventPivots: "Бастапқы оқиғаларға өту",
   },
   severity: { critical: "Сындарлы", high: "Жоғары", medium: "Орташа", low: "Төмен", informational: "Ақпараттық", unknown: "Берілмеген" },
   status: {

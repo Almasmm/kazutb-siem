@@ -17,6 +17,7 @@ const SoarPage = lazy(() => import("./pages/SoarPage"));
 const AISocPage = lazy(() => import("./pages/AISocPage"));
 const SystemPage = lazy(() => import("./pages/SystemPage"));
 const CasesPage = lazy(() => import("./pages/CasesPage"));
+const AssetsPage = lazy(() => import("./pages/AssetsPage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 
 export default function App() {
@@ -39,6 +40,7 @@ export default function App() {
           <Route path="/ai-soc" element={<AISocPage />} />
           <Route path="/system" element={<SystemPage />} />
           <Route path="/cases" element={<CasesPage />} />
+          <Route path="/assets" element={<AssetsPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>

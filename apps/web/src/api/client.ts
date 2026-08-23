@@ -1,4 +1,6 @@
 import type {
+	EntityDto,
+	EntityGraphDto,
   AlertDto,
   AISOCDecisionDto,
   AISOCPolicyDto,
@@ -276,6 +278,10 @@ export const api = {
     getList<UEBAAnomalyDto>("/ueba/anomalies", params, signal),
   uebaBaseline: (entityType: string, entityID: string, signal?: AbortSignal) =>
     request<UEBABaselineDto>(`/ueba/entities/${encodeURIComponent(entityType)}/${encodeURIComponent(entityID)}`, { signal }),
+  entities: (params?: Record<string, QueryValue>, signal?: AbortSignal) => getList<EntityDto>("/entities", params, signal),
+  entity: (id: string, signal?: AbortSignal) => request<EntityDto>(`/entities/${encodeURIComponent(id)}`, { signal }),
+  entityGraph: (id: string, depth = 2, signal?: AbortSignal) => request<EntityGraphDto>(`/entities/${encodeURIComponent(id)}/graph?depth=${depth}&limit=500`, { signal }),
+  assets: (params?: Record<string, QueryValue>, signal?: AbortSignal) => getList<EntityDto>("/assets", params, signal),
   updateUEBAFeedback: (id: string, payload: { status: string; reason: string; version: number }) =>
     request<UEBAAnomalyDto>(`/ueba/anomalies/${encodeURIComponent(id)}/feedback`, {
       method: "POST",

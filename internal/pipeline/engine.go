@@ -55,6 +55,10 @@ type uebaProvider interface {
 	ObserveUEBAEvent(context.Context, core.CanonicalEvent) (*core.UEBAAnomaly, error)
 }
 
+type entityObserver interface {
+	ObserveEntityEvent(context.Context, core.CanonicalEvent) error
+}
+
 // Repository is the data-plane port used by the embedded executor. Production
 // adapters can route events/findings to ClickHouse and control objects to PostgreSQL
 // without leaking those SDK types into the domain pipeline.
@@ -148,6 +152,11 @@ func (e *Engine) Ingest(ctx context.Context, tenantID string, input core.Canonic
 	stored, duplicate, err := e.store.PutEvent(ctx, event)
 	if err != nil {
 		return core.IngestResult{}, fmt.Errorf("persist canonical event: %w", err)
+	}
+	if observer, ok := e.store.(entityObserver); ok {
+		if err := observer.ObserveEntityEvent(ctx, stored); err != nil {
+			return core.IngestResult{}, fmt.Errorf("project entity graph: %w", err)
+		}
 	}
 	if duplicate {
 		return core.IngestResult{Event: stored, Duplicate: true, Findings: []core.Finding{}, Alerts: []core.Alert{}}, nil

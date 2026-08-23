@@ -17,6 +17,7 @@ import (
 	"github.com/kcsp/platform/internal/cases"
 	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/detection"
+	"github.com/kcsp/platform/internal/entitygraph"
 	"github.com/kcsp/platform/internal/evidence"
 	"github.com/kcsp/platform/internal/hunt"
 	"github.com/kcsp/platform/internal/ingest"
@@ -62,6 +63,7 @@ type Server struct {
 	ueba              *ueba.Service
 	aiSOC             *aisoc.Service
 	cases             *cases.Service
+	entities          *entitygraph.Service
 }
 
 type Authenticator interface {
@@ -84,6 +86,7 @@ type Config struct {
 	UEBAService                 *ueba.Service
 	AISOCService                *aisoc.Service
 	CasesService                *cases.Service
+	EntityService               *entitygraph.Service
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -99,7 +102,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		collectors: config.CollectorRegistry, requireCollectors: config.RequireRegisteredCollectors,
 		detections: config.DetectionService, hunts: config.HuntStore, retention: config.RetentionStore,
 		evidence: config.EvidenceService, threatIntel: config.ThreatIntelService, soar: config.SOARService,
-		ueba: config.UEBAService, aiSOC: config.AISOCService, cases: config.CasesService,
+		ueba: config.UEBAService, aiSOC: config.AISOCService, cases: config.CasesService, entities: config.EntityService,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -171,6 +174,13 @@ func (s *Server) routes() {
 		s.mux.Handle("POST /api/v1/cases/{caseID}/participants", s.protect("soc.cases.manage", http.HandlerFunc(s.addCaseParticipant)))
 		s.mux.Handle("POST /api/v1/cases/{caseID}/observables", s.protect("soc.cases.manage", http.HandlerFunc(s.addCaseObservable)))
 		s.mux.Handle("POST /api/v1/cases/{caseID}/incidents", s.protect("soc.cases.manage", http.HandlerFunc(s.linkCaseIncident)))
+	}
+	if s.entities != nil {
+		s.mux.Handle("GET /api/v1/entities", s.protect("soc.entities.read", http.HandlerFunc(s.listEntities)))
+		s.mux.Handle("GET /api/v1/entities/{entityID}", s.protect("soc.entities.read", http.HandlerFunc(s.getEntity)))
+		s.mux.Handle("GET /api/v1/entities/{entityID}/graph", s.protect("soc.entities.read", http.HandlerFunc(s.getEntityGraph)))
+		s.mux.Handle("GET /api/v1/assets", s.protect("soc.entities.read", http.HandlerFunc(s.listAssets)))
+		s.mux.Handle("GET /api/v1/assets/{assetID}", s.protect("soc.entities.read", http.HandlerFunc(s.getAsset)))
 	}
 	if s.threatIntel != nil {
 		s.mux.Handle("GET /api/v1/threat-intel/feeds", s.protect("ti.indicators.read", http.HandlerFunc(s.listThreatIntelFeeds)))

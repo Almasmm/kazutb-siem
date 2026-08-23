@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/kcsp/platform/internal/core"
@@ -22,6 +23,10 @@ type Repository interface {
 	PutEvent(context.Context, core.CanonicalEvent) (core.CanonicalEvent, bool, error)
 	GetEvent(context.Context, string, string) (core.CanonicalEvent, error)
 	ListEvents(context.Context, string, EventFilter) ([]core.CanonicalEvent, error)
+	ObserveEntityEvent(context.Context, core.CanonicalEvent) error
+	ListEntities(context.Context, string, core.EntityFilter) ([]core.SecurityEntity, error)
+	GetEntity(context.Context, string, string) (core.SecurityEntity, error)
+	GetEntityGraph(context.Context, string, string, int, int) (core.EntityGraph, error)
 	PutFinding(context.Context, core.Finding) error
 	ListFindings(context.Context, string, string, int) ([]core.Finding, error)
 
@@ -45,11 +50,19 @@ type Repository interface {
 // to Repository. It is intentionally retained for unit tests and explicit demo
 // tooling, never as an automatic production fallback.
 type MemoryRepository struct {
-	memory *Memory
+	memory                 *Memory
+	entityMu               sync.RWMutex
+	entities               map[string]map[string]core.SecurityEntity
+	entityRelations        map[string]map[string]core.EntityRelation
+	seenEntityObservations map[string]struct{}
+	seenRelationEvents     map[string]struct{}
 }
 
 func WrapMemory(memory *Memory) *MemoryRepository {
-	return &MemoryRepository{memory: memory}
+	return &MemoryRepository{
+		memory: memory, entities: map[string]map[string]core.SecurityEntity{}, entityRelations: map[string]map[string]core.EntityRelation{},
+		seenEntityObservations: map[string]struct{}{}, seenRelationEvents: map[string]struct{}{},
+	}
 }
 
 func NewMemoryRepository() *MemoryRepository {
@@ -68,6 +81,7 @@ func (m *MemoryRepository) ResetTenant(ctx context.Context, tenantID string) err
 		return err
 	}
 	m.memory.ResetTenant(tenantID)
+	m.resetEntities(tenantID)
 	return nil
 }
 func (m *MemoryRepository) SetRules(ctx context.Context, rules []core.DetectionRule) error {

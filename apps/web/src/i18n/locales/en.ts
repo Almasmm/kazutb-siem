@@ -21,6 +21,7 @@ export const en = {
     hunt: "Search / Hunt",
     incidents: "Incidents",
     cases: "Cases",
+    assets: "Assets & entities",
     rules: "Detections",
     collectors: "Collectors",
     threatIntel: "Threat Intelligence",
@@ -172,6 +173,13 @@ export const en = {
     evidenceAttached: "Evidence sealed and linked to the case.", noEvidence: "No evidence linked", comments: "Comments",
     commentPlaceholder: "Record an investigation note", addComment: "Add comment", history: "Case history",
     closeTitle: "Close investigation case", closeHint: "Record the verified outcome, recovery and lessons learned before closing.", closureSummary: "Closure summary",
+  },
+  assetsPage: {
+    eyebrow: "Security entity fabric", title: "Assets & Entity Graph", subtitle: "A live, tenant-scoped graph projected from normalized telemetry for investigation pivots and exposure context.",
+    entities: "Visible entities", managedAssets: "Managed assets", highRisk: "High-risk entities", observations: "Observations",
+    searchPlaceholder: "Hostname, user, IP, process or natural key", entityType: "Entity type", minimumRisk: "Minimum risk", noEntities: "No entities match this view",
+    entity: "Entity", firstSeen: "First seen", lastSeen: "Last seen", naturalKey: "Natural key", riskContext: "Current context",
+    relationshipGraph: "Relationship graph", nodes: "nodes", relations: "relations", attributes: "Observed attributes", eventPivots: "Source event pivots",
   },
   severity: { critical: "Critical", high: "High", medium: "Medium", low: "Low", informational: "Informational", unknown: "Not set" },
   status: {

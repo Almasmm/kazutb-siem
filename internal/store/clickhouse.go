@@ -345,7 +345,7 @@ func uint64ToInt(value uint64) (int, error) {
 }
 
 func (c *ClickHouse) ResetTenant(ctx context.Context, tenantID string) error {
-	for _, table := range []string{"raw_events", "findings", "normalized_events"} {
+	for _, table := range []string{"entity_relation_observations", "entity_observations", "raw_events", "findings", "normalized_events"} {
 		if err := c.conn.Exec(ctx, "ALTER TABLE "+table+" DELETE WHERE tenant_id=? SETTINGS mutations_sync=1", tenantID); err != nil {
 			return fmt.Errorf("reset ClickHouse table %s: %w", table, err)
 		}

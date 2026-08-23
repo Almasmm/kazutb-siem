@@ -668,3 +668,43 @@ export interface CaseDto {
   updated_at: string;
   closed_at?: string;
 }
+
+export interface EntityDto {
+  entity_id: string;
+  tenant_id?: string;
+  entity_type: string;
+  natural_key: string;
+  display_name: string;
+  label?: string;
+  risk_score: number;
+  criticality?: string;
+  attributes?: Record<string, string>;
+  first_seen: string;
+  last_seen: string;
+  observation_count: number;
+  last_event_id?: string;
+  version: number;
+}
+
+export interface EntityRelationDto {
+  relation_id: string;
+  tenant_id?: string;
+  relation_type: string;
+  source_entity_id: string;
+  target_entity_id: string;
+  attributes?: Record<string, string>;
+  first_seen: string;
+  last_seen: string;
+  observation_count: number;
+  last_event_id?: string;
+  version: number;
+}
+
+export interface EntityGraphDto {
+  root: EntityDto;
+  entities: EntityDto[];
+  relations: EntityRelationDto[];
+  event_ids: string[];
+  depth: number;
+  total_observations: number;
+}

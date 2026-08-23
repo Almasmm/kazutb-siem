@@ -20,6 +20,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   UsersRound,
+  Network,
   Workflow,
   X,
 } from "lucide-react";
@@ -44,6 +45,7 @@ const navGroups = [
     label: "nav.intelligence",
     items: [
       { to: "/hunt", label: "nav.hunt", icon: Search },
+      { to: "/assets", label: "nav.assets", icon: Network },
       { to: "/threat-intel", label: "nav.threatIntel", icon: Crosshair },
       { to: "/ueba", label: "nav.ueba", icon: UsersRound },
       { to: "/ai-soc", label: "nav.aiSoc", icon: BrainCircuit },
@@ -76,6 +78,7 @@ const pageKeys: Record<string, string> = {
   "/ai-soc": "nav.aiSoc",
   "/system": "nav.system",
   "/cases": "nav.cases",
+  "/assets": "nav.assets",
 };
 
 export function AppShell() {
