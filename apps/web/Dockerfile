@@ -11,7 +11,7 @@ RUN VITE_AUTH_MODE="$KCSP_WEB_MODE" \
     VITE_TENANT_ID="$KCSP_WEB_TENANT" \
     npm run build
 
-FROM nginxinc/nginx-unprivileged:1.29-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS runtime
 
 USER root
 RUN apk upgrade --no-cache
