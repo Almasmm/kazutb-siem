@@ -144,6 +144,8 @@ export const kk = {
     createConnectorTitle: "Әрекет ету коннекторын тіркеу", editConnectorTitle: "Әрекет ету коннекторын баптау",
     endpoint: "HTTPS endpoint", secretRef: "Құпияны байланыстыру", secretRefHint: "env://, vault:// немесе k8s:// сілтемесін көрсетіңіз. Құпия мән мұнда сақталмайды.",
     multiSelectHint: "Осы коннекторға рұқсат етілген бір немесе бірнеше әрекетті таңдаңыз.", provider: "Провайдер келісімшарты", channel: "Арна",
+    projectKey: "Jira жоба кілті", issueType: "Jira тапсырма түрі", closeTransitionId: "Jira жабу ауысымының ID мәні",
+    nativeITSMHint: "Native ITSM таңдалған провайдердің API интерфейсін қолданады және әр өтінімді read-after-write сұрауымен тексереді.",
     apiKeyHeader: "API key тақырыбы", healthMethod: "Тексеру әдісі", healthPath: "Тексеру жолы", expectedStatus: "Күтілетін HTTP күйі",
     fromAddress: "Жіберуші мекенжайы", heloName: "SMTP HELO атауы",
     directoryType: "Каталог түрі", baseDN: "Каталогтың негізгі DN мәні", accountAttribute: "Тіркелгі атрибуты",

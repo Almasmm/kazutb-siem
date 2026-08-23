@@ -60,6 +60,8 @@ var secretEnvironmentName = regexp.MustCompile(`^KCSP_CONNECTOR_SECRET_[A-Z0-9_]
 var connectorHeaderName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]{0,63}$`)
 var connectorHELOName = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)
 var connectorLDAPAttribute = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]{0,63}$`)
+var connectorJIRAProjectKey = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,31}$`)
+var connectorJIRATransitionID = regexp.MustCompile(`^[0-9]{1,20}$`)
 
 func (s *Service) CreateConnector(ctx context.Context, tenantID, actor string,
 	draft ConnectorDraft) (core.SOARConnector, error) {
@@ -331,6 +333,9 @@ func normalizeConnectorSettings(kind, authType string, settings map[string]inter
 	if kind == core.SOARConnectorKindNotification {
 		result["provider"] = "GENERIC"
 	}
+	if kind == core.SOARConnectorKindITSMREST {
+		result["provider"] = "GENERIC"
+	}
 	if kind == core.SOARConnectorKindLDAPDirectory {
 		result["directory_type"] = "LDAP"
 	}
@@ -365,10 +370,43 @@ func normalizeConnectorSettings(kind, authType string, settings map[string]inter
 		case "provider":
 			provider, ok := value.(string)
 			provider = strings.ToUpper(strings.TrimSpace(provider))
-			if !ok || kind != core.SOARConnectorKindNotification || (provider != "GENERIC" && provider != "SLACK" && provider != "TEAMS") {
-				return nil, fmt.Errorf("%w: notification provider must be GENERIC, SLACK, or TEAMS", ErrInvalidConnector)
+			if !ok {
+				return nil, fmt.Errorf("%w: connector provider is invalid", ErrInvalidConnector)
+			}
+			switch kind {
+			case core.SOARConnectorKindNotification:
+				if provider != "GENERIC" && provider != "SLACK" && provider != "TEAMS" {
+					return nil, fmt.Errorf("%w: notification provider must be GENERIC, SLACK, or TEAMS", ErrInvalidConnector)
+				}
+			case core.SOARConnectorKindITSMREST:
+				if provider != "GENERIC" && provider != "SERVICENOW" && provider != "JIRA" {
+					return nil, fmt.Errorf("%w: ITSM provider must be GENERIC, SERVICENOW, or JIRA", ErrInvalidConnector)
+				}
+			default:
+				return nil, fmt.Errorf("%w: provider is unavailable for this connector kind", ErrInvalidConnector)
 			}
 			result[key] = provider
+		case "project_key":
+			projectKey, ok := value.(string)
+			projectKey = strings.ToUpper(strings.TrimSpace(projectKey))
+			if !ok || kind != core.SOARConnectorKindITSMREST || !connectorJIRAProjectKey.MatchString(projectKey) {
+				return nil, fmt.Errorf("%w: Jira project_key is invalid", ErrInvalidConnector)
+			}
+			result[key] = projectKey
+		case "issue_type":
+			issueType, ok := value.(string)
+			issueType = strings.TrimSpace(issueType)
+			if !ok || kind != core.SOARConnectorKindITSMREST || issueType == "" || len(issueType) > 120 || strings.ContainsAny(issueType, "\x00\r\n") {
+				return nil, fmt.Errorf("%w: Jira issue_type is invalid", ErrInvalidConnector)
+			}
+			result[key] = issueType
+		case "close_transition_id":
+			transitionID, ok := value.(string)
+			transitionID = strings.TrimSpace(transitionID)
+			if !ok || kind != core.SOARConnectorKindITSMREST || !connectorJIRATransitionID.MatchString(transitionID) {
+				return nil, fmt.Errorf("%w: Jira close_transition_id is invalid", ErrInvalidConnector)
+			}
+			result[key] = transitionID
 		case "channel":
 			channel, ok := value.(string)
 			channel = strings.TrimSpace(channel)
@@ -428,6 +466,23 @@ func normalizeConnectorSettings(kind, authType string, settings map[string]inter
 	}
 	if result["provider"] == "SLACK" && result["channel"] == nil {
 		return nil, fmt.Errorf("%w: Slack notification connectors require a channel", ErrInvalidConnector)
+	}
+	if kind == core.SOARConnectorKindITSMREST {
+		provider, _ := result["provider"].(string)
+		if provider == "JIRA" {
+			if result["project_key"] == nil {
+				return nil, fmt.Errorf("%w: Jira connectors require project_key", ErrInvalidConnector)
+			}
+			if result["issue_type"] == nil {
+				result["issue_type"] = "Task"
+			}
+		} else {
+			for _, key := range []string{"project_key", "issue_type", "close_transition_id"} {
+				if _, configured := settings[key]; configured {
+					return nil, fmt.Errorf("%w: %s is available only for Jira connectors", ErrInvalidConnector, key)
+				}
+			}
+		}
 	}
 	if kind == core.SOARConnectorKindEmailSMTP && result["from_address"] == nil {
 		return nil, fmt.Errorf("%w: SMTP connectors require from_address", ErrInvalidConnector)

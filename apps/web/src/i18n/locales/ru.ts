@@ -271,6 +271,8 @@ export const ru = {
     createConnectorTitle: "Регистрация коннектора реагирования", editConnectorTitle: "Настройка коннектора реагирования",
     endpoint: "HTTPS endpoint", secretRef: "Привязка секрета", secretRefHint: "Укажите ссылку env://, vault:// или k8s://. Секретные данные здесь не сохраняются.",
     multiSelectHint: "Выберите одно или несколько разрешённых действий.", provider: "Контракт провайдера", channel: "Канал",
+    projectKey: "Ключ проекта Jira", issueType: "Тип задачи Jira", closeTransitionId: "ID перехода закрытия Jira",
+    nativeITSMHint: "Native ITSM использует API выбранного провайдера и проверяет каждую заявку отдельным read-after-write запросом.",
     apiKeyHeader: "Заголовок API key", healthMethod: "Метод проверки", healthPath: "Путь проверки", expectedStatus: "Ожидаемый HTTP-статус",
     fromAddress: "Адрес отправителя", heloName: "Имя SMTP HELO",
     directoryType: "Тип каталога", baseDN: "Базовый DN каталога", accountAttribute: "Атрибут учётной записи",

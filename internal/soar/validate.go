@@ -33,6 +33,9 @@ func DefaultActionCatalog() ActionCatalog {
 	return ActionCatalog{
 		"kcsp.enrich.threat_intel":      {Type: "kcsp.enrich.threat_intel", Level: 0},
 		"kcsp.ticket.create":            {Type: "kcsp.ticket.create", Level: 1},
+		"kcsp.ticket.update":            {Type: "kcsp.ticket.update", Level: 1},
+		"kcsp.ticket.comment":           {Type: "kcsp.ticket.comment", Level: 1},
+		"kcsp.ticket.close":             {Type: "kcsp.ticket.close", Level: 2},
 		"kcsp.notification.send":        {Type: "kcsp.notification.send", Level: 2},
 		"endpoint.isolate":              {Type: "endpoint.isolate", Level: 3, Reversible: true},
 		"endpoint.release":              {Type: "endpoint.release", Level: 3},

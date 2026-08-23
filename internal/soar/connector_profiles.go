@@ -40,8 +40,11 @@ var connectorProfiles = map[string]connectorProfile{
 		EndpointSchemes: httpsConnectorSchemes, AuthTypes: standardHTTPConnectorAuth,
 	},
 	core.SOARConnectorKindITSMREST: {
-		SchemaVersion:   "kcsp.itsm.v1",
-		Actions:         map[string]bool{"kcsp.ticket.create": true},
+		SchemaVersion: "kcsp.itsm.v1",
+		Actions: map[string]bool{
+			"kcsp.ticket.create": true, "kcsp.ticket.update": true,
+			"kcsp.ticket.comment": true, "kcsp.ticket.close": true,
+		},
 		EndpointSchemes: httpsConnectorSchemes, AuthTypes: standardHTTPConnectorAuth,
 	},
 	core.SOARConnectorKindKCSPAPI: {
@@ -109,14 +112,45 @@ func buildConnectorPayload(connector core.SOARConnector, request ActionRequest) 
 			"parameters": parameters,
 		}
 	case core.SOARConnectorKindITSMREST:
-		title, err := requiredConnectorParameter(parameters, "title", "summary")
-		if err != nil {
-			return nil, err
-		}
+		operation := "create_ticket"
 		payload = map[string]interface{}{
-			"schema_version": profile.SchemaVersion, "operation": "create_ticket", "title": title,
-			"fields": parameters, "kcsp": metadata,
+			"schema_version": profile.SchemaVersion, "fields": parameters, "kcsp": metadata,
 		}
+		switch request.Attempt.ActionType {
+		case "kcsp.ticket.create":
+			title, err := requiredConnectorParameter(parameters, "title", "summary")
+			if err != nil {
+				return nil, err
+			}
+			payload["title"] = title
+		case "kcsp.ticket.update":
+			operation = "update_ticket"
+			reference, err := requiredConnectorParameter(parameters, "ticket_id", "ticket_key")
+			if err != nil {
+				return nil, err
+			}
+			payload["ticket_id"] = reference
+		case "kcsp.ticket.comment":
+			operation = "add_comment"
+			reference, err := requiredConnectorParameter(parameters, "ticket_id", "ticket_key")
+			if err != nil {
+				return nil, err
+			}
+			comment, err := requiredConnectorParameter(parameters, "comment", "text", "message")
+			if err != nil {
+				return nil, err
+			}
+			payload["ticket_id"] = reference
+			payload["comment"] = comment
+		case "kcsp.ticket.close":
+			operation = "close_ticket"
+			reference, err := requiredConnectorParameter(parameters, "ticket_id", "ticket_key")
+			if err != nil {
+				return nil, err
+			}
+			payload["ticket_id"] = reference
+		}
+		payload["operation"] = operation
 	case core.SOARConnectorKindNotification:
 		text, err := requiredConnectorParameter(parameters, "text", "message")
 		if err != nil {
