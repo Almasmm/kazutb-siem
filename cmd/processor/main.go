@@ -30,6 +30,11 @@ func main() {
 
 func run(logger *slog.Logger) error {
 	observability.Configure("processor", envOr("KCSP_VERSION", "development"))
+	profile := envOr("KCSP_PROFILE", "production")
+	kafkaSecurity, err := ingest.KafkaSecurityConfigFromEnvironment(profile != "development" && profile != "test")
+	if err != nil {
+		return fmt.Errorf("configure Kafka security: %w", err)
+	}
 	startupContext, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	repository, err := store.OpenHybrid(startupContext, os.Getenv("KCSP_DATABASE_URL"), os.Getenv("KCSP_CLICKHOUSE_URL"))
@@ -45,7 +50,7 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	publisher, err := ingest.OpenKafkaPublisher(startupContext, kafkaConfig())
+	publisher, err := ingest.OpenKafkaPublisher(startupContext, kafkaConfig(kafkaSecurity))
 	if err != nil {
 		return err
 	}
@@ -55,7 +60,7 @@ func run(logger *slog.Logger) error {
 		Brokers: strings.Split(os.Getenv("KCSP_KAFKA_BROKERS"), ","), ClientID: "kcsp-processor",
 		GroupID: envOr("KCSP_KAFKA_CONSUMER_GROUP", "kcsp-canonical-processing-v1"), Topic: publisher.RawTopic(),
 		EnvelopeHMACKey: os.Getenv("KCSP_KAFKA_ENVELOPE_HMAC_KEY"),
-		MaxWorkers:      processorWorkers,
+		MaxWorkers:      processorWorkers, Security: kafkaSecurity,
 	}, repository, parser.NewRegistry(repository), engine, publisher)
 	if err != nil {
 		return err
@@ -84,13 +89,13 @@ func run(logger *slog.Logger) error {
 	return nil
 }
 
-func kafkaConfig() ingest.KafkaConfig {
+func kafkaConfig(security ingest.KafkaSecurityConfig) ingest.KafkaConfig {
 	partitions := positiveInt32Env("KCSP_KAFKA_PARTITIONS", 12)
 	replication := positiveInt16Env("KCSP_KAFKA_REPLICATION_FACTOR", 1)
 	return ingest.KafkaConfig{
 		Brokers: strings.Split(os.Getenv("KCSP_KAFKA_BROKERS"), ","), ClientID: "kcsp-processor-dlq",
 		RawTopic: os.Getenv("KCSP_KAFKA_RAW_TOPIC"), DeadLetterTopic: os.Getenv("KCSP_KAFKA_DLQ_TOPIC"),
-		Partitions: partitions, ReplicationFactor: replication,
+		Partitions: partitions, ReplicationFactor: replication, Security: security,
 	}
 }
 

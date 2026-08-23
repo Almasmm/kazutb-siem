@@ -55,6 +55,8 @@ secrets:
     valkeyURL: valkey-url
     valkeyPassword: valkey-password
     kafkaEnvelopeHMACKey: kafka-envelope-hmac-key
+    kafkaSASLUsername: kafka-sasl-username
+    kafkaSASLPassword: kafka-sasl-password
     collectorOAuthClientID: collector-oauth-client-id
     collectorOAuthClientSecret: collector-oauth-client-secret
     minioAccessKey: minio-access-key
@@ -147,6 +149,11 @@ config:
     consumerGroup: kcsp-processor
     partitions: 12
     replicationFactor: 3
+    tls:
+      enabled: true
+      serverName: ""
+    sasl:
+      mechanism: scram-sha-512
   minio:
     endpoint: minio.example.internal:9000
     secure: true

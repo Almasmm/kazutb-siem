@@ -54,6 +54,10 @@ func run(logger *slog.Logger) error {
 	if authMode == "demo" && profile != "development" && profile != "test" {
 		return errors.New("demo authentication is forbidden outside development/test profiles")
 	}
+	kafkaSecurity, err := ingest.KafkaSecurityConfigFromEnvironment(profile != "development" && profile != "test")
+	if err != nil {
+		return fmt.Errorf("configure Kafka security: %w", err)
+	}
 
 	startupContext, cancelStartup := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelStartup()
@@ -115,7 +119,7 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	publisher, err := ingest.OpenKafkaPublisher(startupContext, kafkaConfig("kcsp-api"))
+	publisher, err := ingest.OpenKafkaPublisher(startupContext, kafkaConfig("kcsp-api", kafkaSecurity))
 	if err != nil {
 		return err
 	}
@@ -247,13 +251,13 @@ func run(logger *slog.Logger) error {
 	return nil
 }
 
-func kafkaConfig(clientID string) ingest.KafkaConfig {
+func kafkaConfig(clientID string, security ingest.KafkaSecurityConfig) ingest.KafkaConfig {
 	partitions := positiveInt32Env("KCSP_KAFKA_PARTITIONS", 12)
 	replication := positiveInt16Env("KCSP_KAFKA_REPLICATION_FACTOR", 1)
 	return ingest.KafkaConfig{
 		Brokers: strings.Split(os.Getenv("KCSP_KAFKA_BROKERS"), ","), ClientID: clientID,
 		RawTopic: os.Getenv("KCSP_KAFKA_RAW_TOPIC"), DeadLetterTopic: os.Getenv("KCSP_KAFKA_DLQ_TOPIC"),
-		Partitions: partitions, ReplicationFactor: replication,
+		Partitions: partitions, ReplicationFactor: replication, Security: security,
 	}
 }
 

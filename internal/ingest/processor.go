@@ -34,6 +34,7 @@ type ProcessorConfig struct {
 	Topic           string
 	EnvelopeHMACKey string
 	MaxWorkers      int
+	Security        KafkaSecurityConfig
 }
 
 type Processor struct {
@@ -65,9 +66,11 @@ func OpenProcessor(config ProcessorConfig, rawStore RawStore, eventParser Envelo
 	if config.Topic == "" {
 		config.Topic = "kcsp.raw.events.v1"
 	}
-	consumer, err := kgo.NewClient(
-		kgo.SeedBrokers(config.Brokers...),
-		kgo.ClientID(config.ClientID),
+	clientOptions, err := kafkaClientOptions(config.Brokers, config.ClientID, config.Security)
+	if err != nil {
+		return nil, fmt.Errorf("configure Kafka processor security: %w", err)
+	}
+	clientOptions = append(clientOptions,
 		kgo.ConsumerGroup(config.GroupID),
 		kgo.ConsumeTopics(config.Topic),
 		kgo.DisableAutoCommit(),
@@ -76,6 +79,7 @@ func OpenProcessor(config ProcessorConfig, rawStore RawStore, eventParser Envelo
 		kgo.FetchMaxWait(200*time.Millisecond),
 		kgo.FetchMaxBytes(32<<20),
 	)
+	consumer, err := kgo.NewClient(clientOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("create Kafka processor: %w", err)
 	}

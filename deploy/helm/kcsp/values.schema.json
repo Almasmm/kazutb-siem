@@ -50,6 +50,8 @@
             "valkeyURL",
             "valkeyPassword",
             "kafkaEnvelopeHMACKey",
+            "kafkaSASLUsername",
+            "kafkaSASLPassword",
             "collectorOAuthClientID",
             "collectorOAuthClientSecret",
             "minioAccessKey",
@@ -93,7 +95,7 @@
         },
         "kafka": {
           "type": "object",
-          "required": ["brokers", "rawTopic", "dlqTopic", "consumerGroup", "partitions", "replicationFactor"],
+          "required": ["brokers", "rawTopic", "dlqTopic", "consumerGroup", "partitions", "replicationFactor", "tls", "sasl"],
           "properties": {
             "brokers": {
               "type": "array",
@@ -101,7 +103,22 @@
               "items": {"type": "string", "minLength": 3}
             },
             "partitions": {"type": "integer", "minimum": 1},
-            "replicationFactor": {"type": "integer", "minimum": 1}
+            "replicationFactor": {"type": "integer", "minimum": 1},
+            "tls": {
+              "type": "object",
+              "required": ["enabled", "serverName"],
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "serverName": {"type": "string"}
+              }
+            },
+            "sasl": {
+              "type": "object",
+              "required": ["mechanism"],
+              "properties": {
+                "mechanism": {"type": "string", "enum": ["plain", "scram-sha-256", "scram-sha-512"]}
+              }
+            }
           }
         },
         "minio": {

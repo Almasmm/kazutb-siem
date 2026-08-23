@@ -143,6 +143,16 @@ spec:
                 secretKeyRef:
                   name: {{ $root.Values.secrets.existingSecret }}
                   key: {{ $root.Values.secrets.keys.kafkaEnvelopeHMACKey }}
+            - name: KCSP_KAFKA_SASL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.secrets.existingSecret }}
+                  key: {{ $root.Values.secrets.keys.kafkaSASLUsername }}
+            - name: KCSP_KAFKA_SASL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.secrets.existingSecret }}
+                  key: {{ $root.Values.secrets.keys.kafkaSASLPassword }}
             {{- end }}
             {{- if eq $name "api" }}
             - name: KCSP_LISTEN_ADDR
