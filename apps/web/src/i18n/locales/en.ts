@@ -160,6 +160,8 @@ export const en = {
     multiSelectHint: "Select one or more actions allowed for this connector.", provider: "Provider contract", channel: "Channel",
     projectKey: "Jira project key", issueType: "Jira issue type", closeTransitionId: "Jira close transition ID",
     nativeITSMHint: "Native ITSM actions use provider-specific APIs and verify every ticket with a read-after-write request.",
+    teamId: "Microsoft Teams team ID", channelId: "Microsoft Teams channel ID",
+    nativeNotificationHint: "Native notification actions use the provider API and verify the posted message with a separate read request.",
     apiKeyHeader: "API key header", healthMethod: "Health method", healthPath: "Health path", expectedStatus: "Expected HTTP status",
     fromAddress: "Envelope sender", heloName: "SMTP HELO name",
     directoryType: "Directory type", baseDN: "Directory base DN", accountAttribute: "Account attribute",

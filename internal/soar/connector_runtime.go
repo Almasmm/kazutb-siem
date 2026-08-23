@@ -157,6 +157,9 @@ func (e *ManagedConnectorExecutor) Execute(ctx context.Context, request ActionRe
 	if connector.Kind == core.SOARConnectorKindITSMREST && itsmProvider(connector) != itsmProviderGeneric {
 		return e.executeITSMConnector(ctx, connector, request, secret)
 	}
+	if connector.Kind == core.SOARConnectorKindNotification && isNativeNotificationProvider(connector) {
+		return e.executeNativeNotificationConnector(ctx, connector, request, secret)
+	}
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, connector.Endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return ActionResult{}, &NodeError{
@@ -265,6 +268,9 @@ func (e *ManagedConnectorExecutor) TestConnector(ctx context.Context,
 	}
 	if connector.Kind == core.SOARConnectorKindITSMREST && itsmProvider(connector) != itsmProviderGeneric {
 		return e.testITSMConnector(ctx, connector, secret), nil
+	}
+	if connector.Kind == core.SOARConnectorKindNotification && isNativeNotificationProvider(connector) {
+		return e.testNativeNotificationConnector(ctx, connector, secret), nil
 	}
 	endpoint, err := connectorHealthURL(connector)
 	if err != nil {

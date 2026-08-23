@@ -62,6 +62,9 @@ var connectorHELOName = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[
 var connectorLDAPAttribute = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]{0,63}$`)
 var connectorJIRAProjectKey = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,31}$`)
 var connectorJIRATransitionID = regexp.MustCompile(`^[0-9]{1,20}$`)
+var connectorSlackChannelID = regexp.MustCompile(`^[A-Za-z0-9_-]{2,80}$`)
+var connectorTeamsTeamID = regexp.MustCompile(`^[A-Za-z0-9._:-]{2,200}$`)
+var connectorTeamsChannelID = regexp.MustCompile(`^[A-Za-z0-9._:@-]{2,300}$`)
 
 func (s *Service) CreateConnector(ctx context.Context, tenantID, actor string,
 	draft ConnectorDraft) (core.SOARConnector, error) {
@@ -375,8 +378,9 @@ func normalizeConnectorSettings(kind, authType string, settings map[string]inter
 			}
 			switch kind {
 			case core.SOARConnectorKindNotification:
-				if provider != "GENERIC" && provider != "SLACK" && provider != "TEAMS" {
-					return nil, fmt.Errorf("%w: notification provider must be GENERIC, SLACK, or TEAMS", ErrInvalidConnector)
+				if provider != "GENERIC" && provider != "SLACK" && provider != "TEAMS" &&
+					provider != notificationProviderSlackWebAPI && provider != notificationProviderTeamsGraph {
+					return nil, fmt.Errorf("%w: notification provider is unsupported", ErrInvalidConnector)
 				}
 			case core.SOARConnectorKindITSMREST:
 				if provider != "GENERIC" && provider != "SERVICENOW" && provider != "JIRA" {
@@ -414,6 +418,20 @@ func normalizeConnectorSettings(kind, authType string, settings map[string]inter
 				return nil, fmt.Errorf("%w: notification channel is invalid", ErrInvalidConnector)
 			}
 			result[key] = channel
+		case "team_id":
+			teamID, ok := value.(string)
+			teamID = strings.TrimSpace(teamID)
+			if !ok || kind != core.SOARConnectorKindNotification || !connectorTeamsTeamID.MatchString(teamID) {
+				return nil, fmt.Errorf("%w: Microsoft Teams team_id is invalid", ErrInvalidConnector)
+			}
+			result[key] = teamID
+		case "channel_id":
+			channelID, ok := value.(string)
+			channelID = strings.TrimSpace(channelID)
+			if !ok || kind != core.SOARConnectorKindNotification || !connectorTeamsChannelID.MatchString(channelID) {
+				return nil, fmt.Errorf("%w: Microsoft Teams channel_id is invalid", ErrInvalidConnector)
+			}
+			result[key] = channelID
 		case "from_address":
 			from, ok := value.(string)
 			address, err := mail.ParseAddress(strings.TrimSpace(from))
@@ -464,8 +482,22 @@ func normalizeConnectorSettings(kind, authType string, settings map[string]inter
 			result["api_key_header"] = "X-API-Key"
 		}
 	}
-	if result["provider"] == "SLACK" && result["channel"] == nil {
-		return nil, fmt.Errorf("%w: Slack notification connectors require a channel", ErrInvalidConnector)
+	if kind == core.SOARConnectorKindNotification {
+		provider, _ := result["provider"].(string)
+		if (provider == "SLACK" || provider == notificationProviderSlackWebAPI) && result["channel"] == nil {
+			return nil, fmt.Errorf("%w: Slack notification connectors require a channel", ErrInvalidConnector)
+		}
+		if provider == notificationProviderSlackWebAPI {
+			channel, _ := result["channel"].(string)
+			if authType != core.SOARConnectorAuthBearer || !connectorSlackChannelID.MatchString(channel) {
+				return nil, fmt.Errorf("%w: native Slack requires BEARER auth and a conversation ID", ErrInvalidConnector)
+			}
+		}
+		if provider == notificationProviderTeamsGraph {
+			if authType != core.SOARConnectorAuthBearer || result["team_id"] == nil || result["channel_id"] == nil {
+				return nil, fmt.Errorf("%w: native Teams Graph requires BEARER auth, team_id, and channel_id", ErrInvalidConnector)
+			}
+		}
 	}
 	if kind == core.SOARConnectorKindITSMREST {
 		provider, _ := result["provider"].(string)

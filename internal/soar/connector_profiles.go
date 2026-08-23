@@ -158,9 +158,9 @@ func buildConnectorPayload(connector core.SOARConnector, request ActionRequest) 
 		}
 		provider, _ := connector.Settings["provider"].(string)
 		switch provider {
-		case "SLACK":
+		case "SLACK", notificationProviderSlackWebAPI:
 			payload = map[string]interface{}{"channel": connector.Settings["channel"], "text": text}
-		case "TEAMS":
+		case "TEAMS", notificationProviderTeamsGraph:
 			payload = map[string]interface{}{"body": map[string]interface{}{"contentType": "text", "content": text}}
 		default:
 			payload = map[string]interface{}{

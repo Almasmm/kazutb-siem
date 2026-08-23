@@ -149,6 +149,8 @@ export const kk = {
     multiSelectHint: "Осы коннекторға рұқсат етілген бір немесе бірнеше әрекетті таңдаңыз.", provider: "Провайдер келісімшарты", channel: "Арна",
     projectKey: "Jira жоба кілті", issueType: "Jira тапсырма түрі", closeTransitionId: "Jira жабу ауысымының ID мәні",
     nativeITSMHint: "Native ITSM таңдалған провайдердің API интерфейсін қолданады және әр өтінімді read-after-write сұрауымен тексереді.",
+    teamId: "Microsoft Teams командасының ID мәні", channelId: "Microsoft Teams арнасының ID мәні",
+    nativeNotificationHint: "Native notification провайдер API интерфейсін қолданады және жіберілген хабарды бөлек read сұрауымен тексереді.",
     apiKeyHeader: "API key тақырыбы", healthMethod: "Тексеру әдісі", healthPath: "Тексеру жолы", expectedStatus: "Күтілетін HTTP күйі",
     fromAddress: "Жіберуші мекенжайы", heloName: "SMTP HELO атауы",
     directoryType: "Каталог түрі", baseDN: "Каталогтың негізгі DN мәні", accountAttribute: "Тіркелгі атрибуты",
