@@ -9,7 +9,7 @@ COPY internal/dr ./internal/dr
 RUN go test ./internal/dr ./cmd/dr && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/kcsp-dr ./cmd/dr
 
-FROM clickhouse/clickhouse-server:25.8-alpine
+FROM clickhouse/clickhouse-server:26.6-alpine
 USER root
 RUN apk add --no-cache ca-certificates postgresql17-client && \
     mkdir -p /var/lib/kcsp/dr /var/lib/kcsp/clickhouse-backups && \
