@@ -17,6 +17,7 @@ import (
 	"github.com/kcsp/platform/internal/cases"
 	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/detection"
+	"github.com/kcsp/platform/internal/enrollment"
 	"github.com/kcsp/platform/internal/entitygraph"
 	"github.com/kcsp/platform/internal/evidence"
 	"github.com/kcsp/platform/internal/hunt"
@@ -72,6 +73,7 @@ type Server struct {
 	mitre             *mitre.Service
 	reports           *reporting.Service
 	licenses          *licensing.Service
+	enrollment        *enrollment.Service
 }
 
 type Authenticator interface {
@@ -99,6 +101,7 @@ type Config struct {
 	MITREService                *mitre.Service
 	ReportService               *reporting.Service
 	LicenseService              *licensing.Service
+	AgentEnrollmentService      *enrollment.Service
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -114,7 +117,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		collectors: config.CollectorRegistry, requireCollectors: config.RequireRegisteredCollectors,
 		detections: config.DetectionService, hunts: config.HuntStore, retention: config.RetentionStore,
 		evidence: config.EvidenceService, threatIntel: config.ThreatIntelService, soar: config.SOARService,
-		ueba: config.UEBAService, aiSOC: config.AISOCService, cases: config.CasesService, entities: config.EntityService, parsers: config.ParserService, mitre: config.MITREService, reports: config.ReportService, licenses: config.LicenseService,
+		ueba: config.UEBAService, aiSOC: config.AISOCService, cases: config.CasesService, entities: config.EntityService, parsers: config.ParserService, mitre: config.MITREService, reports: config.ReportService, licenses: config.LicenseService, enrollment: config.AgentEnrollmentService,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -142,6 +145,13 @@ func (s *Server) routes() {
 		s.mux.Handle("POST /api/v1/collectors", s.protect("platform.collectors.manage", http.HandlerFunc(s.registerCollector)))
 		s.mux.Handle("PATCH /api/v1/collectors/{collectorID}", s.protect("platform.collectors.manage", http.HandlerFunc(s.updateCollector)))
 		s.mux.Handle("POST /api/v1/collectors/heartbeat", s.protect("platform.collectors.heartbeat", http.HandlerFunc(s.collectorHeartbeat)))
+	}
+	if s.enrollment != nil {
+		s.mux.Handle("GET /api/v1/agent-enrollment/tokens", s.protect("platform.collectors.read", http.HandlerFunc(s.listAgentEnrollmentTokens)))
+		s.mux.Handle("POST /api/v1/agent-enrollment/tokens", s.protect("platform.collectors.manage", http.HandlerFunc(s.createAgentEnrollmentToken)))
+		s.mux.Handle("POST /api/v1/agent-enrollment/tokens/{tokenID}/revoke", s.protect("platform.collectors.manage", http.HandlerFunc(s.revokeAgentEnrollmentToken)))
+		s.mux.HandleFunc("POST /api/v1/agent-enrollment", s.enrollAgent)
+		s.mux.Handle("POST /api/v1/agent-credentials/rotate", s.protect("platform.collectors.heartbeat", http.HandlerFunc(s.rotateAgentCredential)))
 	}
 	if s.detections != nil {
 		s.mux.Handle("GET /api/v1/detection/content", s.protect("siem.rules.read", http.HandlerFunc(s.listDetectionContent)))
@@ -592,6 +602,81 @@ func (s *Server) collectorHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.json(w, http.StatusOK, collector)
+}
+
+func (s *Server) listAgentEnrollmentTokens(w http.ResponseWriter, r *http.Request) {
+	items, err := s.enrollment.ListTokens(r.Context(), tenantFrom(r.Context()))
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": items, "total": len(items)})
+}
+
+func (s *Server) createAgentEnrollmentToken(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
+	var request enrollment.CreateTokenRequest
+	if err := decodeJSON(w, r, &request); err != nil {
+		s.handleDecodeError(w, r, "Invalid agent enrollment token request", err)
+		return
+	}
+	issued, err := s.enrollment.CreateToken(r.Context(), tenantFrom(r.Context()), principalFrom(r.Context()).ID, request)
+	if errors.Is(err, enrollment.ErrInvalidRequest) {
+		s.problem(w, r, http.StatusBadRequest, "validation_error", "Invalid agent enrollment token request", err.Error())
+		return
+	}
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusCreated, issued)
+}
+
+func (s *Server) revokeAgentEnrollmentToken(w http.ResponseWriter, r *http.Request) {
+	item, err := s.enrollment.RevokeToken(r.Context(), tenantFrom(r.Context()), r.PathValue("tokenID"))
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, item)
+}
+
+func (s *Server) enrollAgent(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	var request core.AgentEnrollmentRequest
+	if err := decodeJSON(w, r, &request); err != nil {
+		s.handleDecodeError(w, r, "Invalid agent enrollment request", err)
+		return
+	}
+	response, err := s.enrollment.Enroll(r.Context(), request, remoteIP(r.RemoteAddr))
+	if errors.Is(err, enrollment.ErrInvalidToken) {
+		s.problem(w, r, http.StatusUnauthorized, "agent_enrollment_rejected", "Agent enrollment rejected", "The enrollment token is invalid, expired, revoked, or exhausted.")
+		return
+	}
+	if errors.Is(err, enrollment.ErrInvalidRequest) {
+		s.problem(w, r, http.StatusBadRequest, "validation_error", "Invalid agent enrollment request", err.Error())
+		return
+	}
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusCreated, response)
+}
+
+func (s *Server) rotateAgentCredential(w http.ResponseWriter, r *http.Request) {
+	value := strings.TrimSpace(r.Header.Get("Authorization"))
+	current := strings.TrimSpace(strings.TrimPrefix(value, "Bearer "))
+	grant, err := s.enrollment.RotateCredential(r.Context(), current)
+	if errors.Is(err, enrollment.ErrInvalidToken) {
+		s.problem(w, r, http.StatusUnauthorized, "agent_credential_rejected", "Agent credential rejected", "The current machine credential is invalid or expired.")
+		return
+	}
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, grant)
 }
 
 func remoteIP(address string) string {

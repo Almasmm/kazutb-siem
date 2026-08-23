@@ -78,6 +78,8 @@ config:
       scope: openid profile email offline_access
   collectors:
     requireRegistered: true
+    agentCredentialTTL: 720h
+    agentEnrollmentMaxTTL: 168h
   networkCollector:
     serverURL: ""
     oauthTokenURL: https://identity.example.edu/realms/kcsp/protocol/openid-connect/token

@@ -63,6 +63,24 @@ func (h *Hybrid) HeartbeatCollector(ctx context.Context, tenantID, subject strin
 func (h *Hybrid) SetCollectorState(ctx context.Context, tenantID, collectorID, state string) (core.Collector, error) {
 	return h.control.SetCollectorState(ctx, tenantID, collectorID, state)
 }
+func (h *Hybrid) CreateAgentEnrollmentToken(ctx context.Context, token core.AgentEnrollmentToken, tokenHash []byte) (core.AgentEnrollmentToken, error) {
+	return h.control.CreateAgentEnrollmentToken(ctx, token, tokenHash)
+}
+func (h *Hybrid) ListAgentEnrollmentTokens(ctx context.Context, tenantID string) ([]core.AgentEnrollmentToken, error) {
+	return h.control.ListAgentEnrollmentTokens(ctx, tenantID)
+}
+func (h *Hybrid) RevokeAgentEnrollmentToken(ctx context.Context, tenantID, tokenID string) (core.AgentEnrollmentToken, error) {
+	return h.control.RevokeAgentEnrollmentToken(ctx, tenantID, tokenID)
+}
+func (h *Hybrid) ConsumeAgentEnrollment(ctx context.Context, tokenHash []byte, collector core.Collector, credential core.AgentCredential, credentialHash []byte) (core.Collector, error) {
+	return h.control.ConsumeAgentEnrollment(ctx, tokenHash, collector, credential, credentialHash)
+}
+func (h *Hybrid) AgentCredentialByHash(ctx context.Context, tokenHash []byte) (core.AgentCredential, error) {
+	return h.control.AgentCredentialByHash(ctx, tokenHash)
+}
+func (h *Hybrid) RotateAgentCredential(ctx context.Context, oldHash []byte, replacement core.AgentCredential, replacementHash []byte) (core.AgentCredential, error) {
+	return h.control.RotateAgentCredential(ctx, oldHash, replacement, replacementHash)
+}
 func (h *Hybrid) CreateDetectionDraft(ctx context.Context, content core.DetectionContent) (core.DetectionContent, error) {
 	return h.control.CreateDetectionDraft(ctx, content)
 }

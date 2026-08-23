@@ -18,6 +18,7 @@ import (
 	"github.com/kcsp/platform/internal/cases"
 	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/detection"
+	"github.com/kcsp/platform/internal/enrollment"
 	"github.com/kcsp/platform/internal/entitygraph"
 	"github.com/kcsp/platform/internal/evidence"
 	"github.com/kcsp/platform/internal/httpapi"
@@ -121,10 +122,22 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("configure Kafka envelope integrity: %w", err)
 	}
 	gateway := ingest.NewGateway(publisher, envelopeAuthenticator)
-	authenticator, err := configureAuthenticator(startupContext, profile, authMode)
+	primaryAuthenticator, err := configureAuthenticator(startupContext, profile, authMode)
 	if err != nil {
 		return err
 	}
+	credentialTTL, err := time.ParseDuration(envOr("KCSP_AGENT_CREDENTIAL_TTL", "720h"))
+	if err != nil || credentialTTL < time.Hour {
+		return errors.New("KCSP_AGENT_CREDENTIAL_TTL must be a duration of at least one hour")
+	}
+	maximumEnrollmentTTL, err := time.ParseDuration(envOr("KCSP_AGENT_ENROLLMENT_MAX_TTL", "168h"))
+	if err != nil || maximumEnrollmentTTL < time.Minute {
+		return errors.New("KCSP_AGENT_ENROLLMENT_MAX_TTL must be a duration of at least one minute")
+	}
+	enrollmentService := enrollment.NewService(repository, enrollment.Config{
+		CredentialTTL: credentialTTL, MaximumEnrollmentTTL: maximumEnrollmentTTL,
+	})
+	authenticator := auth.NewChainedAuthenticator(auth.NewAgentAuthenticator(repository), primaryAuthenticator)
 
 	var seed func(context.Context) error
 	if strings.EqualFold(os.Getenv("KCSP_DEMO_SEED"), "true") {
@@ -144,22 +157,23 @@ func run(logger *slog.Logger) error {
 		seed,
 		httpapi.Config{
 			Profile: profile + "-distributed", AuthMode: authMode, Gateway: gateway,
-			AllowDirectIngest:  profile == "development" || profile == "test",
-			CollectorRegistry:  repository,
-			DetectionService:   detectionService,
-			HuntStore:          repository,
-			RetentionStore:     repository,
-			EvidenceService:    evidenceService,
-			ThreatIntelService: threatIntelService,
-			SOARService:        soarService,
-			UEBAService:        uebaService,
-			AISOCService:       aiSOCService,
-			CasesService:       caseService,
-			EntityService:      entityService,
-			ParserService:      parserService,
-			MITREService:       mitreService,
-			ReportService:      reportService,
-			LicenseService:     licenseService,
+			AllowDirectIngest:      profile == "development" || profile == "test",
+			CollectorRegistry:      repository,
+			DetectionService:       detectionService,
+			HuntStore:              repository,
+			RetentionStore:         repository,
+			EvidenceService:        evidenceService,
+			ThreatIntelService:     threatIntelService,
+			SOARService:            soarService,
+			UEBAService:            uebaService,
+			AISOCService:           aiSOCService,
+			CasesService:           caseService,
+			EntityService:          entityService,
+			ParserService:          parserService,
+			MITREService:           mitreService,
+			ReportService:          reportService,
+			LicenseService:         licenseService,
+			AgentEnrollmentService: enrollmentService,
 			RequireRegisteredCollectors: strings.EqualFold(
 				envOr("KCSP_REQUIRE_REGISTERED_COLLECTORS", strconv.FormatBool(authMode == "oidc")), "true",
 			),
