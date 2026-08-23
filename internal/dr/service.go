@@ -204,6 +204,7 @@ func (s *Service) backupPostgres(ctx context.Context, directory string) error {
 	if err := s.runner.Run(ctx, s.cfg.CommandTimeout, io.Discard, environment, "pg_dump", dumpArguments...); err != nil {
 		return fmt.Errorf("PostgreSQL backup: %w", err)
 	}
+	// #nosec G304 -- directory is a freshly created private backup work directory.
 	globals, err := os.OpenFile(filepath.Join(directory, "globals.sql"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
@@ -221,6 +222,7 @@ func (s *Service) backupPostgres(ctx context.Context, directory string) error {
 }
 
 func (s *Service) postgresInventory(ctx context.Context, database, destination string) error {
+	// #nosec G304 -- destination is generated beneath the private backup work directory.
 	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
@@ -285,6 +287,7 @@ func (s *Service) clickHouseQuery(ctx context.Context, configPath, query, output
 	var file *os.File
 	var err error
 	if outputPath != "" {
+		// #nosec G304 -- outputPath is generated beneath the private backup or restore work directory.
 		file, err = os.OpenFile(outputPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {
 			return err
@@ -593,6 +596,7 @@ func (s *Service) dropClickHouse(ctx context.Context, database, work string) err
 
 func (s *Service) verifyEvidence(ctx context.Context, database, bucket, work string) (int64, error) {
 	outputPath := filepath.Join(work, "evidence-inventory.csv")
+	// #nosec G304 -- outputPath is a constant filename beneath the private restore work directory.
 	output, err := os.OpenFile(outputPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return 0, err
@@ -615,6 +619,7 @@ ORDER BY object_key
 	if closeErr != nil {
 		return 0, closeErr
 	}
+	// #nosec G304 -- outputPath is the private file created immediately above.
 	file, err := os.Open(outputPath)
 	if err != nil {
 		return 0, err
@@ -721,10 +726,12 @@ func (s *Service) Prune(ctx context.Context) ([]string, error) {
 }
 
 func compareFiles(expected, actual string) error {
+	// #nosec G304 -- callers pass verified manifest artifacts or files created beneath the private restore work directory.
 	left, err := os.ReadFile(expected)
 	if err != nil {
 		return err
 	}
+	// #nosec G304 -- callers pass verified manifest artifacts or files created beneath the private restore work directory.
 	right, err := os.ReadFile(actual)
 	if err != nil {
 		return err
@@ -739,6 +746,7 @@ func compareFiles(expected, actual string) error {
 }
 
 func copyFile(source, destination string) error {
+	// #nosec G304 -- source is a SHA-256 verified manifest artifact and destination is under the validated DR directory.
 	input, err := os.Open(source)
 	if err != nil {
 		return err
@@ -747,7 +755,8 @@ func copyFile(source, destination string) error {
 	if err := os.MkdirAll(filepath.Dir(destination), 0o750); err != nil {
 		return err
 	}
-	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o640)
+	// #nosec G304 -- destination is generated beneath the validated absolute ClickHouse restore directory.
+	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}

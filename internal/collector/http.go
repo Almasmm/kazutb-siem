@@ -104,12 +104,13 @@ func (r *HTTPReceiver) Run(ctx context.Context) error {
 		WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10,
 	}
 	r.once.Do(func() { close(r.ready) })
-	go func() {
+	stopShutdown := context.AfterFunc(ctx, func() {
 		<-ctx.Done()
 		shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = server.Shutdown(shutdownContext)
-	}()
+	})
+	defer stopShutdown()
 	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
@@ -288,6 +289,7 @@ func loadMTLSServerConfig(certificateFile, privateKeyFile, clientCAFile string) 
 	if err != nil {
 		return nil, fmt.Errorf("load collector TLS identity: %w", err)
 	}
+	// #nosec G304 -- certificate paths are local collector administrator configuration, never telemetry input.
 	caBody, err := os.ReadFile(clientCAFile)
 	if err != nil {
 		return nil, fmt.Errorf("read collector client CA: %w", err)

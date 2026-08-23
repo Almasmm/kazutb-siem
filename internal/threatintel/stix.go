@@ -4,13 +4,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- RFC 4122 UUIDv5 interoperability requires SHA-1; it is not a security digest.
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/kcsp/platform/internal/core"
@@ -363,6 +365,7 @@ func exportSTIXIndicatorID(tenantID string, indicator core.ThreatIndicator) stri
 }
 
 func deterministicUUID(value string) string {
+	// #nosec G401 -- RFC 4122 UUIDv5 requires SHA-1 and this value is only a stable identifier.
 	sum := sha1.Sum([]byte("kcsp-stix-2.1|" + value))
 	bytes := append([]byte(nil), sum[:16]...)
 	bytes[6] = (bytes[6] & 0x0f) | 0x50
@@ -373,13 +376,16 @@ func deterministicUUID(value string) string {
 func randomUUID() string {
 	value := make([]byte, 16)
 	if _, err := rand.Read(value); err != nil {
-		sum := sha1.Sum([]byte(time.Now().UTC().Format(time.RFC3339Nano)))
+		seed := fmt.Sprintf("%s|%d", time.Now().UTC().Format(time.RFC3339Nano), uuidFallbackSequence.Add(1))
+		sum := sha256.Sum256([]byte(seed))
 		copy(value, sum[:16])
 	}
 	value[6] = (value[6] & 0x0f) | 0x40
 	value[8] = (value[8] & 0x3f) | 0x80
 	return formatUUID(value)
 }
+
+var uuidFallbackSequence atomic.Uint64
 
 func formatUUID(value []byte) string {
 	encoded := hex.EncodeToString(value)

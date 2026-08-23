@@ -43,7 +43,7 @@ func SelfTest() error {
 			if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 				return err
 			}
-			if err := os.WriteFile(path, []byte("self-test\n"), 0o640); err != nil {
+			if err := os.WriteFile(path, []byte("self-test\n"), 0o600); err != nil {
 				return err
 			}
 			continue
@@ -62,7 +62,7 @@ func SelfTest() error {
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			return err
 		}
-		if err := os.WriteFile(path, []byte(content), 0o640); err != nil {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			return err
 		}
 	}

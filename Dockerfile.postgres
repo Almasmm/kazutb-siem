@@ -1,7 +1,11 @@
 # syntax=docker/dockerfile:1.7
-FROM postgres:17-alpine
+FROM postgres:17-alpine AS prepared
 
-RUN apk add --no-cache openssl pgbackrest postgresql17-client && \
+RUN apk add --no-cache openssl pgbackrest postgresql17-client su-exec && \
+    rm -f /usr/local/bin/gosu && \
+    printf '%s\n' '#!/bin/sh' 'exec /sbin/su-exec "$@"' > /usr/local/bin/gosu && \
+    chmod 0755 /usr/local/bin/gosu && \
+    test "$(gosu postgres id -u)" = "$(id -u postgres)" && \
     mkdir -p /etc/pgbackrest /var/log/pgbackrest /var/lib/pgbackrest \
       /var/lib/postgresql/pitr-drill && \
     chown -R postgres:postgres /etc/pgbackrest /var/log/pgbackrest \
@@ -19,6 +23,20 @@ RUN chmod 0755 /usr/local/bin/kcsp-* && \
     /bin/sh -n /usr/local/bin/kcsp-pitr-scheduler && \
     /bin/sh -n /usr/local/bin/kcsp-pitr-restore-drill && \
     /usr/local/bin/kcsp-pgbackrest-self-test
+
+FROM scratch
+COPY --from=prepared / /
+
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    LANG=en_US.utf8 \
+    PG_MAJOR=17 \
+    PG_VERSION=17.11 \
+    PGDATA=/var/lib/postgresql/data
+
+WORKDIR /
+VOLUME ["/var/lib/postgresql/data"]
+EXPOSE 5432
+STOPSIGNAL SIGINT
 
 ENTRYPOINT ["/usr/local/bin/kcsp-postgres-entrypoint"]
 CMD ["postgres"]

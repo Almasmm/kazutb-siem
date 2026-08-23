@@ -1,0 +1,56 @@
+name: Security gates
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "23 2 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    name: SAST, SCA and secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+          cache: true
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Validate security policy
+        run: sh ops/security/self-test.sh
+      - name: Scan source and dependencies
+        run: sh ops/security/source-scan.sh
+
+  containers:
+    name: Runtime container scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Validate security policy
+        run: sh ops/security/self-test.sh
+      - name: Build and scan every runtime image
+        run: sh ops/security/build-and-scan.sh

@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1.7
 FROM nginx:1.29-alpine
 
-RUN apk add --no-cache curl openssl
+RUN apk upgrade --no-cache && \
+    apk add --no-cache curl openssl
 COPY deploy/pitr-proxy/nginx.conf /etc/nginx/nginx.conf
 COPY ops/pitr-proxy/entrypoint.sh /usr/local/bin/kcsp-pitr-proxy
 RUN chmod 0755 /usr/local/bin/kcsp-pitr-proxy

@@ -303,12 +303,22 @@ func validStoredCredential(credential storedAgentCredential) bool {
 }
 
 func readPrivateFile(path string, maximumBytes int64) ([]byte, error) {
+	if maximumBytes <= 0 {
+		return nil, errors.New("agent private state maximum size must be positive")
+	}
 	selected := path
-	info, err := os.Stat(selected)
+	// #nosec G304 -- selected is a local administrator credential path; a single handle prevents Stat/Open races.
+	file, err := os.Open(selected)
 	if errors.Is(err, os.ErrNotExist) {
 		selected = path + ".previous"
-		info, err = os.Stat(selected)
+		// #nosec G304 -- the fallback is the fixed previous-version suffix of the same administrator path.
+		file, err = os.Open(selected)
 	}
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
 	if err != nil {
 		return nil, err
 	}
@@ -318,9 +328,12 @@ func readPrivateFile(path string, maximumBytes int64) ([]byte, error) {
 	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		return nil, errors.New("agent private state file has group or world permissions")
 	}
-	body, err := os.ReadFile(selected)
+	body, err := io.ReadAll(io.LimitReader(file, maximumBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(body)) > maximumBytes {
+		return nil, errors.New("agent private state file is oversized")
 	}
 	return body, nil
 }
@@ -374,6 +387,7 @@ func writePrivateJSON(path string, value interface{}) error {
 	} else if err := os.Rename(temporaryName, path); err != nil {
 		return err
 	}
+	// #nosec G304 -- directory is the local administrator-configured private credential directory created above.
 	if directoryHandle, err := os.Open(directory); err == nil {
 		_ = directoryHandle.Sync()
 		_ = directoryHandle.Close()

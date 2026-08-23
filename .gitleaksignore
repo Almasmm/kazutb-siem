@@ -1,0 +1,2 @@
+# Public demo bearer used by the deterministic collector recovery acceptance fixture.
+0a050ccb340584844071b215ace5dcf28b0dae5c:ops/collector/fault-spool-recovery.sh:curl-auth-header:63

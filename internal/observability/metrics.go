@@ -178,12 +178,13 @@ func Serve(ctx context.Context, address string, logger *slog.Logger) error {
 		Addr: address, Handler: Handler(), ReadHeaderTimeout: 3 * time.Second,
 		ReadTimeout: 5 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second,
 	}
-	go func() {
+	stopShutdown := context.AfterFunc(ctx, func() {
 		<-ctx.Done()
 		shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = server.Shutdown(shutdownContext)
-	}()
+	})
+	defer stopShutdown()
 	if logger != nil {
 		logger.Info("KCSP metrics endpoint started", "address", address)
 	}

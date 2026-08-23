@@ -145,6 +145,7 @@ func fileArtifact(localPath, artifactPath, kind string) (Artifact, error) {
 	if err := validateArtifactPath(artifactPath); err != nil {
 		return Artifact{}, err
 	}
+	// #nosec G304 -- localPath is a generated private DR work artifact, not a manifest-supplied path.
 	file, err := os.Open(localPath)
 	if err != nil {
 		return Artifact{}, err

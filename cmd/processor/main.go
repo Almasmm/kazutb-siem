@@ -75,13 +75,31 @@ func run(logger *slog.Logger) error {
 }
 
 func kafkaConfig() ingest.KafkaConfig {
-	partitions, _ := strconv.Atoi(envOr("KCSP_KAFKA_PARTITIONS", "12"))
-	replication, _ := strconv.Atoi(envOr("KCSP_KAFKA_REPLICATION_FACTOR", "1"))
+	partitions := positiveInt32Env("KCSP_KAFKA_PARTITIONS", 12)
+	replication := positiveInt16Env("KCSP_KAFKA_REPLICATION_FACTOR", 1)
 	return ingest.KafkaConfig{
 		Brokers: strings.Split(os.Getenv("KCSP_KAFKA_BROKERS"), ","), ClientID: "kcsp-processor-dlq",
 		RawTopic: os.Getenv("KCSP_KAFKA_RAW_TOPIC"), DeadLetterTopic: os.Getenv("KCSP_KAFKA_DLQ_TOPIC"),
-		Partitions: int32(partitions), ReplicationFactor: int16(replication),
+		Partitions: partitions, ReplicationFactor: replication,
 	}
+}
+
+func positiveInt32Env(key string, fallback int32) int32 {
+	value, err := strconv.ParseInt(envOr(key, strconv.FormatInt(int64(fallback), 10)), 10, 32)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	// #nosec G115 -- ParseInt with bitSize 32 proves the value fits in int32.
+	return int32(value)
+}
+
+func positiveInt16Env(key string, fallback int16) int16 {
+	value, err := strconv.ParseInt(envOr(key, strconv.FormatInt(int64(fallback), 10)), 10, 16)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	// #nosec G115 -- ParseInt with bitSize 16 proves the value fits in int16.
+	return int16(value)
 }
 
 func envOr(key, fallback string) string {

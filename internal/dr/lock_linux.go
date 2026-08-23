@@ -10,6 +10,7 @@ import (
 )
 
 func acquireLock(filename string) (*os.File, error) {
+	// #nosec G304 -- filename is a constant basename joined to the validated absolute private DR work directory.
 	file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err

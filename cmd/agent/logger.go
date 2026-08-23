@@ -52,9 +52,20 @@ func openRotatingLogWriter(path string, maximumSize int64, backups int) (*rotati
 	if backups < 1 {
 		return nil, errors.New("agent log backup count must be positive")
 	}
+	if !filepath.IsAbs(path) {
+		return nil, errors.New("agent log path must be absolute")
+	}
+	path = filepath.Clean(path)
+	// #nosec G304 G703 -- this absolute path is local administrator configuration; the service account bounds access.
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return nil, errors.New("agent log path must not be a symbolic link")
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	// #nosec G304 G703 -- the absolute administrator path was cleaned and an existing symlink was rejected above.
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err

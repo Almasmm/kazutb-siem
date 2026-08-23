@@ -209,12 +209,13 @@ func serveHealth(ctx context.Context, address string, queue *agent.DiskQueue, re
 		_ = json.NewEncoder(response).Encode(map[string]interface{}{"status": "ready", "queue_depth": depth, "queue_bytes": bytes})
 	})
 	server := &http.Server{Addr: address, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second}
-	go func() {
+	stopShutdown := context.AfterFunc(ctx, func() {
 		<-ctx.Done()
 		shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = server.Shutdown(shutdownContext)
-	}()
+	})
+	defer stopShutdown()
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

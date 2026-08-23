@@ -23,6 +23,13 @@ var configurationPaths = []string{
 }
 
 func archiveConfiguration(root, destination string) error {
+	root = filepath.Clean(root)
+	configurationRoot, err := os.OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	defer configurationRoot.Close()
+	// #nosec G304 -- destination is generated beneath the validated absolute private DR work directory.
 	file, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
@@ -75,7 +82,7 @@ func archiveConfiguration(root, destination string) error {
 			if info.IsDir() {
 				return nil
 			}
-			source, err := os.Open(current)
+			source, err := configurationRoot.Open(relative)
 			if err != nil {
 				return err
 			}
@@ -104,6 +111,7 @@ func archiveConfiguration(root, destination string) error {
 }
 
 func extractConfiguration(archivePath, destination string) error {
+	// #nosec G304 -- archivePath is an HMAC-manifested artifact verified by size and SHA-256 before extraction.
 	source, err := os.Open(archivePath)
 	if err != nil {
 		return err
@@ -140,20 +148,27 @@ func extractConfiguration(archivePath, destination string) error {
 				return err
 			}
 		case tar.TypeReg:
+			if header.Size < 0 || header.Size > 64<<20 {
+				return fmt.Errorf("configuration archive entry %q has an invalid size", header.Name)
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 				return err
 			}
-			file, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o640)
+			// #nosec G304 -- target passed artifact-path validation, destination containment, and exclusive creation.
+			file, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 			if err != nil {
 				return err
 			}
-			_, copyErr := io.Copy(file, io.LimitReader(reader, header.Size+1))
+			written, copyErr := io.Copy(file, io.LimitReader(reader, header.Size+1))
 			closeErr := file.Close()
 			if copyErr != nil {
 				return copyErr
 			}
 			if closeErr != nil {
 				return closeErr
+			}
+			if written != header.Size {
+				return fmt.Errorf("configuration archive entry %q size mismatch", header.Name)
 			}
 		default:
 			return fmt.Errorf("configuration archive contains unsupported entry %q", header.Name)

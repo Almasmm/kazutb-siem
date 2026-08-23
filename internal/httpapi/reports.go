@@ -92,10 +92,12 @@ func (s *Server) downloadReport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	w.Header().Set("X-KCSP-Report-SHA256", run.Checksum)
 	w.Header().Set("X-KCSP-Content-SHA256", run.Checksum)
 	w.Header().Set("X-KCSP-SHA256", run.Checksum)
 	w.WriteHeader(http.StatusOK)
+	// #nosec G705 -- HTML is escaped by reporting.Render and every payload is an attachment with nosniff and sandbox CSP.
 	_, _ = w.Write(payload)
 }
 

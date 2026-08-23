@@ -64,6 +64,7 @@ func (s *objectStores) prepare(ctx context.Context) error {
 }
 
 func (s *objectStores) backupObjects(ctx context.Context, prefix, inventoryPath string) (int64, int64, error) {
+	// #nosec G304 -- inventoryPath is generated beneath a freshly created private backup work directory.
 	inventory, err := os.OpenFile(inventoryPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return 0, 0, err
@@ -140,6 +141,7 @@ func (s *objectStores) restoreObjects(ctx context.Context, prefix, inventoryPath
 			_ = s.removeSourceBucket(context.Background(), destinationBucket)
 		}
 	}()
+	// #nosec G304 -- inventoryPath is a size- and SHA-256-verified manifest artifact in the private restore directory.
 	inventory, err := os.Open(inventoryPath)
 	if err != nil {
 		return 0, 0, err
@@ -185,6 +187,7 @@ func (s *objectStores) restoreObjects(ctx context.Context, prefix, inventoryPath
 }
 
 func (s *objectStores) putFile(ctx context.Context, key, filename string, artifact Artifact) error {
+	// #nosec G304 -- filename is a generated private DR artifact whose size and SHA-256 are recorded in artifact.
 	file, err := os.Open(filename)
 	if err != nil {
 		return err
@@ -240,6 +243,7 @@ func (s *objectStores) getFile(ctx context.Context, key, filename string, artifa
 	if err := os.MkdirAll(filepathDir(filename), 0o750); err != nil {
 		return err
 	}
+	// #nosec G304 -- filename is built from a validated artifact path beneath the private restore work directory.
 	file, err := os.OpenFile(filename, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err

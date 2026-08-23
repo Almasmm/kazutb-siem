@@ -33,6 +33,10 @@ func NewSysmonSource(stateDirectory, channel string) (*SysmonSource, error) {
 	if channel == "" {
 		channel = "Microsoft-Windows-Sysmon/Operational"
 	}
+	channel = strings.TrimSpace(channel)
+	if len(channel) > 256 || strings.ContainsAny(channel, "\r\n") {
+		return nil, errors.New("valid Sysmon Event Log channel is required")
+	}
 	if err := os.MkdirAll(stateDirectory, 0o700); err != nil {
 		return nil, fmt.Errorf("create agent state directory: %w", err)
 	}
@@ -55,6 +59,7 @@ func (s *SysmonSource) Read(ctx context.Context, limit int) ([]Event, error) {
 		return nil, err
 	}
 	query := fmt.Sprintf("/q:*[System[(EventRecordID>%d)]]", checkpoint)
+	// #nosec G204 -- wevtutil is fixed and the validated channel is a discrete argv value; no shell is involved.
 	command := exec.CommandContext(ctx, "wevtutil", "qe", s.channel, query, "/f:xml", "/rd:false", fmt.Sprintf("/c:%d", limit))
 	output, err := command.CombinedOutput()
 	if err != nil {

@@ -58,6 +58,7 @@ func (s *WindowsEventSource) Read(ctx context.Context, limit int) ([]Event, erro
 		return nil, err
 	}
 	query := fmt.Sprintf("/q:*[System[(EventRecordID>%d)]]", checkpoint)
+	// #nosec G204 -- wevtutil is fixed and the validated channel is a discrete argv value; no shell is involved.
 	command := exec.CommandContext(ctx, "wevtutil", "qe", s.channel, query, "/f:xml", "/rd:false", fmt.Sprintf("/c:%d", limit))
 	output, err := command.CombinedOutput()
 	if err != nil {

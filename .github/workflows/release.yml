@@ -15,7 +15,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  security:
+    uses: ./.github/workflows/security.yml
+    permissions:
+      contents: read
+
   images:
+    needs: security
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: release
