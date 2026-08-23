@@ -262,11 +262,12 @@ func configureAuthenticator(ctx context.Context, profile, mode string) (httpapi.
 		return auth.NewDemoAuthenticator(), nil
 	case "oidc":
 		return auth.NewOIDCAuthenticator(ctx, auth.OIDCConfig{
-			IssuerURL:       os.Getenv("KCSP_OIDC_ISSUER_URL"),
-			ClientID:        os.Getenv("KCSP_OIDC_CLIENT_ID"),
-			TenantClaim:     os.Getenv("KCSP_OIDC_TENANT_CLAIM"),
-			RolesClaim:      os.Getenv("KCSP_OIDC_ROLES_CLAIM"),
-			PermissionClaim: os.Getenv("KCSP_OIDC_PERMISSION_CLAIM"),
+			IssuerURL:           os.Getenv("KCSP_OIDC_ISSUER_URL"),
+			ClientID:            os.Getenv("KCSP_OIDC_CLIENT_ID"),
+			TenantClaim:         os.Getenv("KCSP_OIDC_TENANT_CLAIM"),
+			RolesClaim:          os.Getenv("KCSP_OIDC_ROLES_CLAIM"),
+			PermissionClaim:     os.Getenv("KCSP_OIDC_PERMISSION_CLAIM"),
+			AllowInsecureIssuer: profile == "development" || profile == "test",
 		})
 	default:
 		return nil, fmt.Errorf("unsupported KCSP_AUTH_MODE %q", mode)

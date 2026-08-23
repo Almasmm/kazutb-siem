@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/kcsp/platform/internal/core"
+	"github.com/kcsp/platform/internal/platform/tenant"
 )
 
 type AgentCredentialStore interface {
@@ -33,6 +35,9 @@ func (a *AgentAuthenticator) Authenticate(request *http.Request) (Principal, err
 	hash := sha256.Sum256([]byte(token))
 	credential, err := a.store.AgentCredentialByHash(request.Context(), hash[:])
 	if err != nil {
+		return Principal{}, ErrUnauthenticated
+	}
+	if credential.RevokedAt != nil || !credential.ExpiresAt.After(time.Now().UTC()) || !tenant.Valid(credential.TenantID) || strings.TrimSpace(credential.CollectorID) == "" || strings.TrimSpace(credential.AuthSubject) == "" {
 		return Principal{}, ErrUnauthenticated
 	}
 	return Principal{

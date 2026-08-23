@@ -40,6 +40,23 @@ func TestDemoPermissionAndTenantBoundaries(t *testing.T) {
 	}
 }
 
+func TestDemoUsesCanonicalRoleMatrix(t *testing.T) {
+	authenticator := NewDemoAuthenticator()
+	principal, ok := authenticator.tokens["kcsp-demo-l2"]
+	if !ok {
+		t.Fatal("demo SOC L2 principal is missing")
+	}
+	expected, _, _ := permissionsForRoles([]string{"soc_l2"})
+	if len(principal.Permissions) != len(expected) {
+		t.Fatalf("demo permissions differ from canonical role: got %d, want %d", len(principal.Permissions), len(expected))
+	}
+	for permission := range expected {
+		if !principal.Permissions[permission] {
+			t.Fatalf("demo SOC L2 is missing canonical permission %q", permission)
+		}
+	}
+}
+
 func TestUnknownDemoTokenIsRejected(t *testing.T) {
 	request, _ := http.NewRequest(http.MethodGet, "http://kcsp.local", nil)
 	request.Header.Set("Authorization", "Bearer not-a-real-token")

@@ -35,60 +35,37 @@ type DemoAuthenticator struct {
 }
 
 func NewDemoAuthenticator() *DemoAuthenticator {
-	read := []string{
-		"platform.session.read", "platform.overview.read", "siem.events.read", "siem.findings.read",
-		"soc.alerts.read", "soc.incidents.read", "detection.rules.read", "platform.collectors.read", "siem.rules.read",
-		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage",
-		"siem.parsers.read",
-		"siem.mitre.read",
-		"reports.read",
-		"licenses.read",
-		"platform.retention.read",
-		"soc.evidence.read",
-		"soc.cases.read",
-		"soc.entities.read",
-		"ti.indicators.read",
-		"soar.playbooks.read", "soar.connectors.read",
-		"ueba.read",
-		"ai.read", "ai.request",
-	}
-	l2 := append(append([]string{}, read...), "soc.alerts.manage", "soc.incidents.create", "soc.incidents.manage", "soc.cases.manage", "platform.audit.read", "soc.evidence.write", "soar.playbooks.execute", "soar.actions.approve", "ueba.feedback", "ai.decide", "siem.parsers.write", "siem.parsers.publish", "reports.generate")
 	return &DemoAuthenticator{tokens: map[string]Principal{
-		"kcsp-demo-l1":                 principal("user-soc-l1", "Айдана Сәрсен", "SOC L1", append(read, "soc.alerts.manage", "soc.incidents.create")),
-		"kcsp-demo-l2":                 principal("user-soc-l2", "Данияр Нұрлан", "SOC L2", l2),
-		"kcsp-demo-auditor":            principal("user-auditor", "Internal Auditor", "Auditor", []string{"platform.overview.read", "platform.audit.read", "soc.alerts.read", "soc.incidents.read", "soc.entities.read", "reports.read"}),
-		"kcsp-demo-collector":          principal("svc-http-collector", "HTTP Collector", "Service Account", []string{"siem.events.ingest", "platform.collectors.heartbeat"}),
-		"kcsp-demo-detection-engineer": principal("user-detection-engineer", "Detection Engineer", "Detection Engineer", []string{"platform.overview.read", "siem.events.read", "siem.rules.read", "siem.rules.write", "siem.rules.publish", "siem.hunt.read", "siem.hunt.execute", "siem.parsers.read", "siem.parsers.write", "siem.parsers.publish"}),
-		"kcsp-demo-threat-intel":       principal("user-threat-intel", "Threat Intelligence Analyst", "Threat Intelligence Analyst", []string{"platform.overview.read", "siem.events.read", "soc.alerts.read", "soc.incidents.read", "ti.indicators.read", "ti.indicators.manage"}),
-		"kcsp-demo-soar-engineer":      principal("user-soar-engineer", "SOAR Engineer", "SOAR Engineer", []string{"platform.overview.read", "soc.alerts.read", "soc.incidents.read", "soar.playbooks.read", "soar.playbooks.write", "soar.playbooks.execute", "soar.actions.approve", "soar.connectors.read", "soar.connectors.manage", "soar.connectors.test"}),
-		"kcsp-demo-tenant-admin":       principal("user-tenant-admin", "Tenant Administrator", "Tenant Admin", []string{"platform.overview.read", "platform.audit.read", "platform.collectors.read", "platform.retention.read", "licenses.read", "admin.users.manage"}),
-		"kcsp-demo-mssp": {
-			ID: "user-mssp-manager", DisplayName: "MSSP Operations Manager", Role: "MSSP Manager",
-			Permissions:    map[string]bool{"platform.overview.read": true, "soc.alerts.read": true, "soc.incidents.read": true, "licenses.read": true, "mssp.tenants.read": true},
-			AllowedTenants: map[string]bool{}, PlatformScope: true,
-		},
-		"kcsp-demo-admin": {
-			ID:             "user-platform-admin",
-			DisplayName:    "KCSP Administrator",
-			Role:           "Platform Administrator",
-			Permissions:    map[string]bool{"*": true},
-			AllowedTenants: map[string]bool{},
-			PlatformScope:  true,
-		},
+		"kcsp-demo-l1":                 demoRolePrincipal("user-soc-l1", "Айдана Сәрсен", "soc_l1"),
+		"kcsp-demo-l2":                 demoRolePrincipal("user-soc-l2", "Данияр Нұрлан", "soc_l2"),
+		"kcsp-demo-auditor":            demoRolePrincipal("user-auditor", "Internal Auditor", "auditor"),
+		"kcsp-demo-collector":          demoRolePrincipal("svc-http-collector", "HTTP Collector", "service_collector"),
+		"kcsp-demo-detection-engineer": demoRolePrincipal("user-detection-engineer", "Detection Engineer", "detection_engineer"),
+		"kcsp-demo-threat-intel":       demoRolePrincipal("user-threat-intel", "Threat Intelligence Analyst", "threat_intelligence_analyst"),
+		"kcsp-demo-soar-engineer":      demoRolePrincipal("user-soar-engineer", "SOAR Engineer", "soar_engineer"),
+		"kcsp-demo-tenant-admin":       demoRolePrincipal("user-tenant-admin", "Tenant Administrator", "tenant_admin"),
+		"kcsp-demo-mssp":               demoRolePrincipal("user-mssp-manager", "MSSP Operations Manager", "mssp_manager"),
+		"kcsp-demo-admin":              demoRolePrincipal("user-platform-admin", "KCSP Administrator", "platform_administrator"),
 	}}
 }
 
-func principal(id, name, role string, permissions []string) Principal {
-	perms := make(map[string]bool, len(permissions))
-	for _, permission := range permissions {
-		perms[permission] = true
+func demoRolePrincipal(id, name, role string) Principal {
+	permissions, roleNames, platformScope := permissionsForRoles([]string{role})
+	displayRole := role
+	if len(roleNames) > 0 {
+		displayRole = roleNames[0]
+	}
+	allowedTenants := map[string]bool{}
+	if !platformScope {
+		allowedTenants["university-kulazhanov"] = true
 	}
 	return Principal{
 		ID:             id,
 		DisplayName:    name,
-		Role:           role,
-		Permissions:    perms,
-		AllowedTenants: map[string]bool{"university-kulazhanov": true},
+		Role:           displayRole,
+		Permissions:    permissions,
+		AllowedTenants: allowedTenants,
+		PlatformScope:  platformScope,
 	}
 }
 

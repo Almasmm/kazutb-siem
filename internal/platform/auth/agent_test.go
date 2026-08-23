@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -14,6 +15,43 @@ import (
 type agentCredentialStoreStub struct {
 	hash       []byte
 	credential core.AgentCredential
+}
+
+type defenseInDepthCredentialStore struct {
+	credential core.AgentCredential
+}
+
+func (s defenseInDepthCredentialStore) AgentCredentialByHash(context.Context, []byte) (core.AgentCredential, error) {
+	return s.credential, nil
+}
+
+func TestAgentAuthenticatorRejectsInvalidStoredCredential(t *testing.T) {
+	now := time.Now().UTC()
+	revokedAt := now.Add(-time.Minute)
+	valid := core.AgentCredential{
+		TenantID:    "university-kulazhanov",
+		CollectorID: "collector-windows-01",
+		AuthSubject: "agent:collector-windows-01",
+		ExpiresAt:   now.Add(time.Hour),
+	}
+	tests := map[string]core.AgentCredential{
+		"expired":            func() core.AgentCredential { value := valid; value.ExpiresAt = now.Add(-time.Minute); return value }(),
+		"revoked":            func() core.AgentCredential { value := valid; value.RevokedAt = &revokedAt; return value }(),
+		"invalid tenant":     func() core.AgentCredential { value := valid; value.TenantID = "../tenant"; return value }(),
+		"empty collector":    func() core.AgentCredential { value := valid; value.CollectorID = " "; return value }(),
+		"empty auth subject": func() core.AgentCredential { value := valid; value.AuthSubject = " "; return value }(),
+	}
+
+	for name, credential := range tests {
+		t.Run(name, func(t *testing.T) {
+			authenticator := NewAgentAuthenticator(defenseInDepthCredentialStore{credential: credential})
+			request := httptest.NewRequest(http.MethodPost, "https://kcsp.local/api/v1/ingest/events", nil)
+			request.Header.Set("Authorization", "Bearer kcsp_agent_test-credential")
+			if _, err := authenticator.Authenticate(request); !errors.Is(err, ErrUnauthenticated) {
+				t.Fatalf("expected invalid credential to be rejected, got %v", err)
+			}
+		})
+	}
 }
 
 func (s agentCredentialStoreStub) AgentCredentialByHash(_ context.Context, hash []byte) (core.AgentCredential, error) {

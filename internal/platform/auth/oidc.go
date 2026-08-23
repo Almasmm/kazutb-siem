@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -13,11 +14,12 @@ import (
 )
 
 type OIDCConfig struct {
-	IssuerURL       string
-	ClientID        string
-	TenantClaim     string
-	RolesClaim      string
-	PermissionClaim string
+	IssuerURL           string
+	ClientID            string
+	TenantClaim         string
+	RolesClaim          string
+	PermissionClaim     string
+	AllowInsecureIssuer bool
 }
 
 type OIDCAuthenticator struct {
@@ -33,6 +35,16 @@ func NewOIDCAuthenticator(ctx context.Context, config OIDCConfig) (*OIDCAuthenti
 	config.ClientID = strings.TrimSpace(config.ClientID)
 	if config.IssuerURL == "" || config.ClientID == "" {
 		return nil, errors.New("OIDC issuer URL and client ID are required")
+	}
+	issuerURL, err := url.Parse(config.IssuerURL)
+	if err != nil || !issuerURL.IsAbs() || issuerURL.Host == "" {
+		return nil, errors.New("OIDC issuer URL must be an absolute URL with a host")
+	}
+	if issuerURL.User != nil || issuerURL.RawQuery != "" || issuerURL.Fragment != "" {
+		return nil, errors.New("OIDC issuer URL must not contain user info, query parameters, or a fragment")
+	}
+	if !strings.EqualFold(issuerURL.Scheme, "https") && !(config.AllowInsecureIssuer && strings.EqualFold(issuerURL.Scheme, "http")) {
+		return nil, errors.New("OIDC issuer URL must use HTTPS")
 	}
 	provider, err := oidc.NewProvider(ctx, config.IssuerURL)
 	if err != nil {
@@ -69,12 +81,12 @@ func (a *OIDCAuthenticator) Authenticate(r *http.Request) (Principal, error) {
 	permissions, roleNames, platformScope := permissionsForRoles(roles)
 	for _, permission := range stringSliceClaim(claims, a.permissionClaim) {
 		if knownPermissions[permission] {
-			permissions[permission] = true
+			grantPermission(permissions, permission)
 		}
 	}
 	for _, permission := range strings.Fields(stringClaim(claims, "scope")) {
 		if knownPermissions[permission] {
-			permissions[permission] = true
+			grantPermission(permissions, permission)
 		}
 	}
 	tenants := map[string]bool{}
@@ -218,6 +230,7 @@ var roleDisplayNames = map[string]string{
 	"threat_hunter":               "Threat Hunter",
 	"detection_engineer":          "Detection Engineer",
 	"threat_intelligence_analyst": "Threat Intelligence Analyst",
+	"soar_engineer":               "SOAR Engineer",
 	"auditor":                     "Auditor",
 	"collector":                   "Collector Service",
 	"service_collector":           "Collector Service",
@@ -228,6 +241,7 @@ var rolePermissions = map[string][]string{
 	"platform_administrator": {"*"},
 	"tenant_admin": {
 		"platform.overview.read", "admin.users.manage", "admin.roles.manage", "admin.config.manage", "platform.audit.read",
+		"platform.collectors.read", "platform.collectors.manage", "siem.parsers.read", "siem.parsers.write", "siem.parsers.publish", "siem.mitre.read", "soc.entities.read",
 		"licenses.read", "licenses.install", "reports.read", "reports.generate",
 		"siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read", "siem.rules.read",
 		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage", "platform.retention.read", "platform.retention.manage", "ti.indicators.read", "ti.indicators.manage",
@@ -235,42 +249,47 @@ var rolePermissions = map[string][]string{
 		"soc.cases.manage", "soc.evidence.read", "soc.evidence.write", "soar.playbooks.read", "soar.playbooks.write", "soar.playbooks.execute", "soar.actions.approve", "soar.connectors.read", "soar.connectors.manage", "soar.connectors.test", "ueba.read", "ueba.feedback", "ai.read", "ai.request", "ai.decide", "ai.policy.manage",
 	},
 	"soc_manager": {
-		"platform.overview.read", "siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read",
+		"platform.overview.read", "platform.collectors.read", "siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read", "siem.rules.read", "siem.parsers.read", "siem.mitre.read", "soc.entities.read",
 		"licenses.read", "reports.read", "reports.generate",
 		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage", "platform.retention.read", "ti.indicators.read",
 		"soc.alerts.read", "soc.alerts.manage", "soc.alerts.triage", "soc.incidents.read", "soc.incidents.create", "soc.incidents.manage",
 		"soc.cases.manage", "soc.evidence.read", "soc.evidence.write", "soar.playbooks.read", "soar.playbooks.write", "soar.playbooks.execute", "soar.actions.approve", "soar.connectors.read", "soar.connectors.manage", "soar.connectors.test", "ueba.read", "ueba.feedback", "ai.read", "ai.request", "ai.decide",
 	},
 	"soc_l1": {
-		"platform.overview.read", "platform.collectors.read", "siem.events.read", "siem.findings.read", "detection.rules.read",
+		"platform.overview.read", "platform.collectors.read", "siem.events.read", "siem.findings.read", "detection.rules.read", "siem.rules.read", "siem.parsers.read", "siem.mitre.read", "soc.entities.read",
+		"licenses.read", "reports.read", "soc.cases.read", "soc.evidence.read", "soar.playbooks.read", "soar.connectors.read",
 		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage", "platform.retention.read", "ti.indicators.read",
 		"soc.alerts.read", "soc.alerts.manage", "soc.alerts.triage", "soc.incidents.read", "soc.incidents.create", "ueba.read", "ai.read", "ai.request",
 	},
 	"soc_l2": {
-		"platform.overview.read", "platform.collectors.read", "siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read",
+		"platform.overview.read", "platform.collectors.read", "siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read", "siem.rules.read", "siem.parsers.read", "siem.mitre.read", "soc.entities.read",
 		"licenses.read", "reports.read", "reports.generate",
 		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage", "platform.retention.read", "ti.indicators.read",
 		"soc.alerts.read", "soc.alerts.manage", "soc.alerts.triage", "soc.incidents.read", "soc.incidents.create", "soc.incidents.manage",
 		"soc.cases.manage", "soc.evidence.read", "soc.evidence.write", "soar.playbooks.read", "soar.playbooks.execute", "soar.connectors.read", "platform.audit.read", "ueba.read", "ueba.feedback", "ai.read", "ai.request", "ai.decide",
 	},
 	"soc_l3": {
-		"platform.overview.read", "platform.collectors.read", "siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read",
+		"platform.overview.read", "platform.collectors.read", "siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read", "siem.rules.read", "siem.parsers.read", "siem.mitre.read", "soc.entities.read",
+		"licenses.read", "reports.read", "reports.generate",
 		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage", "platform.retention.read", "ti.indicators.read",
 		"soc.alerts.read", "soc.alerts.manage", "soc.alerts.triage", "soc.incidents.read", "soc.incidents.create", "soc.incidents.manage",
 		"soc.cases.manage", "soc.evidence.read", "soc.evidence.write", "soar.playbooks.read", "soar.playbooks.execute", "soar.actions.approve", "soar.connectors.read", "soar.connectors.test", "platform.audit.read", "ueba.read", "ueba.feedback", "ai.read", "ai.request", "ai.decide",
 	},
 	"threat_hunter": {
-		"platform.overview.read", "siem.events.read", "siem.events.export", "siem.findings.read", "siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage", "platform.retention.read", "ti.indicators.read",
+		"platform.overview.read", "siem.events.read", "siem.events.export", "siem.findings.read", "siem.rules.read", "siem.parsers.read", "siem.mitre.read", "soc.entities.read", "siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage", "platform.retention.read", "ti.indicators.read",
 		"soc.alerts.read", "soc.incidents.read", "soc.incidents.create", "soc.cases.manage", "soc.evidence.read", "soc.evidence.write", "ueba.read", "ueba.feedback", "ai.read", "ai.request", "ai.decide",
 	},
 	"detection_engineer": {
-		"platform.overview.read", "siem.events.read", "siem.findings.read", "detection.rules.read", "siem.rules.read", "siem.rules.write", "siem.rules.publish", "siem.hunt.read", "siem.hunt.execute", "platform.retention.read", "ti.indicators.read", "ueba.read", "ai.read", "ai.request",
+		"platform.overview.read", "platform.collectors.read", "siem.events.read", "siem.findings.read", "detection.rules.read", "siem.rules.read", "siem.rules.write", "siem.rules.publish", "siem.parsers.read", "siem.parsers.write", "siem.parsers.publish", "siem.mitre.read", "siem.hunt.read", "siem.hunt.execute", "platform.retention.read", "ti.indicators.read", "ueba.read", "ai.read", "ai.request",
 	},
 	"threat_intelligence_analyst": {
 		"platform.overview.read", "siem.events.read", "soc.alerts.read", "soc.incidents.read", "ti.indicators.read", "ti.indicators.manage", "ai.read", "ai.request",
 	},
+	"soar_engineer": {
+		"platform.overview.read", "soc.alerts.read", "soc.incidents.read", "soar.playbooks.read", "soar.playbooks.write", "soar.playbooks.execute", "soar.actions.approve", "soar.connectors.read", "soar.connectors.manage", "soar.connectors.test",
+	},
 	"auditor": {
-		"platform.overview.read", "siem.events.read", "soc.alerts.read", "soc.incidents.read", "soc.evidence.read", "platform.audit.read", "audit.read", "ti.indicators.read", "ueba.read", "ai.read", "licenses.read", "reports.read",
+		"platform.overview.read", "siem.events.read", "siem.rules.read", "siem.parsers.read", "siem.mitre.read", "soc.alerts.read", "soc.incidents.read", "soc.cases.read", "soc.evidence.read", "soc.entities.read", "platform.audit.read", "audit.read", "ti.indicators.read", "ueba.read", "ai.read", "licenses.read", "reports.read",
 	},
 	"mssp_manager": {
 		"platform.overview.read", "soc.alerts.read", "soc.incidents.read", "platform.audit.read", "licenses.read", "reports.read", "mssp.tenants.read",
@@ -279,12 +298,51 @@ var rolePermissions = map[string][]string{
 	"service_collector": {"siem.events.ingest", "platform.collectors.heartbeat"},
 }
 
+var permissionImplications = map[string][]string{
+	"siem.events.export":         {"siem.events.read"},
+	"platform.collectors.manage": {"platform.collectors.read"},
+	"siem.rules.write":           {"siem.rules.read"},
+	"siem.rules.publish":         {"siem.rules.write"},
+	"siem.hunt.execute":          {"siem.hunt.read"},
+	"siem.hunt.manage":           {"siem.hunt.read"},
+	"platform.retention.manage":  {"platform.retention.read"},
+	"soc.evidence.write":         {"soc.evidence.read"},
+	"soc.cases.manage":           {"soc.cases.read"},
+	"siem.parsers.write":         {"siem.parsers.read"},
+	"siem.parsers.publish":       {"siem.parsers.write"},
+	"reports.generate":           {"reports.read"},
+	"licenses.install":           {"licenses.read"},
+	"ti.indicators.manage":       {"ti.indicators.read"},
+	"soc.alerts.manage":          {"soc.alerts.read"},
+	"soc.alerts.triage":          {"soc.alerts.read"},
+	"soc.incidents.create":       {"soc.incidents.read"},
+	"soc.incidents.manage":       {"soc.incidents.read"},
+	"soar.playbooks.write":       {"soar.playbooks.read"},
+	"soar.playbooks.execute":     {"soar.playbooks.read"},
+	"soar.connectors.manage":     {"soar.connectors.read"},
+	"soar.connectors.test":       {"soar.connectors.read"},
+	"ueba.feedback":              {"ueba.read"},
+	"ai.request":                 {"ai.read"},
+	"ai.decide":                  {"ai.read"},
+	"ai.policy.manage":           {"ai.read"},
+}
+
+func grantPermission(permissions map[string]bool, permission string) {
+	if permissions[permission] {
+		return
+	}
+	permissions[permission] = true
+	for _, implied := range permissionImplications[permission] {
+		grantPermission(permissions, implied)
+	}
+}
+
 var knownPermissions = func() map[string]bool {
 	result := map[string]bool{}
 	for _, permissions := range rolePermissions {
 		for _, permission := range permissions {
 			if permission != "*" {
-				result[permission] = true
+				grantPermission(result, permission)
 			}
 		}
 	}
@@ -301,7 +359,7 @@ func permissionsForRoles(roles []string) (map[string]bool, []string, bool) {
 			platformScope = true
 		}
 		for _, permission := range rolePermissions[role] {
-			permissions[permission] = true
+			grantPermission(permissions, permission)
 			if permission == "*" {
 				platformScope = true
 			}

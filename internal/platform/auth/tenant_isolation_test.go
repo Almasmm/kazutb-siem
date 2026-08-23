@@ -34,7 +34,7 @@ func TestOIDCAuthenticatorRejectsMalformedTenantMembership(t *testing.T) {
 	}
 	provider := newTestOIDCProvider(t, &privateKey.PublicKey)
 	defer provider.Close()
-	authenticator, err := NewOIDCAuthenticator(context.Background(), OIDCConfig{IssuerURL: provider.URL, ClientID: "kcsp-web"})
+	authenticator, err := NewOIDCAuthenticator(context.Background(), OIDCConfig{IssuerURL: provider.URL, ClientID: "kcsp-web", AllowInsecureIssuer: true})
 	if err != nil {
 		t.Fatal(err)
 	}

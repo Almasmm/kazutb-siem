@@ -22,7 +22,7 @@ func TestOIDCAuthenticatorVerifiesTokenAndMapsTenantScopedRBAC(t *testing.T) {
 	}
 	provider := newTestOIDCProvider(t, &privateKey.PublicKey)
 	defer provider.Close()
-	authenticator, err := NewOIDCAuthenticator(context.Background(), OIDCConfig{IssuerURL: provider.URL, ClientID: "kcsp-web"})
+	authenticator, err := NewOIDCAuthenticator(context.Background(), OIDCConfig{IssuerURL: provider.URL, ClientID: "kcsp-web", AllowInsecureIssuer: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,6 +49,42 @@ func TestOIDCAuthenticatorVerifiesTokenAndMapsTenantScopedRBAC(t *testing.T) {
 	}
 }
 
+func TestOIDCRejectsPlaintextIssuerByDefault(t *testing.T) {
+	if _, err := NewOIDCAuthenticator(context.Background(), OIDCConfig{IssuerURL: "http://identity.example.test", ClientID: "kcsp-web"}); err == nil {
+		t.Fatal("expected plaintext OIDC issuer to be rejected")
+	}
+}
+
+func TestCanonicalRolePermissionsAndClosure(t *testing.T) {
+	tests := []struct {
+		role    string
+		allowed []string
+		denied  []string
+	}{
+		{role: "soc_l2", allowed: []string{"soc.cases.read", "soc.cases.manage", "soc.entities.read", "siem.parsers.read", "siem.mitre.read"}, denied: []string{"platform.collectors.manage", "siem.parsers.write"}},
+		{role: "tenant_admin", allowed: []string{"platform.collectors.manage", "platform.collectors.read", "siem.parsers.publish", "siem.parsers.write", "siem.parsers.read", "soc.cases.read"}},
+		{role: "detection_engineer", allowed: []string{"siem.parsers.publish", "siem.parsers.write", "siem.parsers.read", "siem.mitre.read"}, denied: []string{"soc.incidents.manage"}},
+		{role: "soar_engineer", allowed: []string{"soar.connectors.manage", "soar.connectors.read", "soar.playbooks.execute", "soar.playbooks.read"}, denied: []string{"siem.rules.publish"}},
+		{role: "service_collector", allowed: []string{"siem.events.ingest", "platform.collectors.heartbeat"}, denied: []string{"siem.events.read", "platform.collectors.read"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.role, func(t *testing.T) {
+			permissions, _, _ := permissionsForRoles([]string{test.role})
+			for _, permission := range test.allowed {
+				if !permissions[permission] {
+					t.Errorf("expected %s to allow %s", test.role, permission)
+				}
+			}
+			for _, permission := range test.denied {
+				if permissions[permission] {
+					t.Errorf("expected %s to deny %s", test.role, permission)
+				}
+			}
+		})
+	}
+}
+
 func TestOIDCAuthenticatorRejectsWrongAudienceAndMissingTenant(t *testing.T) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -56,7 +92,7 @@ func TestOIDCAuthenticatorRejectsWrongAudienceAndMissingTenant(t *testing.T) {
 	}
 	provider := newTestOIDCProvider(t, &privateKey.PublicKey)
 	defer provider.Close()
-	authenticator, err := NewOIDCAuthenticator(context.Background(), OIDCConfig{IssuerURL: provider.URL, ClientID: "kcsp-web"})
+	authenticator, err := NewOIDCAuthenticator(context.Background(), OIDCConfig{IssuerURL: provider.URL, ClientID: "kcsp-web", AllowInsecureIssuer: true})
 	if err != nil {
 		t.Fatal(err)
 	}
