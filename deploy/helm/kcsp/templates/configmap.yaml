@@ -17,6 +17,25 @@ data:
   KCSP_OIDC_PERMISSION_CLAIM: {{ .Values.config.auth.oidc.permissionClaim | quote }}
   KCSP_OIDC_TENANT_CLAIM: {{ .Values.config.auth.oidc.tenantClaim | quote }}
   KCSP_REQUIRE_REGISTERED_COLLECTORS: {{ ternary "true" "false" .Values.config.collectors.requireRegistered | quote }}
+  KCSP_COLLECTOR_SERVER_URL: {{ default (printf "http://%s-api:8080" (include "kcsp.fullname" .)) .Values.config.networkCollector.serverURL | quote }}
+  KCSP_COLLECTOR_TENANT_ID: {{ .Values.global.tenant.id | quote }}
+  KCSP_COLLECTOR_OAUTH_TOKEN_URL: {{ .Values.config.networkCollector.oauthTokenURL | quote }}
+  KCSP_COLLECTOR_OAUTH_SCOPES: {{ .Values.config.networkCollector.oauthScopes | quote }}
+  KCSP_COLLECTOR_ALLOW_INSECURE_HTTP: "true"
+  KCSP_COLLECTOR_SYSLOG_UDP_ADDR: {{ .Values.config.networkCollector.syslog.udpAddress | quote }}
+  KCSP_COLLECTOR_SYSLOG_TCP_ADDR: {{ .Values.config.networkCollector.syslog.tcpAddress | quote }}
+  KCSP_COLLECTOR_SYSLOG_TLS_ADDR: {{ .Values.config.networkCollector.syslog.tlsAddress | quote }}
+  KCSP_COLLECTOR_SYSLOG_TLS_CERT_FILE: "/etc/kcsp/syslog-tls/tls.crt"
+  KCSP_COLLECTOR_SYSLOG_TLS_KEY_FILE: "/etc/kcsp/syslog-tls/tls.key"
+  KCSP_COLLECTOR_SYSLOG_TLS_CLIENT_CA_FILE: "/etc/kcsp/syslog-tls/ca.crt"
+  KCSP_COLLECTOR_HEALTH_ADDR: ":8081"
+  KCSP_COLLECTOR_STATE_DIR: "/var/lib/kcsp-collector"
+  KCSP_COLLECTOR_QUEUE_MAX_BYTES: {{ .Values.config.networkCollector.queueMaxBytes | quote }}
+  KCSP_COLLECTOR_MAX_EVENT_BYTES: {{ .Values.config.networkCollector.maxEventBytes | quote }}
+  KCSP_COLLECTOR_EVENT_BUFFER: {{ .Values.config.networkCollector.eventBuffer | quote }}
+  KCSP_COLLECTOR_BATCH_SIZE: {{ .Values.config.networkCollector.batchSize | quote }}
+  KCSP_COLLECTOR_FLUSH_INTERVAL: {{ .Values.config.networkCollector.flushInterval | quote }}
+  KCSP_COLLECTOR_HEARTBEAT_INTERVAL: {{ .Values.config.networkCollector.heartbeatInterval | quote }}
   KCSP_EVIDENCE_MAX_BYTES: {{ .Values.config.evidence.maxBytes | quote }}
   KCSP_KAFKA_BROKERS: {{ join "," .Values.config.kafka.brokers | quote }}
   KCSP_KAFKA_RAW_TOPIC: {{ .Values.config.kafka.rawTopic | quote }}

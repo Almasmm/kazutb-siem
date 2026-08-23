@@ -42,12 +42,17 @@ helm template kcsp "$chart" \
     --set-string networkPolicy.externalEgressCidrs[0]=10.20.30.10/32 \
     --set-string trustBundle.existingConfigMap=kcsp-ca-bundle \
     --set-string secrets.connectorExistingSecret=kcsp-connectors \
+    --set workloads.collector.enabled=true \
+    --set-string config.networkCollector.service.loadBalancerSourceRanges[0]=10.30.0.0/16 \
     --set observability.serviceMonitor.enabled=true >"$extended"
 grep -q '^kind: Ingress$' "$extended"
 grep -q '^kind: HorizontalPodAutoscaler$' "$extended"
 grep -q '^kind: ServiceMonitor$' "$extended"
 grep -q 'name: kcsp-connectors' "$extended"
 grep -q 'name: trust-bundle' "$extended"
+grep -q 'name: kcsp-collector-syslog' "$extended"
+grep -q '^kind: PersistentVolumeClaim$' "$extended"
+grep -q 'app.kubernetes.io/component: collector' "$extended"
 
 if helm template kcsp "$chart" \
     --namespace kcsp \

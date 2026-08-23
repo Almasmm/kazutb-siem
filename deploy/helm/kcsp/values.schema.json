@@ -21,7 +21,7 @@
     },
     "images": {
       "type": "object",
-      "required": ["api", "processor", "soar-worker", "ai-worker", "web"],
+      "required": ["api", "collector", "processor", "soar-worker", "ai-worker", "web"],
       "additionalProperties": {
         "type": "object",
         "required": ["repository", "tag", "pullPolicy"],
@@ -48,6 +48,8 @@
             "databaseURL",
             "clickhouseURL",
             "kafkaEnvelopeHMACKey",
+            "collectorOAuthClientID",
+            "collectorOAuthClientSecret",
             "minioAccessKey",
             "minioSecretKey",
             "aiLocalAPIKey",
@@ -107,7 +109,7 @@
     },
     "workloads": {
       "type": "object",
-      "required": ["api", "processor", "soar-worker", "ai-worker", "web"],
+      "required": ["api", "collector", "processor", "soar-worker", "ai-worker", "web"],
       "additionalProperties": {
         "type": "object",
         "required": ["enabled", "replicas", "containerPort", "service", "pdb", "autoscaling", "probes", "resources"],

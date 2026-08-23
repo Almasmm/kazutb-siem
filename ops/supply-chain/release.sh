@@ -33,6 +33,7 @@ output_dir="${KCSP_RELEASE_OUTPUT_DIR:-/tmp/kcsp-release}"
 
 platform_repositories=(
   "$registry/$owner/kcsp-api"
+  "$registry/$owner/kcsp-collector"
   "$registry/$owner/kcsp-processor"
   "$registry/$owner/kcsp-soar-worker"
   "$registry/$owner/kcsp-ai-worker"
@@ -159,9 +160,10 @@ jq -n \
   --arg created "$created" \
   --arg source "$source_url" \
   --arg api "${platform_repositories[0]}@$platform_digest" \
-  --arg processor "${platform_repositories[1]}@$platform_digest" \
-  --arg soar "${platform_repositories[2]}@$platform_digest" \
-  --arg ai "${platform_repositories[3]}@$platform_digest" \
+  --arg collector "${platform_repositories[1]}@$platform_digest" \
+  --arg processor "${platform_repositories[2]}@$platform_digest" \
+  --arg soar "${platform_repositories[3]}@$platform_digest" \
+  --arg ai "${platform_repositories[4]}@$platform_digest" \
   --arg web "$web_repository@$web_digest" \
   --arg dr "$dr_repository@$dr_digest" \
   '{
@@ -172,6 +174,7 @@ jq -n \
     source: $source,
     images: [
       {name: "api", reference: $api},
+      {name: "collector", reference: $collector},
       {name: "processor", reference: $processor},
       {name: "soar-worker", reference: $soar},
       {name: "ai-worker", reference: $ai},

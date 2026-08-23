@@ -16,11 +16,16 @@ spec:
   revisionHistoryLimit: 3
   minReadySeconds: 10
   progressDeadlineSeconds: 600
+  {{- if eq $name "collector" }}
+  strategy:
+    type: Recreate
+  {{- else }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
       maxUnavailable: 0
       maxSurge: 1
+  {{- end }}
   selector:
     matchLabels:
       {{- include "kcsp.componentLabels" (dict "root" $root "component" $name) | nindent 6 }}
@@ -81,9 +86,30 @@ spec:
           securityContext:
             {{- toYaml $root.Values.containerSecurityContext | nindent 12 }}
           ports:
+            {{- if eq $name "collector" }}
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+            {{- if $root.Values.config.networkCollector.syslog.udpAddress }}
+            - name: syslog-udp
+              containerPort: {{ $root.Values.config.networkCollector.service.udpPort }}
+              protocol: UDP
+            {{- end }}
+            {{- if $root.Values.config.networkCollector.syslog.tcpAddress }}
+            - name: syslog-tcp
+              containerPort: {{ $root.Values.config.networkCollector.service.tcpPort }}
+              protocol: TCP
+            {{- end }}
+            {{- if $root.Values.config.networkCollector.syslog.tlsAddress }}
+            - name: syslog-tls
+              containerPort: {{ $root.Values.config.networkCollector.service.tlsPort }}
+              protocol: TCP
+            {{- end }}
+            {{- else }}
             - name: {{ $workload.portName }}
               containerPort: {{ $workload.containerPort }}
               protocol: TCP
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ include "kcsp.fullname" $root }}-config
@@ -92,7 +118,7 @@ spec:
                 name: {{ $root.Values.secrets.connectorExistingSecret }}
             {{- end }}
           env:
-            {{- if ne $name "web" }}
+            {{- if or (eq $name "api") (eq $name "processor") (eq $name "soar-worker") (eq $name "ai-worker") }}
             - name: KCSP_DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -126,6 +152,22 @@ spec:
                 secretKeyRef:
                   name: {{ $root.Values.secrets.existingSecret }}
                   key: {{ $root.Values.secrets.keys.minioSecretKey }}
+            {{- end }}
+            {{- if eq $name "collector" }}
+            - name: KCSP_COLLECTOR_OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.secrets.existingSecret }}
+                  key: {{ $root.Values.secrets.keys.collectorOAuthClientID }}
+            - name: KCSP_COLLECTOR_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.secrets.existingSecret }}
+                  key: {{ $root.Values.secrets.keys.collectorOAuthClientSecret }}
+            {{- if $root.Values.trustBundle.existingConfigMap }}
+            - name: KCSP_COLLECTOR_UPSTREAM_CA_FILE
+              value: /etc/ssl/certs/ca-certificates.crt
+            {{- end }}
             {{- end }}
             {{- if or (eq $name "processor") (eq $name "soar-worker") (eq $name "ai-worker") }}
             - name: KCSP_METRICS_ADDR
@@ -172,6 +214,15 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if eq $name "collector" }}
+            - name: collector-state
+              mountPath: /var/lib/kcsp-collector
+            {{- if $root.Values.config.networkCollector.tls.existingSecret }}
+            - name: collector-syslog-tls
+              mountPath: /etc/kcsp/syslog-tls
+              readOnly: true
+            {{- end }}
+            {{- end }}
             {{- if eq $name "web" }}
             - name: web-config
               mountPath: /etc/nginx/conf.d/default.conf
@@ -194,6 +245,23 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: {{ $root.Values.ephemeralStorage.tmpSizeLimit }}
+        {{- if eq $name "collector" }}
+        - name: collector-state
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-collector" (include "kcsp.fullname" $root)) $root.Values.config.networkCollector.storage.existingClaim }}
+        {{- if $root.Values.config.networkCollector.tls.existingSecret }}
+        - name: collector-syslog-tls
+          secret:
+            secretName: {{ $root.Values.config.networkCollector.tls.existingSecret }}
+            items:
+              - key: {{ $root.Values.config.networkCollector.tls.certificateKey }}
+                path: tls.crt
+              - key: {{ $root.Values.config.networkCollector.tls.privateKeyKey }}
+                path: tls.key
+              - key: {{ $root.Values.config.networkCollector.tls.clientCAKey }}
+                path: ca.crt
+        {{- end }}
+        {{- end }}
         {{- if eq $name "web" }}
         - name: web-config
           configMap:

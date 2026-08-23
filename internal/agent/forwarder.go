@@ -23,6 +23,10 @@ type ForwarderConfig struct {
 	ServerURL         string
 	TenantID          string
 	AccessToken       string
+	OAuthTokenURL     string
+	OAuthClientID     string
+	OAuthClientSecret string
+	OAuthScopes       []string
 	CAFile            string
 	CertificateFile   string
 	PrivateKeyFile    string
@@ -34,7 +38,7 @@ type Forwarder struct {
 	endpoint          string
 	heartbeatEndpoint string
 	tenantID          string
-	token             string
+	tokenSource       bearerTokenSource
 	client            *http.Client
 }
 
@@ -49,8 +53,8 @@ func NewForwarder(config ForwarderConfig) (*Forwarder, error) {
 	if serverURL.Scheme != "https" && !config.AllowInsecureHTTP {
 		return nil, errors.New("plain HTTP is disabled; configure TLS or explicit development override")
 	}
-	if strings.TrimSpace(config.TenantID) == "" || strings.TrimSpace(config.AccessToken) == "" {
-		return nil, errors.New("tenant ID and service access token are required")
+	if strings.TrimSpace(config.TenantID) == "" {
+		return nil, errors.New("tenant ID is required")
 	}
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	if config.CAFile != "" {
@@ -81,11 +85,16 @@ func NewForwarder(config ForwarderConfig) (*Forwarder, error) {
 		config.Timeout = 30 * time.Second
 	}
 	transport := &http.Transport{TLSClientConfig: tlsConfig, MaxIdleConns: 10, IdleConnTimeout: 90 * time.Second}
+	client := &http.Client{Transport: transport, Timeout: config.Timeout}
+	tokenSource, err := newBearerTokenSource(config, client)
+	if err != nil {
+		transport.CloseIdleConnections()
+		return nil, err
+	}
 	baseURL := strings.TrimRight(serverURL.String(), "/")
 	return &Forwarder{
 		endpoint: baseURL + "/api/v1/ingest/events", heartbeatEndpoint: baseURL + "/api/v1/collectors/heartbeat",
-		tenantID: config.TenantID, token: config.AccessToken,
-		client: &http.Client{Transport: transport, Timeout: config.Timeout},
+		tenantID: strings.TrimSpace(config.TenantID), tokenSource: tokenSource, client: client,
 	}, nil
 }
 
@@ -98,7 +107,9 @@ func (f *Forwarder) Heartbeat(ctx context.Context, version string, metadata map[
 	if err != nil {
 		return core.Collector{}, fmt.Errorf("create collector heartbeat: %w", err)
 	}
-	request.Header.Set("Authorization", "Bearer "+f.token)
+	if err := f.authorize(ctx, request); err != nil {
+		return core.Collector{}, err
+	}
 	request.Header.Set("X-KCSP-Tenant-ID", f.tenantID)
 	request.Header.Set("Content-Type", "application/json")
 	response, err := f.client.Do(request)
@@ -122,7 +133,9 @@ func (f *Forwarder) Send(ctx context.Context, event Event) (ingest.Receipt, erro
 	if err != nil {
 		return ingest.Receipt{}, fmt.Errorf("create ingest request: %w", err)
 	}
-	request.Header.Set("Authorization", "Bearer "+f.token)
+	if err := f.authorize(ctx, request); err != nil {
+		return ingest.Receipt{}, err
+	}
 	request.Header.Set("X-KCSP-Tenant-ID", f.tenantID)
 	request.Header.Set("X-KCSP-Event-Format", event.Format)
 	request.Header.Set("X-KCSP-Event-ID", event.EventID)
@@ -150,6 +163,15 @@ func (f *Forwarder) Send(ctx context.Context, event Event) (ingest.Receipt, erro
 		return ingest.Receipt{}, fmt.Errorf("invalid KCSP receipt for event %s", event.EventID)
 	}
 	return receipt, nil
+}
+
+func (f *Forwarder) authorize(ctx context.Context, request *http.Request) error {
+	token, err := f.tokenSource.Token(ctx)
+	if err != nil {
+		return fmt.Errorf("obtain collector access token: %w", err)
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	return nil
 }
 
 func (f *Forwarder) Close() {

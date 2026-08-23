@@ -35,6 +35,8 @@ func run(logger *slog.Logger) error {
 	forwarder, err := agent.NewForwarder(agent.ForwarderConfig{
 		ServerURL: envOr("KCSP_AGENT_SERVER_URL", "https://soc.kaztbu.kz"), TenantID: os.Getenv("KCSP_AGENT_TENANT_ID"),
 		AccessToken: os.Getenv("KCSP_AGENT_ACCESS_TOKEN"), CAFile: os.Getenv("KCSP_AGENT_CA_FILE"),
+		OAuthTokenURL: os.Getenv("KCSP_AGENT_OAUTH_TOKEN_URL"), OAuthClientID: os.Getenv("KCSP_AGENT_OAUTH_CLIENT_ID"),
+		OAuthClientSecret: os.Getenv("KCSP_AGENT_OAUTH_CLIENT_SECRET"), OAuthScopes: strings.Fields(os.Getenv("KCSP_AGENT_OAUTH_SCOPES")),
 		CertificateFile: os.Getenv("KCSP_AGENT_CERT_FILE"), PrivateKeyFile: os.Getenv("KCSP_AGENT_KEY_FILE"),
 		AllowInsecureHTTP: strings.EqualFold(os.Getenv("KCSP_AGENT_ALLOW_INSECURE_HTTP"), "true"), Timeout: 30 * time.Second,
 	})

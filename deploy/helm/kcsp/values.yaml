@@ -20,6 +20,11 @@ images:
     tag: "0.1.0"
     digest: ""
     pullPolicy: IfNotPresent
+  collector:
+    repository: ghcr.io/almasmm/kcsp-collector
+    tag: "0.1.0"
+    digest: ""
+    pullPolicy: IfNotPresent
   soar-worker:
     repository: ghcr.io/almasmm/kcsp-soar-worker
     tag: "0.1.0"
@@ -48,6 +53,8 @@ secrets:
     databaseURL: database-url
     clickhouseURL: clickhouse-url
     kafkaEnvelopeHMACKey: kafka-envelope-hmac-key
+    collectorOAuthClientID: collector-oauth-client-id
+    collectorOAuthClientSecret: collector-oauth-client-secret
     minioAccessKey: minio-access-key
     minioSecretKey: minio-secret-key
     aiLocalAPIKey: ai-local-api-key
@@ -69,6 +76,39 @@ config:
       scope: openid profile email offline_access
   collectors:
     requireRegistered: true
+  networkCollector:
+    serverURL: ""
+    oauthTokenURL: https://identity.example.edu/realms/kcsp/protocol/openid-connect/token
+    oauthScopes: openid profile
+    queueMaxBytes: 10737418240
+    maxEventBytes: 1048576
+    eventBuffer: 4096
+    batchSize: 200
+    flushInterval: 250ms
+    heartbeatInterval: 30s
+    syslog:
+      udpAddress: ":5514"
+      tcpAddress: ":5514"
+      tlsAddress: ""
+    service:
+      enabled: true
+      type: LoadBalancer
+      annotations: {}
+      loadBalancerSourceRanges: []
+      udpPort: 5514
+      tcpPort: 5514
+      tlsPort: 6514
+    storage:
+      existingClaim: ""
+      storageClassName: ""
+      accessModes:
+        - ReadWriteOnce
+      size: 20Gi
+    tls:
+      existingSecret: ""
+      certificateKey: tls.crt
+      privateKeyKey: tls.key
+      clientCAKey: ca.crt
   evidence:
     maxBytes: 26214400
   kafka:
@@ -149,6 +189,57 @@ workloads:
     resources:
       requests:
         cpu: 250m
+        memory: 256Mi
+        ephemeral-storage: 64Mi
+      limits:
+        cpu: "2"
+        memory: 1Gi
+        ephemeral-storage: 256Mi
+  collector:
+    enabled: false
+    replicas: 1
+    command:
+      - /usr/local/bin/kcsp-collector
+    containerPort: 8081
+    portName: health
+    terminationGracePeriodSeconds: 60
+    service:
+      enabled: true
+      port: 8081
+      monitor: false
+    pdb:
+      enabled: false
+      minAvailable: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 1
+      targetCPUUtilizationPercentage: 0
+      targetMemoryUtilizationPercentage: 0
+    probes:
+      startup:
+        httpGet:
+          path: /health/live
+          port: health
+        failureThreshold: 30
+        periodSeconds: 2
+      liveness:
+        httpGet:
+          path: /health/live
+          port: health
+        periodSeconds: 10
+        timeoutSeconds: 3
+        failureThreshold: 3
+      readiness:
+        httpGet:
+          path: /health/ready
+          port: health
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 3
+    resources:
+      requests:
+        cpu: 200m
         memory: 256Mi
         ephemeral-storage: 64Mi
       limits:
@@ -419,6 +510,8 @@ podAnnotations: {}
 podLabels: {}
 podSecurityContext:
   runAsNonRoot: true
+  fsGroup: 10001
+  fsGroupChangePolicy: OnRootMismatch
   seccompProfile:
     type: RuntimeDefault
 containerSecurityContext:

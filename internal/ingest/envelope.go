@@ -17,8 +17,15 @@ import (
 const MaxEventBytes = 1 << 20
 
 const (
-	FormatCanonicalJSON = "ocsf-json-v1"
-	FormatSysmonXML     = "microsoft-sysmon-xml-v1"
+	FormatCanonicalJSON   = "ocsf-json-v1"
+	FormatSysmonXML       = "microsoft-sysmon-xml-v1"
+	FormatWindowsEventXML = "microsoft-windows-event-xml-v1"
+	FormatLinuxAudit      = "linux-auditd-v1"
+	FormatSyslog          = "syslog-v1"
+	FormatCEF             = "cef-v1"
+	FormatLEEF            = "leef-v2"
+	FormatSuricataEVE     = "suricata-eve-json-v1"
+	FormatZeekJSON        = "zeek-json-v1"
 )
 
 var ErrInvalidEnvelope = errors.New("invalid ingest envelope")

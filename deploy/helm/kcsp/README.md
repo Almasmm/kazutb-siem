@@ -37,6 +37,8 @@ single-node data stores from being presented as a production topology.
 | `database-url` | API, processor, SOAR, AI |
 | `clickhouse-url` | API, processor, AI |
 | `kafka-envelope-hmac-key` | API, processor; minimum 32 bytes |
+| `collector-oauth-client-id` | Network collector, when enabled |
+| `collector-oauth-client-secret` | Network collector, when enabled |
 | `minio-access-key` | API |
 | `minio-secret-key` | API |
 | `ai-local-api-key` | AI, optional |
@@ -45,6 +47,12 @@ single-node data stores from being presented as a production topology.
 SOAR connector credentials can be supplied through
 `secrets.connectorExistingSecret`. Its keys must already be valid KCSP
 environment names such as `KCSP_CONNECTOR_SECRET_ITSM`.
+
+The network collector is opt-in. Enable `workloads.collector.enabled`, set its
+OIDC token endpoint and client credentials, restrict
+`config.networkCollector.service.loadBalancerSourceRanges`, and choose UDP,
+TCP, or mTLS listeners. Its durable spool uses an existing PVC or a
+chart-managed RWO claim.
 
 Do not commit a Secret manifest or plaintext values file. Use an external
 secret operator, a hardware-backed secret manager, or a controlled bootstrap

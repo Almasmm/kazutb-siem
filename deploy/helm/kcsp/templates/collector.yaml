@@ -1,0 +1,61 @@
+{{- if .Values.workloads.collector.enabled }}
+{{- if and (not .Values.config.networkCollector.storage.existingClaim) .Values.config.networkCollector.storage.size }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "kcsp.fullname" . }}-collector
+  labels:
+    {{- include "kcsp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: collector
+spec:
+  accessModes:
+    {{- toYaml .Values.config.networkCollector.storage.accessModes | nindent 4 }}
+  {{- with .Values.config.networkCollector.storage.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.config.networkCollector.storage.size }}
+---
+{{- end }}
+{{- if .Values.config.networkCollector.service.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kcsp.fullname" . }}-collector-syslog
+  labels:
+    {{- include "kcsp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: collector
+  {{- with .Values.config.networkCollector.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.config.networkCollector.service.type }}
+  {{- with .Values.config.networkCollector.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    {{- include "kcsp.componentLabels" (dict "root" . "component" "collector") | nindent 4 }}
+  ports:
+    {{- if .Values.config.networkCollector.syslog.udpAddress }}
+    - name: syslog-udp
+      port: {{ .Values.config.networkCollector.service.udpPort }}
+      targetPort: syslog-udp
+      protocol: UDP
+    {{- end }}
+    {{- if .Values.config.networkCollector.syslog.tcpAddress }}
+    - name: syslog-tcp
+      port: {{ .Values.config.networkCollector.service.tcpPort }}
+      targetPort: syslog-tcp
+      protocol: TCP
+    {{- end }}
+    {{- if .Values.config.networkCollector.syslog.tlsAddress }}
+    - name: syslog-tls
+      port: {{ .Values.config.networkCollector.service.tlsPort }}
+      targetPort: syslog-tls
+      protocol: TCP
+    {{- end }}
+{{- end }}
+{{- end }}

@@ -38,4 +38,4 @@ if KCSP_RELEASE_DRY_RUN=true \
   exit 1
 fi
 
-printf '%s\n' '{"status":"ok","test":"kcsp-supply-chain-self-test","images":6}'
+printf '%s\n' '{"status":"ok","test":"kcsp-supply-chain-self-test","images":7}'

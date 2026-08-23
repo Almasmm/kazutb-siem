@@ -25,7 +25,7 @@ jq -e '
   .schema == "kcsp.release/v1" and
   (.version | type == "string") and
   (.revision | test("^[0-9a-f]{40}$")) and
-  (.images | length == 6) and
+  (.images | length == 7) and
   (all(.images[]; .reference | test("@sha256:[0-9a-f]{64}$")))
 ' "$manifest" >/dev/null
 

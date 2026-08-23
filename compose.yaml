@@ -232,6 +232,47 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  collector:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    command: ["/usr/local/bin/kcsp-collector"]
+    environment:
+      KCSP_COLLECTOR_SERVER_URL: http://api:8080
+      KCSP_COLLECTOR_TENANT_ID: university-kulazhanov
+      KCSP_COLLECTOR_ACCESS_TOKEN: kcsp-demo-collector
+      KCSP_COLLECTOR_ALLOW_INSECURE_HTTP: "true"
+      KCSP_COLLECTOR_SYSLOG_UDP_ADDR: ":5514"
+      KCSP_COLLECTOR_SYSLOG_TCP_ADDR: ":5514"
+      KCSP_COLLECTOR_HEALTH_ADDR: ":8081"
+      KCSP_COLLECTOR_STATE_DIR: /var/lib/kcsp-collector
+      KCSP_COLLECTOR_QUEUE_MAX_BYTES: 1073741824
+      KCSP_COLLECTOR_MAX_EVENT_BYTES: 1048576
+      KCSP_COLLECTOR_EVENT_BUFFER: 4096
+      KCSP_COLLECTOR_BATCH_SIZE: 200
+      KCSP_COLLECTOR_FLUSH_INTERVAL: 250ms
+      KCSP_COLLECTOR_HEARTBEAT_INTERVAL: 30s
+    ports:
+      - "127.0.0.1:5514:5514/tcp"
+      - "127.0.0.1:5514:5514/udp"
+    volumes:
+      - kcsp-collector-state:/var/lib/kcsp-collector
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/health/ready"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+    depends_on:
+      api:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   soar-worker:
     build:
       context: .
@@ -766,6 +807,7 @@ volumes:
   kcsp-clickhouse-logs:
   kcsp-clickhouse-backups:
   kcsp-minio-data:
+  kcsp-collector-state:
   kcsp-prometheus-data:
   kcsp-grafana-data:
   kcsp-dr-target-data:

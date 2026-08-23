@@ -27,12 +27,26 @@ type Registry struct {
 func NewRegistry() *Registry {
 	return &Registry{
 		parsers: map[string]ingest.EnvelopeParser{
-			ingest.FormatCanonicalJSON: CanonicalJSON{},
-			ingest.FormatSysmonXML:     SysmonXML{},
+			ingest.FormatCanonicalJSON:   CanonicalJSON{},
+			ingest.FormatSysmonXML:       SysmonXML{},
+			ingest.FormatWindowsEventXML: WindowsEventXML{},
+			ingest.FormatLinuxAudit:      LinuxAudit{},
+			ingest.FormatSyslog:          Syslog{},
+			ingest.FormatCEF:             CEF{},
+			ingest.FormatLEEF:            LEEF{},
+			ingest.FormatSuricataEVE:     SuricataEVE{},
+			ingest.FormatZeekJSON:        ZeekJSON{},
 		},
 		descriptors: []Descriptor{
 			{ID: "kcsp-canonical-json", Vendor: "KCSP", Product: "Canonical Event", Version: "1.1.0", SchemaCompatibility: []string{"OCSF 1.4.0"}, Formats: []string{ingest.FormatCanonicalJSON}, ReleaseState: "published"},
 			{ID: "microsoft-sysmon-xml", Vendor: "Microsoft", Product: "Sysmon", Version: "1.0.0", SchemaCompatibility: []string{"OCSF 1.4.0"}, Formats: []string{ingest.FormatSysmonXML}, ReleaseState: "published"},
+			{ID: "microsoft-windows-event-xml", Vendor: "Microsoft", Product: "Windows Event Log", Version: "1.0.0", SchemaCompatibility: []string{"OCSF 1.4.0"}, Formats: []string{ingest.FormatWindowsEventXML}, ReleaseState: "published"},
+			{ID: "linux-auditd", Vendor: "Linux", Product: "auditd", Version: "1.0.0", SchemaCompatibility: []string{"OCSF 1.4.0"}, Formats: []string{ingest.FormatLinuxAudit}, ReleaseState: "published"},
+			{ID: "ietf-syslog", Vendor: "IETF", Product: "Syslog", Version: "1.0.0", SchemaCompatibility: []string{"OCSF 1.4.0"}, Formats: []string{ingest.FormatSyslog}, ReleaseState: "published"},
+			{ID: "arcsite-cef", Vendor: "OpenText", Product: "Common Event Format", Version: "1.0.0", SchemaCompatibility: []string{"OCSF 1.4.0"}, Formats: []string{ingest.FormatCEF}, ReleaseState: "published"},
+			{ID: "ibm-leef", Vendor: "IBM", Product: "Log Event Extended Format", Version: "1.0.0", SchemaCompatibility: []string{"OCSF 1.4.0"}, Formats: []string{ingest.FormatLEEF}, ReleaseState: "published"},
+			{ID: "oisf-suricata-eve", Vendor: "OISF", Product: "Suricata", Version: "1.0.0", SchemaCompatibility: []string{"OCSF 1.4.0"}, Formats: []string{ingest.FormatSuricataEVE}, ReleaseState: "published"},
+			{ID: "zeek-json", Vendor: "Zeek", Product: "Zeek", Version: "1.0.0", SchemaCompatibility: []string{"OCSF 1.4.0"}, Formats: []string{ingest.FormatZeekJSON}, ReleaseState: "published"},
 		},
 	}
 }
