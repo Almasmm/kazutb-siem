@@ -52,7 +52,8 @@ try {
     }
     foreach ($name in @(
         'Install-KCSPAgent.ps1', 'Uninstall-KCSPAgent.ps1', 'Install-KCSPSysmon.ps1', 'Test-KCSPAgent.ps1', 'New-KCSPRolloutPlan.ps1', 'sysmon-kcsp.xml',
-        'Install-KCSPWEFCollector.ps1', 'Install-KCSPWEFSource.ps1', 'Test-KCSPWEFCollector.ps1', 'wef-kcsp-subscription.xml'
+        'Install-KCSPWEFCollector.ps1', 'Install-KCSPWEFSource.ps1', 'Test-KCSPWEFCollector.ps1', 'wef-kcsp-subscription.xml',
+        'Test-KCSPEndToEnd.ps1'
     )) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $stage $name)
     }

@@ -9,7 +9,7 @@ import { formatFullDateTime } from "../utils/format";
 import "./service-accounts.css";
 
 const automationScopes = [
-  "platform.overview.read", "siem.events.read", "siem.events.export", "siem.events.ingest", "siem.hunt.read", "siem.hunt.execute",
+  "platform.overview.read", "siem.events.read", "siem.events.export", "siem.events.ingest", "siem.findings.read", "siem.hunt.read", "siem.hunt.execute",
   "soc.alerts.read", "soc.alerts.manage", "soc.incidents.read", "soc.incidents.create", "soc.incidents.manage",
   "ti.indicators.read", "ti.indicators.manage", "reports.read", "reports.generate", "soar.playbooks.read", "soar.playbooks.execute",
   "platform.collectors.read", "platform.collectors.heartbeat",

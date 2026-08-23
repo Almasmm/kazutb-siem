@@ -127,6 +127,29 @@ the next wave. In KCSP, confirm the collector is `ONLINE`, source identity is th
 expected hostname, Sysmon test activity reaches ClickHouse, and the associated
 detection creates an alert and incident.
 
+## Live Windows/Sysmon pipeline acceptance
+
+After the host-level probe is green, create a short-lived KCSP service account
+with exactly `siem.events.read`, `siem.findings.read`, and `soc.alerts.read`.
+Run the live gate from an elevated prompt on a representative university host:
+
+```powershell
+$token = Read-Host 'KCSP acceptance service token' -AsSecureString
+.\Test-KCSPEndToEnd.ps1 `
+  -ServerUrl https://soc.kaztbu.kz `
+  -TenantId university-kulazhanov `
+  -AccessToken $token `
+  -ExpectedCollectorId $env:COMPUTERNAME
+```
+
+The gate starts a harmless local PowerShell process with a unique marker and
+suspicious command-line indicators, then proves the server-side chain
+`Sysmon event -> OCSF event -> KCSP-WIN-PS-001 finding -> alert`. It fails when
+source identity or tenant binding is missing, the expected detection is absent,
+or end-to-end latency exceeds the configured SLA. Its JSON report contains only
+record identifiers and timings. Revoke the temporary service account after the
+acceptance window.
+
 ## Rollback
 
 Stop a rollout wave first and revoke its unused enrollment token. To remove the
