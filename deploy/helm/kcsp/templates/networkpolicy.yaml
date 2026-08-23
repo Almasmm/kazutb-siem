@@ -169,6 +169,10 @@ spec:
         - port: {{ $.Values.config.networkCollector.service.tlsPort }}
           protocol: TCP
         {{- end }}
+        {{- if $.Values.config.networkCollector.http.enabled }}
+        - port: {{ $.Values.config.networkCollector.service.httpPort }}
+          protocol: TCP
+        {{- end }}
   {{- end }}
   egress:
     - to:

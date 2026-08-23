@@ -20,7 +20,7 @@ import (
 	"github.com/kcsp/platform/internal/collector"
 )
 
-const collectorVersion = "0.2.0"
+const collectorVersion = "0.3.0"
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -57,6 +57,23 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	var httpReceiver *collector.HTTPReceiver
+	if address := strings.TrimSpace(os.Getenv("KCSP_COLLECTOR_HTTP_ADDR")); address != "" {
+		httpReceiver, err = collector.NewHTTPReceiver(collector.HTTPConfig{
+			Address: address, Path: envOr("KCSP_COLLECTOR_HTTP_PATH", "/v1/events"), AccessToken: os.Getenv("KCSP_COLLECTOR_HTTP_TOKEN"),
+			TLSCertificate: os.Getenv("KCSP_COLLECTOR_HTTP_TLS_CERT_FILE"), TLSPrivateKey: os.Getenv("KCSP_COLLECTOR_HTTP_TLS_KEY_FILE"),
+			TLSClientCA: os.Getenv("KCSP_COLLECTOR_HTTP_TLS_CLIENT_CA_FILE"), AllowInsecureHTTP: strings.EqualFold(os.Getenv("KCSP_COLLECTOR_HTTP_ALLOW_INSECURE"), "true"),
+			MaximumEventBytes: int(envInt64("KCSP_COLLECTOR_MAX_EVENT_BYTES", 1<<20)), MaximumRequest: envInt64("KCSP_COLLECTOR_HTTP_MAX_REQUEST_BYTES", 16<<20),
+			MaximumBatch: int(envInt64("KCSP_COLLECTOR_HTTP_MAX_BATCH", 500)),
+			Sink: func(_ context.Context, event agent.Event) error {
+				_, queueErr := queue.Enqueue(event)
+				return queueErr
+			},
+		})
+		if err != nil {
+			return err
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ready := &atomic.Bool{}
@@ -66,11 +83,27 @@ func run(logger *slog.Logger) error {
 	}()
 	receiverDone := make(chan error, 1)
 	go func() { receiverDone <- receiver.Run(ctx) }()
+	var httpDone <-chan error
+	if httpReceiver != nil {
+		done := make(chan error, 1)
+		httpDone = done
+		go func() { done <- httpReceiver.Run(ctx) }()
+	}
 	select {
 	case <-receiver.Ready():
+		if httpReceiver != nil {
+			select {
+			case <-httpReceiver.Ready():
+			case httpErr := <-httpDone:
+				return httpErr
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
 		ready.Store(true)
 		logger.Info("KCSP network collector started", "version", collectorVersion, "state_directory", stateDirectory,
-			"udp", os.Getenv("KCSP_COLLECTOR_SYSLOG_UDP_ADDR"), "tcp", os.Getenv("KCSP_COLLECTOR_SYSLOG_TCP_ADDR"), "tls", os.Getenv("KCSP_COLLECTOR_SYSLOG_TLS_ADDR"))
+			"udp", os.Getenv("KCSP_COLLECTOR_SYSLOG_UDP_ADDR"), "tcp", os.Getenv("KCSP_COLLECTOR_SYSLOG_TCP_ADDR"),
+			"tls", os.Getenv("KCSP_COLLECTOR_SYSLOG_TLS_ADDR"), "http", os.Getenv("KCSP_COLLECTOR_HTTP_ADDR"))
 	case runErr := <-receiverDone:
 		return runErr
 	case healthErr := <-healthDone:
@@ -115,6 +148,8 @@ func run(logger *slog.Logger) error {
 			}
 		case runErr := <-receiverDone:
 			return runErr
+		case httpErr := <-httpDone:
+			return httpErr
 		case healthErr := <-healthDone:
 			return healthErr
 		case <-ctx.Done():

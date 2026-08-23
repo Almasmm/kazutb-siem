@@ -29,6 +29,14 @@ data:
   KCSP_COLLECTOR_SYSLOG_TLS_CERT_FILE: "/etc/kcsp/syslog-tls/tls.crt"
   KCSP_COLLECTOR_SYSLOG_TLS_KEY_FILE: "/etc/kcsp/syslog-tls/tls.key"
   KCSP_COLLECTOR_SYSLOG_TLS_CLIENT_CA_FILE: "/etc/kcsp/syslog-tls/ca.crt"
+  KCSP_COLLECTOR_HTTP_ADDR: {{ ternary .Values.config.networkCollector.http.address "" .Values.config.networkCollector.http.enabled | quote }}
+  KCSP_COLLECTOR_HTTP_PATH: {{ .Values.config.networkCollector.http.path | quote }}
+  KCSP_COLLECTOR_HTTP_MAX_REQUEST_BYTES: {{ .Values.config.networkCollector.http.maxRequestBytes | quote }}
+  KCSP_COLLECTOR_HTTP_MAX_BATCH: {{ .Values.config.networkCollector.http.maxBatch | quote }}
+  KCSP_COLLECTOR_HTTP_TLS_CERT_FILE: "/etc/kcsp/syslog-tls/tls.crt"
+  KCSP_COLLECTOR_HTTP_TLS_KEY_FILE: "/etc/kcsp/syslog-tls/tls.key"
+  KCSP_COLLECTOR_HTTP_TLS_CLIENT_CA_FILE: "/etc/kcsp/syslog-tls/ca.crt"
+  KCSP_COLLECTOR_HTTP_ALLOW_INSECURE: "false"
   KCSP_COLLECTOR_HEALTH_ADDR: ":8081"
   KCSP_COLLECTOR_STATE_DIR: "/var/lib/kcsp-collector"
   KCSP_COLLECTOR_QUEUE_MAX_BYTES: {{ .Values.config.networkCollector.queueMaxBytes | quote }}

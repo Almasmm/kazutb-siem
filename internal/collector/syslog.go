@@ -244,8 +244,12 @@ func detectFormat(payload []byte) (string, string) {
 	case json.Valid(payload):
 		var fields map[string]json.RawMessage
 		if json.Unmarshal(payload, &fields) == nil {
-			if _, ok := fields["event_type"]; ok {
-				return ingest.FormatSuricataEVE, "application/json"
+			if _, eventType := fields["event_type"]; eventType {
+				for _, key := range []string{"src_ip", "dest_ip", "flow_id", "alert", "dns", "http", "tls"} {
+					if _, fingerprint := fields[key]; fingerprint {
+						return ingest.FormatSuricataEVE, "application/json"
+					}
+				}
 			}
 			if _, timestamp := fields["ts"]; timestamp {
 				if _, origin := fields["id.orig_h"]; origin {
@@ -253,6 +257,7 @@ func detectFormat(payload []byte) (string, string) {
 				}
 			}
 		}
+		return ingest.FormatGenericJSON, "application/json"
 	}
 	return ingest.FormatSyslog, "text/plain"
 }

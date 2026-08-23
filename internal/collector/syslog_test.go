@@ -24,6 +24,7 @@ func TestDetectNetworkFormats(t *testing.T) {
 		{payload: "LEEF:2.0|Vendor|Product|1|id|x09|src=10.0.0.1", format: ingest.FormatLEEF},
 		{payload: `{"event_type":"alert","src_ip":"10.0.0.1"}`, format: ingest.FormatSuricataEVE},
 		{payload: `{"ts":1787446923.25,"id.orig_h":"10.0.0.1"}`, format: ingest.FormatZeekJSON},
+		{payload: `{"timestamp":"2026-08-23T01:02:03Z","event_type":"authentication_failure","action":"login failed","source_ip":"10.0.0.1"}`, format: ingest.FormatGenericJSON},
 	}
 	for _, test := range tests {
 		format, _ := detectFormat([]byte(test.payload))

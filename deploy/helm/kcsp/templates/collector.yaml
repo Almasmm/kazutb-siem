@@ -1,4 +1,7 @@
 {{- if .Values.workloads.collector.enabled }}
+{{- if and .Values.config.networkCollector.http.enabled (not .Values.config.networkCollector.tls.existingSecret) }}
+{{- fail "config.networkCollector.tls.existingSecret is required when the collector HTTP endpoint is enabled" }}
+{{- end }}
 {{- if and (not .Values.config.networkCollector.storage.existingClaim) .Values.config.networkCollector.storage.size }}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -55,6 +58,12 @@ spec:
     - name: syslog-tls
       port: {{ .Values.config.networkCollector.service.tlsPort }}
       targetPort: syslog-tls
+      protocol: TCP
+    {{- end }}
+    {{- if .Values.config.networkCollector.http.enabled }}
+    - name: http-json
+      port: {{ .Values.config.networkCollector.service.httpPort }}
+      targetPort: http-json
       protocol: TCP
     {{- end }}
 {{- end }}

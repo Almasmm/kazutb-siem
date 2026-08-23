@@ -26,6 +26,7 @@ const (
 	FormatLEEF            = "leef-v2"
 	FormatSuricataEVE     = "suricata-eve-json-v1"
 	FormatZeekJSON        = "zeek-json-v1"
+	FormatGenericJSON     = "generic-json-v1"
 )
 
 var ErrInvalidEnvelope = errors.New("invalid ingest envelope")

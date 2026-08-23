@@ -105,6 +105,11 @@ spec:
               containerPort: {{ $root.Values.config.networkCollector.service.tlsPort }}
               protocol: TCP
             {{- end }}
+            {{- if $root.Values.config.networkCollector.http.enabled }}
+            - name: http-json
+              containerPort: {{ $root.Values.config.networkCollector.service.httpPort }}
+              protocol: TCP
+            {{- end }}
             {{- else }}
             - name: {{ $workload.portName }}
               containerPort: {{ $workload.containerPort }}

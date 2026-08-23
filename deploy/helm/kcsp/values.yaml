@@ -92,6 +92,12 @@ config:
       udpAddress: ":5514"
       tcpAddress: ":5514"
       tlsAddress: ""
+    http:
+      enabled: false
+      address: ":8082"
+      path: /v1/events
+      maxRequestBytes: 16777216
+      maxBatch: 500
     service:
       enabled: true
       type: LoadBalancer
@@ -100,6 +106,7 @@ config:
       udpPort: 5514
       tcpPort: 5514
       tlsPort: 6514
+      httpPort: 8082
     storage:
       existingClaim: ""
       storageClassName: ""

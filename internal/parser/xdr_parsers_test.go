@@ -26,6 +26,7 @@ func TestXDRParsersNormalizeTrustedIdentity(t *testing.T) {
 		{name: "leef", format: ingest.FormatLEEF, category: "network_activity", parserID: "ibm-leef", sourceIP: "10.1.2.3", payload: "LEEF:2.0|Fortinet|FortiGate|7.4|deny|x09|src=10.1.2.3\tdst=198.51.100.8\tsrcPort=51515\tdstPort=443\taction=deny\tsev=8"},
 		{name: "suricata", format: ingest.FormatSuricataEVE, category: "network_activity", parserID: "oisf-suricata-eve", sourceIP: "10.1.2.3", payload: `{"timestamp":"2026-08-23T01:02:03.123456Z","flow_id":42,"event_type":"alert","src_ip":"10.1.2.3","src_port":51515,"dest_ip":"198.51.100.8","dest_port":443,"proto":"TCP","app_proto":"tls","alert":{"action":"blocked","signature":"Known C2 TLS fingerprint","category":"Command and Control","severity":1}}`},
 		{name: "zeek dns", format: ingest.FormatZeekJSON, category: "dns_activity", parserID: "zeek-json", sourceIP: "10.1.2.3", destHost: "bad.example", payload: `{"ts":1787446923.25,"uid":"Cabc","id.orig_h":"10.1.2.3","id.orig_p":53000,"id.resp_h":"10.0.0.53","id.resp_p":53,"proto":"udp","query":"bad.example","qtype_name":"A","rcode_name":"NOERROR"}`},
+		{name: "generic json", format: ingest.FormatGenericJSON, category: "authentication", parserID: "generic-json", sourceIP: "10.1.2.3", payload: `{"timestamp":"2026-08-23T01:02:03Z","event_type":"authentication_failure","action":"login failed","source_ip":"10.1.2.3","destination_ip":"10.0.0.10","username":"student","hostname":"vpn-01","severity":7}`},
 	}
 	registry := NewRegistry()
 	for _, fixture := range fixtures {
@@ -67,8 +68,8 @@ func TestXDRParsersNormalizeTrustedIdentity(t *testing.T) {
 func TestRegistryPublishesXDRFormats(t *testing.T) {
 	t.Parallel()
 	descriptors := NewRegistry().Descriptors()
-	if len(descriptors) != 9 {
-		t.Fatalf("published parser descriptors = %d, want 9", len(descriptors))
+	if len(descriptors) != 10 {
+		t.Fatalf("published parser descriptors = %d, want 10", len(descriptors))
 	}
 	for _, descriptor := range descriptors {
 		if descriptor.ReleaseState != "published" || len(descriptor.Formats) == 0 {

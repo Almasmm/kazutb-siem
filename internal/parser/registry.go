@@ -50,6 +50,7 @@ func NewRegistry(providers ...PublishedParserProvider) *Registry {
 			ingest.FormatLEEF:            LEEF{},
 			ingest.FormatSuricataEVE:     SuricataEVE{},
 			ingest.FormatZeekJSON:        ZeekJSON{},
+			ingest.FormatGenericJSON:     GenericJSON{},
 		},
 		descriptors: []Descriptor{
 			{ID: "kcsp-canonical-json", Vendor: "KCSP", Product: "Canonical Event", Version: "1.1.0", SchemaCompatibility: []string{"OCSF 1.4.0"}, Formats: []string{ingest.FormatCanonicalJSON}, ReleaseState: "published"},
@@ -61,6 +62,7 @@ func NewRegistry(providers ...PublishedParserProvider) *Registry {
 			{ID: "ibm-leef", Vendor: "IBM", Product: "Log Event Extended Format", Version: "1.0.0", SchemaCompatibility: []string{"OCSF 1.4.0"}, Formats: []string{ingest.FormatLEEF}, ReleaseState: "published"},
 			{ID: "oisf-suricata-eve", Vendor: "OISF", Product: "Suricata", Version: "1.0.0", SchemaCompatibility: []string{"OCSF 1.4.0"}, Formats: []string{ingest.FormatSuricataEVE}, ReleaseState: "published"},
 			{ID: "zeek-json", Vendor: "Zeek", Product: "Zeek", Version: "1.0.0", SchemaCompatibility: []string{"OCSF 1.4.0"}, Formats: []string{ingest.FormatZeekJSON}, ReleaseState: "published"},
+			{ID: "generic-json", Vendor: "KCSP", Product: "Generic JSON", Version: "1.0.0", SchemaCompatibility: []string{"OCSF 1.4.0"}, Formats: []string{ingest.FormatGenericJSON}, ReleaseState: "published"},
 		},
 		cache: map[string]dynamicParserSnapshot{},
 	}
