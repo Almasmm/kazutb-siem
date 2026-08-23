@@ -271,6 +271,7 @@ export const ru = {
     endpoint: "HTTPS endpoint", secretRef: "Привязка секрета", secretRefHint: "Укажите ссылку env://, vault:// или k8s://. Секретные данные здесь не сохраняются.",
     multiSelectHint: "Выберите одно или несколько разрешённых действий.", provider: "Контракт провайдера", channel: "Канал",
     apiKeyHeader: "Заголовок API key", healthMethod: "Метод проверки", healthPath: "Путь проверки", expectedStatus: "Ожидаемый HTTP-статус",
+    fromAddress: "Адрес отправителя", heloName: "Имя SMTP HELO",
     timeoutSeconds: "Таймаут (секунды)", rateLimit: "Вызовов в минуту", healthDetail: "Детали состояния",
     connectionTests: "Проверки соединения", noConnectionTests: "Проверки соединения ещё не запускались", testQueued: "Проверка соединения поставлена в очередь.",
     connectorSaved: "Настройки коннектора сохранены. Перед LIVE-выполнением запустите проверку соединения.", connectorDisabled: "Коннектор отключён.",

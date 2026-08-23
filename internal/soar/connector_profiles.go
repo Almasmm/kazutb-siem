@@ -10,23 +10,39 @@ import (
 )
 
 type connectorProfile struct {
-	SchemaVersion  string
-	Actions        map[string]bool
-	AllowAnonymous bool
+	SchemaVersion   string
+	Actions         map[string]bool
+	AllowAnonymous  bool
+	EndpointSchemes map[string]bool
+	AuthTypes       map[string]bool
+}
+
+var httpsConnectorSchemes = map[string]bool{"https": true}
+var standardHTTPConnectorAuth = map[string]bool{
+	core.SOARConnectorAuthBearer: true, core.SOARConnectorAuthHMAC: true,
+	core.SOARConnectorAuthBasic: true, core.SOARConnectorAuthAPIKey: true,
+}
+var webhookConnectorAuth = map[string]bool{
+	core.SOARConnectorAuthNone: true, core.SOARConnectorAuthBearer: true,
+	core.SOARConnectorAuthHMAC: true, core.SOARConnectorAuthBasic: true,
+	core.SOARConnectorAuthAPIKey: true,
 }
 
 var connectorProfiles = map[string]connectorProfile{
 	core.SOARConnectorKindWebhook: {
 		SchemaVersion: "1.0", AllowAnonymous: true,
-		Actions: map[string]bool{"kcsp.ticket.create": true, "kcsp.notification.send": true},
+		Actions:         map[string]bool{"kcsp.ticket.create": true, "kcsp.notification.send": true},
+		EndpointSchemes: httpsConnectorSchemes, AuthTypes: webhookConnectorAuth,
 	},
 	core.SOARConnectorKindFirewallREST: {
-		SchemaVersion: "kcsp.firewall.v1",
-		Actions:       map[string]bool{"firewall.block_ip": true, "firewall.unblock_ip": true},
+		SchemaVersion:   "kcsp.firewall.v1",
+		Actions:         map[string]bool{"firewall.block_ip": true, "firewall.unblock_ip": true},
+		EndpointSchemes: httpsConnectorSchemes, AuthTypes: standardHTTPConnectorAuth,
 	},
 	core.SOARConnectorKindITSMREST: {
-		SchemaVersion: "kcsp.itsm.v1",
-		Actions:       map[string]bool{"kcsp.ticket.create": true},
+		SchemaVersion:   "kcsp.itsm.v1",
+		Actions:         map[string]bool{"kcsp.ticket.create": true},
+		EndpointSchemes: httpsConnectorSchemes, AuthTypes: standardHTTPConnectorAuth,
 	},
 	core.SOARConnectorKindKCSPAPI: {
 		SchemaVersion: "kcsp.internal.v1",
@@ -34,18 +50,28 @@ var connectorProfiles = map[string]connectorProfile{
 			"kcsp.ticket.create": true, "kcsp.notification.send": true,
 			"threat_intel.indicator.submit": true,
 		},
+		EndpointSchemes: httpsConnectorSchemes, AuthTypes: standardHTTPConnectorAuth,
 	},
 	core.SOARConnectorKindThreatIntelREST: {
-		SchemaVersion: "kcsp.threat-intel.v1",
-		Actions:       map[string]bool{"threat_intel.indicator.submit": true},
+		SchemaVersion:   "kcsp.threat-intel.v1",
+		Actions:         map[string]bool{"threat_intel.indicator.submit": true},
+		EndpointSchemes: httpsConnectorSchemes, AuthTypes: standardHTTPConnectorAuth,
 	},
 	core.SOARConnectorKindNotification: {
-		SchemaVersion: "kcsp.notification.v1",
-		Actions:       map[string]bool{"kcsp.notification.send": true},
+		SchemaVersion:   "kcsp.notification.v1",
+		Actions:         map[string]bool{"kcsp.notification.send": true},
+		EndpointSchemes: httpsConnectorSchemes, AuthTypes: standardHTTPConnectorAuth,
 	},
 	core.SOARConnectorKindEDRXDRREST: {
-		SchemaVersion: "kcsp.edr-xdr.v1",
-		Actions:       map[string]bool{"endpoint.isolate": true, "endpoint.release": true},
+		SchemaVersion:   "kcsp.edr-xdr.v1",
+		Actions:         map[string]bool{"endpoint.isolate": true, "endpoint.release": true},
+		EndpointSchemes: httpsConnectorSchemes, AuthTypes: standardHTTPConnectorAuth,
+	},
+	core.SOARConnectorKindEmailSMTP: {
+		SchemaVersion:   "kcsp.email.v1",
+		Actions:         map[string]bool{"kcsp.notification.send": true},
+		EndpointSchemes: map[string]bool{"smtps": true},
+		AuthTypes:       map[string]bool{core.SOARConnectorAuthBasic: true},
 	},
 }
 
@@ -145,6 +171,23 @@ func buildConnectorPayload(connector core.SOARConnector, request ActionRequest) 
 		payload = map[string]interface{}{
 			"schema_version": profile.SchemaVersion, "operation": request.Attempt.ActionType,
 			"request": parameters, "kcsp": metadata,
+		}
+	case core.SOARConnectorKindEmailSMTP:
+		to, err := requiredConnectorParameter(parameters, "to", "recipient")
+		if err != nil {
+			return nil, err
+		}
+		subject, err := requiredConnectorParameter(parameters, "subject", "title")
+		if err != nil {
+			return nil, err
+		}
+		body, err := requiredConnectorParameter(parameters, "body", "text", "message")
+		if err != nil {
+			return nil, err
+		}
+		payload = map[string]interface{}{
+			"schema_version": profile.SchemaVersion, "operation": "send_email", "to": to,
+			"subject": subject, "body": body, "kcsp": metadata,
 		}
 	default:
 		return nil, fmt.Errorf("%w: connector kind has no runtime adapter", ErrInvalidConnector)

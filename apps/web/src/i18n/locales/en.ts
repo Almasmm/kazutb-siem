@@ -155,6 +155,7 @@ export const en = {
     endpoint: "HTTPS endpoint", secretRef: "Secret binding", secretRefHint: "Reference an env://, vault:// or k8s:// secret. Secret material is never stored here.",
     multiSelectHint: "Select one or more actions allowed for this connector.", provider: "Provider contract", channel: "Channel",
     apiKeyHeader: "API key header", healthMethod: "Health method", healthPath: "Health path", expectedStatus: "Expected HTTP status",
+    fromAddress: "Envelope sender", heloName: "SMTP HELO name",
     timeoutSeconds: "Timeout (seconds)", rateLimit: "Calls per minute", healthDetail: "Health detail",
     connectionTests: "Connection tests", noConnectionTests: "No connection tests recorded", testQueued: "Connection test queued.",
     connectorSaved: "Connector configuration saved. Run a connection test before live execution.", connectorDisabled: "Connector disabled.",

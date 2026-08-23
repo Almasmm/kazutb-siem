@@ -145,6 +145,7 @@ export const kk = {
     endpoint: "HTTPS endpoint", secretRef: "Құпияны байланыстыру", secretRefHint: "env://, vault:// немесе k8s:// сілтемесін көрсетіңіз. Құпия мән мұнда сақталмайды.",
     multiSelectHint: "Осы коннекторға рұқсат етілген бір немесе бірнеше әрекетті таңдаңыз.", provider: "Провайдер келісімшарты", channel: "Арна",
     apiKeyHeader: "API key тақырыбы", healthMethod: "Тексеру әдісі", healthPath: "Тексеру жолы", expectedStatus: "Күтілетін HTTP күйі",
+    fromAddress: "Жіберуші мекенжайы", heloName: "SMTP HELO атауы",
     timeoutSeconds: "Күту уақыты (секунд)", rateLimit: "Минутына шақыру", healthDetail: "Күй мәліметтері",
     connectionTests: "Қосылым тексерістері", noConnectionTests: "Қосылым тексерістері әлі орындалмады", testQueued: "Қосылым тексерісі кезекке қойылды.",
     connectorSaved: "Коннектор баптауы сақталды. LIVE орындау алдында қосылымды тексеріңіз.", connectorDisabled: "Коннектор өшірілді.",

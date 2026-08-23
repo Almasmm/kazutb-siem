@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/mail"
 	"net/url"
 	"regexp"
 	"sort"
@@ -56,6 +57,7 @@ type ConnectorPatch struct {
 
 var secretEnvironmentName = regexp.MustCompile(`^KCSP_CONNECTOR_SECRET_[A-Z0-9_]{1,96}$`)
 var connectorHeaderName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]{0,63}$`)
+var connectorHELOName = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)
 
 func (s *Service) CreateConnector(ctx context.Context, tenantID, actor string,
 	draft ConnectorDraft) (core.SOARConnector, error) {
@@ -225,15 +227,21 @@ func normalizeConnectorDraft(draft ConnectorDraft) (core.SOARConnector, error) {
 		return core.SOARConnector{}, fmt.Errorf("%w: a 2-160 character name and supported connector kind are required", ErrInvalidConnector)
 	}
 	endpoint, err := url.Parse(draft.Endpoint)
-	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil ||
+	if err != nil || !profile.EndpointSchemes[strings.ToLower(endpoint.Scheme)] || endpoint.Host == "" || endpoint.User != nil ||
 		endpoint.Fragment != "" || endpoint.RawQuery != "" {
-		return core.SOARConnector{}, fmt.Errorf("%w: endpoint must be an absolute HTTPS URL without credentials, query, or fragment", ErrInvalidConnector)
+		return core.SOARConnector{}, fmt.Errorf("%w: endpoint scheme is unsupported or URL contains credentials, query, or fragment", ErrInvalidConnector)
+	}
+	if strings.EqualFold(endpoint.Scheme, "smtps") && endpoint.Path != "" && endpoint.Path != "/" {
+		return core.SOARConnector{}, fmt.Errorf("%w: SMTPS endpoint must not contain a path", ErrInvalidConnector)
 	}
 	switch draft.AuthType {
 	case core.SOARConnectorAuthNone, core.SOARConnectorAuthBearer, core.SOARConnectorAuthHMAC,
 		core.SOARConnectorAuthBasic, core.SOARConnectorAuthAPIKey:
 	default:
 		return core.SOARConnector{}, fmt.Errorf("%w: unsupported connector authentication", ErrInvalidConnector)
+	}
+	if !profile.AuthTypes[draft.AuthType] {
+		return core.SOARConnector{}, fmt.Errorf("%w: authentication type is unsupported by this connector kind", ErrInvalidConnector)
 	}
 	if draft.AuthType == core.SOARConnectorAuthNone && !profile.AllowAnonymous {
 		return core.SOARConnector{}, fmt.Errorf("%w: this connector kind requires bound authentication", ErrInvalidConnector)
@@ -312,7 +320,11 @@ func normalizeConnectorSettings(kind, authType string, settings map[string]inter
 	if settings == nil {
 		settings = map[string]interface{}{}
 	}
-	result := map[string]interface{}{"health_method": "HEAD", "expected_status": 200}
+	result := map[string]interface{}{}
+	if kind != core.SOARConnectorKindEmailSMTP {
+		result["health_method"] = "HEAD"
+		result["expected_status"] = 200
+	}
 	if kind == core.SOARConnectorKindNotification {
 		result["provider"] = "GENERIC"
 	}
@@ -321,19 +333,19 @@ func normalizeConnectorSettings(kind, authType string, settings map[string]inter
 		case "health_method":
 			method, ok := value.(string)
 			method = strings.ToUpper(strings.TrimSpace(method))
-			if !ok || (method != "HEAD" && method != "GET") {
+			if !ok || kind == core.SOARConnectorKindEmailSMTP || (method != "HEAD" && method != "GET") {
 				return nil, fmt.Errorf("%w: health_method must be HEAD or GET", ErrInvalidConnector)
 			}
 			result[key] = method
 		case "health_path":
 			path, ok := value.(string)
-			if !ok || len(path) > 512 || (path != "" && (!strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//"))) {
+			if !ok || kind == core.SOARConnectorKindEmailSMTP || len(path) > 512 || (path != "" && (!strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//"))) {
 				return nil, fmt.Errorf("%w: health_path must be an absolute URL path", ErrInvalidConnector)
 			}
 			result[key] = path
 		case "expected_status":
 			status, ok := configInt(settings, key)
-			if !ok || status < 100 || status > 599 {
+			if !ok || kind == core.SOARConnectorKindEmailSMTP || status < 100 || status > 599 {
 				return nil, fmt.Errorf("%w: expected_status must be a valid HTTP status", ErrInvalidConnector)
 			}
 			result[key] = status
@@ -358,6 +370,20 @@ func normalizeConnectorSettings(kind, authType string, settings map[string]inter
 				return nil, fmt.Errorf("%w: notification channel is invalid", ErrInvalidConnector)
 			}
 			result[key] = channel
+		case "from_address":
+			from, ok := value.(string)
+			address, err := mail.ParseAddress(strings.TrimSpace(from))
+			if !ok || err != nil || kind != core.SOARConnectorKindEmailSMTP || address.Address == "" || len(address.Address) > 320 {
+				return nil, fmt.Errorf("%w: SMTP from_address is invalid", ErrInvalidConnector)
+			}
+			result[key] = address.Address
+		case "helo_name":
+			helo, ok := value.(string)
+			helo = strings.TrimSpace(helo)
+			if !ok || kind != core.SOARConnectorKindEmailSMTP || !connectorHELOName.MatchString(helo) {
+				return nil, fmt.Errorf("%w: SMTP helo_name is invalid", ErrInvalidConnector)
+			}
+			result[key] = helo
 		default:
 			return nil, fmt.Errorf("%w: unsupported or secret-bearing connector setting %q", ErrInvalidConnector, key)
 		}
@@ -369,6 +395,9 @@ func normalizeConnectorSettings(kind, authType string, settings map[string]inter
 	}
 	if result["provider"] == "SLACK" && result["channel"] == nil {
 		return nil, fmt.Errorf("%w: Slack notification connectors require a channel", ErrInvalidConnector)
+	}
+	if kind == core.SOARConnectorKindEmailSMTP && result["from_address"] == nil {
+		return nil, fmt.Errorf("%w: SMTP connectors require from_address", ErrInvalidConnector)
 	}
 	payload, err := json.Marshal(result)
 	if err != nil || len(payload) > 16<<10 {

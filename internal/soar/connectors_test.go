@@ -134,6 +134,7 @@ func TestBuildTypedConnectorPayloadContracts(t *testing.T) {
 		{kind: core.SOARConnectorKindEDRXDRREST, action: "endpoint.isolate", parameters: map[string]interface{}{"endpoint_id": "host-42"}, wantSchema: "kcsp.edr-xdr.v1", operation: "isolate_endpoint"},
 		{kind: core.SOARConnectorKindThreatIntelREST, action: "threat_intel.indicator.submit", parameters: map[string]interface{}{"indicator": "malware.example"}, wantSchema: "kcsp.threat-intel.v1", operation: "submit_indicator"},
 		{kind: core.SOARConnectorKindKCSPAPI, action: "kcsp.ticket.create", parameters: map[string]interface{}{"title": "Investigate"}, wantSchema: "kcsp.internal.v1", operation: "kcsp.ticket.create"},
+		{kind: core.SOARConnectorKindEmailSMTP, action: "kcsp.notification.send", parameters: map[string]interface{}{"to": "soc@example.edu", "subject": "Incident", "body": "Review incident"}, wantSchema: "kcsp.email.v1", operation: "send_email"},
 	}
 	for _, test := range tests {
 		t.Run(test.kind, func(t *testing.T) {

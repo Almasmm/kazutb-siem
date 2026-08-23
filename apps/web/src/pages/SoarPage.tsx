@@ -18,6 +18,7 @@ const connectorActions = {
   THREAT_INTEL_REST: ["threat_intel.indicator.submit"],
   NOTIFICATION_REST: ["kcsp.notification.send"],
   EDR_XDR_REST: ["endpoint.isolate", "endpoint.release"],
+  EMAIL_SMTP: ["kcsp.notification.send"],
 } as const;
 
 type ConnectorKind = keyof typeof connectorActions;
@@ -36,21 +37,27 @@ interface ConnectorForm {
   provider: string;
   channel: string;
   apiKeyHeader: string;
+  fromAddress: string;
+  heloName: string;
 }
 
 const emptyConnectorForm = (): ConnectorForm => ({
   name: "", kind: "WEBHOOK", endpoint: "", authType: "BEARER", secretRef: "",
   allowedActions: ["kcsp.notification.send"], healthMethod: "HEAD", healthPath: "",
   expectedStatus: 200, timeoutSeconds: 10, rateLimitPerMinute: 60,
-  provider: "GENERIC", channel: "", apiKeyHeader: "X-API-Key",
+  provider: "GENERIC", channel: "", apiKeyHeader: "X-API-Key", fromAddress: "", heloName: "",
 });
 
 function connectorDraft(form: ConnectorForm): SOARConnectorDraftDto {
-  const settings: Record<string, string | number | boolean> = {
-    health_method: form.healthMethod,
-    expected_status: form.expectedStatus,
-  };
-  if (form.healthPath.trim()) settings.health_path = form.healthPath.trim();
+  const settings: Record<string, string | number | boolean> = {};
+  if (form.kind === "EMAIL_SMTP") {
+    settings.from_address = form.fromAddress.trim();
+    if (form.heloName.trim()) settings.helo_name = form.heloName.trim();
+  } else {
+    settings.health_method = form.healthMethod;
+    settings.expected_status = form.expectedStatus;
+    if (form.healthPath.trim()) settings.health_path = form.healthPath.trim();
+  }
   if (form.authType === "API_KEY") settings.api_key_header = form.apiKeyHeader.trim() || "X-API-Key";
   if (form.kind === "NOTIFICATION_REST") {
     settings.provider = form.provider;
@@ -134,6 +141,7 @@ export default function SoarPage() {
       expectedStatus: Number(settings.expected_status || 200), timeoutSeconds: item.timeout_seconds || 10,
       rateLimitPerMinute: item.rate_limit_per_minute || 60, provider: String(settings.provider || "GENERIC"),
       channel: String(settings.channel || ""), apiKeyHeader: String(settings.api_key_header || "X-API-Key"),
+      fromAddress: String(settings.from_address || ""), heloName: String(settings.helo_name || ""),
     });
     setConnectorEditorOpen(true);
   };
@@ -157,13 +165,14 @@ export default function SoarPage() {
       </div>}
     </Drawer>
     <Modal open={decisionOpen && selection?.kind === "approval"} onClose={() => setDecisionOpen(false)} title={t("soarPage.decisionTitle")} footer={<><button className="button ghost" type="button" onClick={() => setDecisionOpen(false)}>{t("common.cancel")}</button><button className="button primary" type="button" disabled={!reason.trim() || decide.isPending} onClick={() => decide.mutate()}>{decision === "APPROVED" ? <CheckCircle2 size={16} /> : <XCircle size={16} />}{t("common.save")}</button></>}><label className="form-field"><span>{t("common.decision")}</span><select value={decision} onChange={(event) => setDecision(event.target.value)}><option value="APPROVED">{t("common.approve")}</option><option value="REJECTED">{t("common.reject")}</option></select></label><label className="form-field"><span>{t("common.reason")}</span><textarea rows={4} value={reason} onChange={(event) => setReason(event.target.value)} /></label>{decide.isError && <ErrorState error={decide.error} compact />}</Modal>
-    <Modal open={connectorEditorOpen} onClose={() => setConnectorEditorOpen(false)} title={editingConnector ? t("soarPage.editConnectorTitle") : t("soarPage.createConnectorTitle")} footer={<><button className="button ghost" type="button" onClick={() => setConnectorEditorOpen(false)}>{t("common.cancel")}</button><button className="button primary" type="button" disabled={!connectorForm.name.trim() || !connectorForm.endpoint.trim() || !connectorForm.allowedActions.length || saveConnector.isPending} onClick={() => saveConnector.mutate()}><Cable size={15} />{editingConnector ? t("common.save") : t("common.create")}</button></>}>
-      <div className="parser-form-grid"><label className="form-field"><span>{t("common.name")}</span><input value={connectorForm.name} onChange={(event) => setConnectorForm({ ...connectorForm, name: event.target.value })} /></label><label className="form-field"><span>{t("soarPage.kind")}</span><select value={connectorForm.kind} disabled={Boolean(editingConnector)} onChange={(event) => { const kind = event.target.value as ConnectorKind; setConnectorForm({ ...connectorForm, kind, allowedActions: [connectorActions[kind][0]], authType: kind !== "WEBHOOK" && connectorForm.authType === "NONE" ? "BEARER" : connectorForm.authType }); }}>{Object.keys(connectorActions).map((kind) => <option key={kind} value={kind}>{kind}</option>)}</select></label><label className="form-field"><span>{t("soarPage.authType")}</span><select value={connectorForm.authType} onChange={(event) => setConnectorForm({ ...connectorForm, authType: event.target.value })}>{connectorForm.kind === "WEBHOOK" && <option value="NONE">NONE</option>}<option value="BEARER">BEARER</option><option value="HMAC_SHA256">HMAC_SHA256</option><option value="BASIC">BASIC</option><option value="API_KEY">API_KEY</option></select></label></div>
-      <label className="form-field"><span>{t("soarPage.endpoint")}</span><input type="url" placeholder="https://connector.example.edu/api/actions" value={connectorForm.endpoint} onChange={(event) => setConnectorForm({ ...connectorForm, endpoint: event.target.value })} /></label><label className="form-field"><span>{t("soarPage.secretRef")}</span><input disabled={connectorForm.authType === "NONE"} placeholder="env://KCSP_CONNECTOR_SECRET_NAME" value={connectorForm.secretRef} onChange={(event) => setConnectorForm({ ...connectorForm, secretRef: event.target.value })} /><small>{t("soarPage.secretRefHint")}</small></label>
+    <Modal open={connectorEditorOpen} onClose={() => setConnectorEditorOpen(false)} title={editingConnector ? t("soarPage.editConnectorTitle") : t("soarPage.createConnectorTitle")} footer={<><button className="button ghost" type="button" onClick={() => setConnectorEditorOpen(false)}>{t("common.cancel")}</button><button className="button primary" type="button" disabled={!connectorForm.name.trim() || !connectorForm.endpoint.trim() || !connectorForm.allowedActions.length || (connectorForm.kind === "EMAIL_SMTP" && !connectorForm.fromAddress.trim()) || saveConnector.isPending} onClick={() => saveConnector.mutate()}><Cable size={15} />{editingConnector ? t("common.save") : t("common.create")}</button></>}>
+      <div className="parser-form-grid"><label className="form-field"><span>{t("common.name")}</span><input value={connectorForm.name} onChange={(event) => setConnectorForm({ ...connectorForm, name: event.target.value })} /></label><label className="form-field"><span>{t("soarPage.kind")}</span><select value={connectorForm.kind} disabled={Boolean(editingConnector)} onChange={(event) => { const kind = event.target.value as ConnectorKind; setConnectorForm({ ...connectorForm, kind, allowedActions: [connectorActions[kind][0]], authType: kind === "EMAIL_SMTP" ? "BASIC" : kind !== "WEBHOOK" && connectorForm.authType === "NONE" ? "BEARER" : connectorForm.authType }); }}>{Object.keys(connectorActions).map((kind) => <option key={kind} value={kind}>{kind}</option>)}</select></label><label className="form-field"><span>{t("soarPage.authType")}</span><select value={connectorForm.authType} disabled={connectorForm.kind === "EMAIL_SMTP"} onChange={(event) => setConnectorForm({ ...connectorForm, authType: event.target.value })}>{connectorForm.kind === "EMAIL_SMTP" ? <option value="BASIC">BASIC</option> : <>{connectorForm.kind === "WEBHOOK" && <option value="NONE">NONE</option>}<option value="BEARER">BEARER</option><option value="HMAC_SHA256">HMAC_SHA256</option><option value="BASIC">BASIC</option><option value="API_KEY">API_KEY</option></>}</select></label></div>
+      <label className="form-field"><span>{t("soarPage.endpoint")}</span><input type="url" placeholder={connectorForm.kind === "EMAIL_SMTP" ? "smtps://mail.example.edu:465" : "https://connector.example.edu/api/actions"} value={connectorForm.endpoint} onChange={(event) => setConnectorForm({ ...connectorForm, endpoint: event.target.value })} /></label><label className="form-field"><span>{t("soarPage.secretRef")}</span><input disabled={connectorForm.authType === "NONE"} placeholder="env://KCSP_CONNECTOR_SECRET_NAME" value={connectorForm.secretRef} onChange={(event) => setConnectorForm({ ...connectorForm, secretRef: event.target.value })} /><small>{t("soarPage.secretRefHint")}</small></label>
       <label className="form-field"><span>{t("soarPage.allowedActions")}</span><select multiple size={Math.min(4, connectorActions[connectorForm.kind].length)} value={connectorForm.allowedActions} onChange={(event) => setConnectorForm({ ...connectorForm, allowedActions: Array.from(event.currentTarget.selectedOptions, (option) => option.value) })}>{connectorActions[connectorForm.kind].map((action) => <option key={action} value={action}>{action}</option>)}</select><small>{t("soarPage.multiSelectHint")}</small></label>
       {connectorForm.kind === "NOTIFICATION_REST" && <div className="parser-form-grid"><label className="form-field"><span>{t("soarPage.provider")}</span><select value={connectorForm.provider} onChange={(event) => setConnectorForm({ ...connectorForm, provider: event.target.value })}><option value="GENERIC">GENERIC</option><option value="SLACK">SLACK</option><option value="TEAMS">TEAMS</option></select></label>{connectorForm.provider === "SLACK" && <label className="form-field"><span>{t("soarPage.channel")}</span><input value={connectorForm.channel} onChange={(event) => setConnectorForm({ ...connectorForm, channel: event.target.value })} /></label>}</div>}
+      {connectorForm.kind === "EMAIL_SMTP" && <div className="parser-form-grid"><label className="form-field"><span>{t("soarPage.fromAddress")}</span><input type="email" placeholder="kcsp-soc@example.edu" value={connectorForm.fromAddress} onChange={(event) => setConnectorForm({ ...connectorForm, fromAddress: event.target.value })} /></label><label className="form-field"><span>{t("soarPage.heloName")}</span><input placeholder="soc.example.edu" value={connectorForm.heloName} onChange={(event) => setConnectorForm({ ...connectorForm, heloName: event.target.value })} /></label></div>}
       {connectorForm.authType === "API_KEY" && <label className="form-field"><span>{t("soarPage.apiKeyHeader")}</span><input value={connectorForm.apiKeyHeader} onChange={(event) => setConnectorForm({ ...connectorForm, apiKeyHeader: event.target.value })} /></label>}
-      <div className="parser-form-grid"><label className="form-field"><span>{t("soarPage.healthMethod")}</span><select value={connectorForm.healthMethod} onChange={(event) => setConnectorForm({ ...connectorForm, healthMethod: event.target.value })}><option value="HEAD">HEAD</option><option value="GET">GET</option></select></label><label className="form-field"><span>{t("soarPage.healthPath")}</span><input placeholder="/health" value={connectorForm.healthPath} onChange={(event) => setConnectorForm({ ...connectorForm, healthPath: event.target.value })} /></label><label className="form-field"><span>{t("soarPage.expectedStatus")}</span><input type="number" min={100} max={599} value={connectorForm.expectedStatus} onChange={(event) => setConnectorForm({ ...connectorForm, expectedStatus: Number(event.target.value) })} /></label><label className="form-field"><span>{t("soarPage.timeoutSeconds")}</span><input type="number" min={1} max={60} value={connectorForm.timeoutSeconds} onChange={(event) => setConnectorForm({ ...connectorForm, timeoutSeconds: Number(event.target.value) })} /></label><label className="form-field"><span>{t("soarPage.rateLimit")}</span><input type="number" min={1} max={600} value={connectorForm.rateLimitPerMinute} onChange={(event) => setConnectorForm({ ...connectorForm, rateLimitPerMinute: Number(event.target.value) })} /></label></div>{saveConnector.isError && <ErrorState error={saveConnector.error} compact />}
+      <div className="parser-form-grid">{connectorForm.kind !== "EMAIL_SMTP" && <><label className="form-field"><span>{t("soarPage.healthMethod")}</span><select value={connectorForm.healthMethod} onChange={(event) => setConnectorForm({ ...connectorForm, healthMethod: event.target.value })}><option value="HEAD">HEAD</option><option value="GET">GET</option></select></label><label className="form-field"><span>{t("soarPage.healthPath")}</span><input placeholder="/health" value={connectorForm.healthPath} onChange={(event) => setConnectorForm({ ...connectorForm, healthPath: event.target.value })} /></label><label className="form-field"><span>{t("soarPage.expectedStatus")}</span><input type="number" min={100} max={599} value={connectorForm.expectedStatus} onChange={(event) => setConnectorForm({ ...connectorForm, expectedStatus: Number(event.target.value) })} /></label></>}<label className="form-field"><span>{t("soarPage.timeoutSeconds")}</span><input type="number" min={1} max={60} value={connectorForm.timeoutSeconds} onChange={(event) => setConnectorForm({ ...connectorForm, timeoutSeconds: Number(event.target.value) })} /></label><label className="form-field"><span>{t("soarPage.rateLimit")}</span><input type="number" min={1} max={600} value={connectorForm.rateLimitPerMinute} onChange={(event) => setConnectorForm({ ...connectorForm, rateLimitPerMinute: Number(event.target.value) })} /></label></div>{saveConnector.isError && <ErrorState error={saveConnector.error} compact />}
     </Modal>
   </div>;
 }

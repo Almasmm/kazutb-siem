@@ -77,9 +77,10 @@ func (EnvironmentSecretResolver) Resolve(_ context.Context, reference string) (s
 }
 
 type ManagedConnectorExecutor struct {
-	store   ConnectorActionStore
-	secrets SecretResolver
-	client  *http.Client
+	store    ConnectorActionStore
+	secrets  SecretResolver
+	client   *http.Client
+	smtpDial smtpConnectorDialer
 }
 
 func NewManagedConnectorExecutor(store ConnectorActionStore, secrets SecretResolver,
@@ -145,6 +146,9 @@ func (e *ManagedConnectorExecutor) Execute(ctx context.Context, request ActionRe
 			}
 		}
 		return ActionResult{}, err
+	}
+	if connector.Kind == core.SOARConnectorKindEmailSMTP {
+		return e.executeSMTPConnector(ctx, connector, request, secret)
 	}
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, connector.Endpoint, bytes.NewReader(payload))
 	if err != nil {
@@ -245,6 +249,9 @@ func (e *ManagedConnectorExecutor) TestConnector(ctx context.Context,
 		return ConnectorTestResult{
 			Status: core.SOARConnectorTestCredentials, ErrorClass: "CREDENTIALS_INVALID", Detail: nodeError.Detail,
 		}, nil
+	}
+	if connector.Kind == core.SOARConnectorKindEmailSMTP {
+		return e.testSMTPConnector(ctx, connector, secret), nil
 	}
 	endpoint, err := connectorHealthURL(connector)
 	if err != nil {
