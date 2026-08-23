@@ -66,6 +66,8 @@ services:
     volumes:
       - kcsp-clickhouse-data:/var/lib/clickhouse
       - kcsp-clickhouse-logs:/var/log/clickhouse-server
+      - kcsp-clickhouse-backups:/var/lib/clickhouse/backups
+      - ./deploy/clickhouse/config.d/backups.xml:/etc/clickhouse-server/config.d/backups.xml:ro
     ulimits:
       nofile:
         soft: 262144
@@ -279,6 +281,106 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  backup-store:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    profiles: ["dr", "dr-scheduled"]
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${KCSP_DR_TARGET_ACCESS_KEY:-}
+      MINIO_ROOT_PASSWORD: ${KCSP_DR_TARGET_SECRET_KEY:-}
+    ports:
+      - "127.0.0.1:9010:9000"
+      - "127.0.0.1:9011:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    volumes:
+      - kcsp-dr-target-data:/data
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  dr:
+    build:
+      context: .
+      dockerfile: Dockerfile.dr
+    profiles: ["dr"]
+    command: ["backup"]
+    environment: &dr-environment
+      KCSP_DR_POSTGRES_HOST: postgres
+      KCSP_DR_POSTGRES_PORT: 5432
+      KCSP_DR_POSTGRES_USER: kcsp
+      KCSP_DR_POSTGRES_PASSWORD: ${KCSP_POSTGRES_PASSWORD}
+      KCSP_DR_POSTGRES_DATABASE: kcsp
+      KCSP_DR_CLICKHOUSE_HOST: clickhouse
+      KCSP_DR_CLICKHOUSE_PORT: 9000
+      KCSP_DR_CLICKHOUSE_USER: kcsp
+      KCSP_DR_CLICKHOUSE_PASSWORD: ${KCSP_CLICKHOUSE_PASSWORD}
+      KCSP_DR_CLICKHOUSE_DATABASE: kcsp
+      KCSP_DR_CLICKHOUSE_BACKUP_DISK: backups
+      KCSP_DR_SOURCE_S3_ENDPOINT: http://minio:9000
+      KCSP_DR_SOURCE_S3_ACCESS_KEY: ${KCSP_MINIO_ROOT_USER}
+      KCSP_DR_SOURCE_S3_SECRET_KEY: ${KCSP_MINIO_ROOT_PASSWORD}
+      KCSP_DR_SOURCE_S3_BUCKET: kcsp-evidence
+      KCSP_DR_SOURCE_ALLOW_INSECURE: "true"
+      KCSP_DR_TARGET_S3_ENDPOINT: ${KCSP_DR_TARGET_ENDPOINT:-http://backup-store:9000}
+      KCSP_DR_TARGET_S3_ACCESS_KEY: ${KCSP_DR_TARGET_ACCESS_KEY:-}
+      KCSP_DR_TARGET_S3_SECRET_KEY: ${KCSP_DR_TARGET_SECRET_KEY:-}
+      KCSP_DR_TARGET_S3_BUCKET: ${KCSP_DR_TARGET_BUCKET:-kcsp-dr}
+      KCSP_DR_TARGET_ALLOW_INSECURE: ${KCSP_DR_TARGET_ALLOW_INSECURE:-false}
+      KCSP_DR_MANIFEST_HMAC_KEY: ${KCSP_DR_MANIFEST_HMAC_KEY:-}
+      KCSP_DR_RPO_SECONDS: ${KCSP_DR_RPO_SECONDS:-86400}
+      KCSP_DR_RTO_SECONDS: ${KCSP_DR_RTO_SECONDS:-3600}
+      KCSP_DR_SCHEDULE_SECONDS: ${KCSP_DR_SCHEDULE_SECONDS:-21600}
+      KCSP_DR_RETENTION_DAYS: ${KCSP_DR_RETENTION_DAYS:-30}
+      KCSP_DR_MINIMUM_BACKUPS: ${KCSP_DR_MINIMUM_BACKUPS:-7}
+      KCSP_DR_COMMAND_TIMEOUT_SECONDS: ${KCSP_DR_COMMAND_TIMEOUT_SECONDS:-86400}
+      KCSP_DR_WORK_DIR: /var/lib/kcsp/dr
+      KCSP_DR_CLICKHOUSE_BACKUP_DIR: /var/lib/kcsp/clickhouse-backups
+      KCSP_DR_CONFIG_ROOT: /workspace
+      KCSP_VERSION: ${KCSP_VERSION:-development}
+    volumes: &dr-volumes
+      - .:/workspace:ro
+      - kcsp-dr-work:/var/lib/kcsp/dr
+      - kcsp-clickhouse-backups:/var/lib/kcsp/clickhouse-backups
+    depends_on: &dr-dependencies
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      backup-store:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  dr-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.dr
+    profiles: ["dr-scheduled"]
+    command: ["schedule"]
+    environment: *dr-environment
+    volumes: *dr-volumes
+    depends_on: *dr-dependencies
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   web:
     build:
       context: ./apps/web
@@ -307,6 +409,9 @@ volumes:
   kcsp-kafka-data:
   kcsp-clickhouse-data:
   kcsp-clickhouse-logs:
+  kcsp-clickhouse-backups:
   kcsp-minio-data:
   kcsp-prometheus-data:
   kcsp-grafana-data:
+  kcsp-dr-target-data:
+  kcsp-dr-work:

@@ -12,7 +12,7 @@ HTTP security event
   → lifecycle + tamper-evident audit chain
 ```
 
-This repository is a product foundation, not a production SIEM claim. The default `embedded-dev` profile is deliberately self-contained and synchronous so that the domain model, API, UI, security boundaries, and tests can be exercised before Kafka, ClickHouse, PostgreSQL, OIDC, and durable workers are introduced.
+This repository is a product foundation, not a production SIEM claim. The current Compose stack includes PostgreSQL, Kafka, ClickHouse, MinIO, durable processing workers, OIDC integration, detection, SOC, evidence, Threat Intelligence, SOAR, UEBA, governed AI assistance, and operational metrics. Production HA, full hardening, load qualification, and university acceptance remain release gates.
 
 ## Run it
 
@@ -112,3 +112,6 @@ test/testdata/         positive and negative telemetry fixtures
 
 See the [local development runbook](docs/runbooks/local-development.md) for API credentials, health checks, reset behavior, and current operational limits.
 
+Backup and recovery use a separate object-store failure domain, signed manifests,
+cryptographic artifact verification, safe-name restores, retention, and measured
+restore drills. See the [backup and restore runbook](docs/runbooks/backup-restore.md).

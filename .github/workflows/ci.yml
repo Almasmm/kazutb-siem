@@ -93,3 +93,24 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci
       - run: npm run build
+
+  disaster-recovery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build version-pinned DR image
+        run: docker build --file Dockerfile.dr --tag kcsp-dr:ci .
+      - name: Run DR integrity and archive self-test
+        run: docker run --rm kcsp-dr:ci self-test
+      - name: Validate Compose profiles
+        env:
+          KCSP_POSTGRES_PASSWORD: kcsp-ci-only
+          KCSP_CLICKHOUSE_PASSWORD: kcsp-ci-only
+          KCSP_MINIO_ROOT_USER: kcsp-ci-only
+          KCSP_MINIO_ROOT_PASSWORD: kcsp-ci-only-secret
+          KCSP_GRAFANA_ADMIN_PASSWORD: kcsp-ci-only
+          KCSP_DR_TARGET_ACCESS_KEY: kcsp-dr-ci-only
+          KCSP_DR_TARGET_SECRET_KEY: kcsp-dr-ci-only-secret
+          KCSP_DR_TARGET_ALLOW_INSECURE: "true"
+          KCSP_DR_MANIFEST_HMAC_KEY: kcsp-dr-ci-only-signing-key-32-bytes
+        run: docker compose --profile dr --profile dr-scheduled config --quiet
