@@ -316,18 +316,32 @@ func (c *ClickHouse) ListFindings(ctx context.Context, tenantID, eventID string,
 
 func (c *ClickHouse) Metrics(ctx context.Context, tenantID string) (TelemetryMetrics, error) {
 	var metrics TelemetryMetrics
+	var events24h uint64
 	if err := c.conn.QueryRow(ctx, `SELECT count() FROM normalized_events FINAL
-		WHERE tenant_id=? AND ingest_time >= now() - INTERVAL 24 HOUR`, tenantID).Scan(&metrics.Events24h); err != nil {
+		WHERE tenant_id=? AND ingest_time >= now() - INTERVAL 24 HOUR`, tenantID).Scan(&events24h); err != nil {
 		return metrics, fmt.Errorf("count ClickHouse events: %w", err)
 	}
+	convertedEvents24h, err := uint64ToInt(events24h)
+	if err != nil {
+		return metrics, fmt.Errorf("count ClickHouse events: %w", err)
+	}
+	metrics.Events24h = convertedEvents24h
 	var latency float64
 	if err := c.conn.QueryRow(ctx, `SELECT ifNull(avg(dateDiff('millisecond', e.ingest_time, f.created_at)),0)
-		FROM findings FINAL AS f INNER JOIN normalized_events FINAL AS e
+		FROM findings AS f FINAL INNER JOIN normalized_events AS e FINAL
 		ON f.tenant_id=e.tenant_id AND f.event_id=e.event_id WHERE f.tenant_id=?`, tenantID).Scan(&latency); err != nil {
 		return metrics, fmt.Errorf("measure ClickHouse detection latency: %w", err)
 	}
 	metrics.DetectionLatencyMS = int(latency)
 	return metrics, nil
+}
+
+func uint64ToInt(value uint64) (int, error) {
+	maxInt := uint64(^uint(0) >> 1)
+	if value > maxInt {
+		return 0, fmt.Errorf("value %d exceeds int capacity", value)
+	}
+	return int(value), nil
 }
 
 func (c *ClickHouse) ResetTenant(ctx context.Context, tenantID string) error {

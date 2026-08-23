@@ -1,0 +1,84 @@
+name: Load acceptance
+
+on:
+  push:
+    paths:
+      - "test/load/**"
+      - "ops/load/**"
+      - ".github/workflows/load.yml"
+  pull_request:
+    paths:
+      - "test/load/**"
+      - "ops/load/**"
+      - ".github/workflows/load.yml"
+  schedule:
+    - cron: "17 2 * * 0"
+  workflow_dispatch:
+    inputs:
+      run_integration:
+        description: Start the local stack and run the smoke profile
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate k6 and safety contracts
+        run: sh ops/load/self-test.sh
+
+      - name: ShellCheck orchestration
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" \
+            -w /src \
+            koalaman/shellcheck:v0.10.0@sha256:2097951f02e735b613f4a34de20c40f937a6c8f18ecb170612c88c34517221fb \
+            ops/load/run.sh \
+            ops/load/fault-processor-recovery.sh \
+            ops/load/self-test.sh
+
+  smoke:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_integration)
+    needs: contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KCSP_POSTGRES_PASSWORD: kcsp-ci-postgres-password
+      KCSP_CLICKHOUSE_PASSWORD: kcsp-ci-clickhouse-password
+      KCSP_MINIO_ROOT_USER: kcsp-ci-minio
+      KCSP_MINIO_ROOT_PASSWORD: kcsp-ci-minio-password
+      KCSP_GRAFANA_ADMIN_PASSWORD: kcsp-ci-grafana-password
+      KCSP_DR_ACCESS_KEY: kcsp-ci-dr
+      KCSP_DR_SECRET_KEY: kcsp-ci-dr-secret-key
+      KCSP_DR_MANIFEST_HMAC_KEY: kcsp-ci-dr-manifest-hmac-key
+      KCSP_PITR_REPO_CIPHER_PASS: kcsp-ci-pitr-repository-cipher-passphrase
+      KCSP_HA_POSTGRES_PASSWORD: kcsp-ci-ha-postgres-password
+      KCSP_HA_REPLICATION_PASSWORD: kcsp-ci-ha-replication-password
+      KCSP_HA_REWIND_PASSWORD: kcsp-ci-ha-rewind-password
+      KCSP_LOAD_RESULTS: /tmp/kcsp-load
+      KCSP_LOAD_DURATION: 20s
+      KCSP_INGEST_RATE: "10"
+      KCSP_READ_VUS: "2"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start data path
+        run: |
+          docker compose up -d --build --wait \
+            postgres clickhouse kafka minio api processor
+
+      - name: Run end-to-end smoke SLO
+        run: bash ops/load/run.sh
+
+      - name: Stop test stack
+        if: always()
+        run: docker compose down --volumes --remove-orphans
