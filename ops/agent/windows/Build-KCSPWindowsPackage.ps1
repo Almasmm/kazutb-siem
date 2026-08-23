@@ -50,7 +50,10 @@ try {
         $signed = Set-AuthenticodeSignature -FilePath $binary -Certificate $certificate -HashAlgorithm SHA256 -TimestampServer $TimestampServer
         if ($signed.Status -ne [Management.Automation.SignatureStatus]::Valid) { throw "Authenticode signing failed: $($signed.Status)" }
     }
-    foreach ($name in @('Install-KCSPAgent.ps1', 'Uninstall-KCSPAgent.ps1', 'Install-KCSPSysmon.ps1', 'Test-KCSPAgent.ps1', 'New-KCSPRolloutPlan.ps1', 'sysmon-kcsp.xml')) {
+    foreach ($name in @(
+        'Install-KCSPAgent.ps1', 'Uninstall-KCSPAgent.ps1', 'Install-KCSPSysmon.ps1', 'Test-KCSPAgent.ps1', 'New-KCSPRolloutPlan.ps1', 'sysmon-kcsp.xml',
+        'Install-KCSPWEFCollector.ps1', 'Install-KCSPWEFSource.ps1', 'Test-KCSPWEFCollector.ps1', 'wef-kcsp-subscription.xml'
+    )) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $stage $name)
     }
     Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\windows-agent.md') -Destination (Join-Path $stage 'README.md')

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Subscription xmlns="http://schemas.microsoft.com/2006/03/windows/events/subscription">
+  <SubscriptionId>KCSP-Baseline</SubscriptionId>
+  <SubscriptionType>SourceInitiated</SubscriptionType>
+  <Description>KCSP source-initiated Windows security telemetry baseline</Description>
+  <Enabled>true</Enabled>
+  <Uri>http://schemas.microsoft.com/wbem/wsman/1/windows/EventLog</Uri>
+  <ConfigurationMode>Custom</ConfigurationMode>
+  <Delivery Mode="Push">
+    <Batching>
+      <MaxItems>50</MaxItems>
+      <MaxLatencyTime>30000</MaxLatencyTime>
+    </Batching>
+    <PushSettings>
+      <Heartbeat Interval="60000" />
+    </PushSettings>
+  </Delivery>
+  <Query><![CDATA[
+    <QueryList>
+      <Query Id="0" Path="Security">
+        <Select Path="Security">*[System[(EventID=1102 or EventID=4616 or EventID=4624 or EventID=4625 or EventID=4634 or EventID=4648 or EventID=4656 or EventID=4663 or EventID=4672 or EventID=4688 or EventID=4689 or EventID=4697 or EventID=4698 or EventID=4699 or EventID=4700 or EventID=4701 or EventID=4702 or EventID=4719 or EventID=4720 or EventID=4722 or EventID=4723 or EventID=4724 or EventID=4725 or EventID=4726 or EventID=4727 or EventID=4728 or EventID=4729 or EventID=4730 or EventID=4731 or EventID=4732 or EventID=4733 or EventID=4734 or EventID=4735 or EventID=4737 or EventID=4738 or EventID=4740 or EventID=4741 or EventID=4742 or EventID=4743 or EventID=4754 or EventID=4755 or EventID=4756 or EventID=4757 or EventID=4758 or EventID=4767 or EventID=4768 or EventID=4769 or EventID=4771 or EventID=4776 or EventID=4781 or EventID=4798 or EventID=4799)]]</Select>
+      </Query>
+      <Query Id="1" Path="System">
+        <Select Path="System">*[System[(Level=1 or Level=2 or Level=3)]]</Select>
+      </Query>
+      <Query Id="2" Path="Microsoft-Windows-Sysmon/Operational">
+        <Select Path="Microsoft-Windows-Sysmon/Operational">*</Select>
+      </Query>
+      <Query Id="3" Path="Microsoft-Windows-PowerShell/Operational">
+        <Select Path="Microsoft-Windows-PowerShell/Operational">*[System[(EventID=400 or EventID=403 or EventID=4103 or EventID=4104 or EventID=4105 or EventID=4106)]]</Select>
+      </Query>
+      <Query Id="4" Path="Microsoft-Windows-Windows Defender/Operational">
+        <Select Path="Microsoft-Windows-Windows Defender/Operational">*</Select>
+      </Query>
+      <Query Id="5" Path="Microsoft-Windows-WMI-Activity/Operational">
+        <Select Path="Microsoft-Windows-WMI-Activity/Operational">*</Select>
+      </Query>
+      <Query Id="6" Path="Microsoft-Windows-TaskScheduler/Operational">
+        <Select Path="Microsoft-Windows-TaskScheduler/Operational">*</Select>
+      </Query>
+    </QueryList>
+  ]]></Query>
+  <ReadExistingEvents>false</ReadExistingEvents>
+  <TransportName>http</TransportName>
+  <ContentFormat>RenderedText</ContentFormat>
+  <Locale Language="en-US" />
+  <LogFile>ForwardedEvents</LogFile>
+  <AllowedSourceNonDomainComputers></AllowedSourceNonDomainComputers>
+  <AllowedSourceDomainComputers>O:NSG:NSD:(A;;GA;;;DC)(A;;GA;;;NS)</AllowedSourceDomainComputers>
+</Subscription>

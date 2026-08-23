@@ -84,7 +84,14 @@ if (-not $SkipSysmon) {
     }
 }
 
-foreach ($channel in @('Security', 'System', 'Microsoft-Windows-PowerShell/Operational', 'Microsoft-Windows-Windows Defender/Operational')) {
+$channelSetting = $serviceEnvironment | Where-Object { $_ -like 'KCSP_AGENT_WINDOWS_CHANNELS=*' } | Select-Object -First 1
+$configuredChannels = if ($channelSetting) {
+    @($channelSetting.Substring('KCSP_AGENT_WINDOWS_CHANNELS='.Length).Split(';') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
+else {
+    @('Security', 'System', 'Microsoft-Windows-PowerShell/Operational', 'Microsoft-Windows-Windows Defender/Operational')
+}
+foreach ($channel in $configuredChannels) {
     try {
         $log = Get-WinEvent -ListLog $channel -ErrorAction Stop
         Add-Result "eventlog.$channel" $(if ($log.IsEnabled) { 'PASS' } else { 'WARN' }) "enabled=$($log.IsEnabled)"
