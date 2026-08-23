@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Activity,
   Archive,
@@ -31,7 +31,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { apiConfig } from "../api/client";
-import { TENANT_TIME_ZONE } from "../utils/format";
+import { formatTimeZoneLabel } from "../utils/format";
 import { useAuth } from "../auth/AuthProvider";
 
 const navGroups = [
@@ -98,12 +98,33 @@ const pageKeys: Record<string, string> = {
 export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [languageOpen, setLanguageOpen] = useState(false);
+  const languagePickerRef = useRef<HTMLDivElement>(null);
+  const languageButtonRef = useRef<HTMLButtonElement>(null);
   const { t, i18n } = useTranslation();
   const location = useLocation();
 	const { mode, user, signOut } = useAuth();
   const route = Object.keys(pageKeys).find((key) => location.pathname.startsWith(key)) || "/soc";
   const currentPageKey = pageKeys[route] || "nav.soc";
   const language = i18n.resolvedLanguage?.slice(0, 2).toUpperCase() || "RU";
+  const timeZone = formatTimeZoneLabel();
+
+  useEffect(() => {
+    if (!languageOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setLanguageOpen(false);
+      languageButtonRef.current?.focus();
+    };
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!languagePickerRef.current?.contains(event.target as Node)) setLanguageOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    return () => {
+      document.removeEventListener("keydown", closeOnEscape);
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+    };
+  }, [languageOpen]);
 
   const changeLanguage = (next: "ru" | "kk" | "en") => {
     void i18n.changeLanguage(next);
@@ -116,7 +137,7 @@ export function AppShell() {
         <div className="brand">
           <span className="brand-mark"><Shield size={23} fill="currentColor" /></span>
           <span><strong>{t("app.name")}</strong><small>{t("app.tagline")}</small></span>
-          <button className="icon-button sidebar-close" onClick={() => setMobileOpen(false)} type="button"><X size={19} /></button>
+          <button className="icon-button sidebar-close" aria-label={t("app.closeNavigation")} onClick={() => setMobileOpen(false)} type="button"><X size={19} /></button>
         </div>
 
         <div className="tenant-card">
@@ -124,7 +145,7 @@ export function AppShell() {
           <span><small>{t("app.environment")}</small><strong>{t("app.tenant")}</strong></span>
         </div>
 
-        <nav className="primary-nav" aria-label="Primary navigation">
+        <nav className="primary-nav" aria-label={t("app.primaryNavigation")}>
           {navGroups.map((group) => (
             <div className="nav-group" key={group.label}>
               <span className="nav-label">{t(group.label)}</span>
@@ -142,31 +163,31 @@ export function AppShell() {
         </div>
       </aside>
 
-      {mobileOpen && <button className="sidebar-backdrop" type="button" onClick={() => setMobileOpen(false)} aria-label="Close navigation" />}
+      {mobileOpen && <button className="sidebar-backdrop" type="button" onClick={() => setMobileOpen(false)} aria-label={t("app.closeNavigation")} />}
 
       <div className="workspace">
         <header className="topbar">
           <div className="topbar-title">
-            <button className="icon-button menu-button" type="button" onClick={() => setMobileOpen(true)}><Menu size={20} /></button>
+            <button className="icon-button menu-button" type="button" aria-label={t("app.openNavigation")} onClick={() => setMobileOpen(true)}><Menu size={20} /></button>
             <Activity size={17} className="topbar-route-icon" />
             <strong>{t(currentPageKey)}</strong>
           </div>
           <div className="topbar-actions">
-            <span className="timezone-chip">UTC+5 · {TENANT_TIME_ZONE}</span>
+            <span className="timezone-chip" title={t("app.timeZone")}>{timeZone}</span>
             <span className="connection-chip"><span />{t("common.live")}</span>
-            <div className="language-picker">
-              <button className="language-button" type="button" onClick={() => setLanguageOpen((value) => !value)} aria-expanded={languageOpen}>
+            <div className="language-picker" ref={languagePickerRef}>
+              <button className="language-button" ref={languageButtonRef} type="button" onClick={() => setLanguageOpen((value) => !value)} aria-expanded={languageOpen} aria-haspopup="menu" aria-controls="kcsp-language-menu" aria-label={t("app.changeLanguage", { language })}>
                 <Globe2 size={16} /> {language} <ChevronDown size={14} />
               </button>
               {languageOpen && (
-                <div className="language-menu">
-                  <button type="button" onClick={() => changeLanguage("ru")}>Русский <span>RU</span></button>
-                  <button type="button" onClick={() => changeLanguage("kk")}>Қазақша <span>KK</span></button>
-                  <button type="button" onClick={() => changeLanguage("en")}>English <span>EN</span></button>
+                <div className="language-menu" id="kcsp-language-menu" role="menu" aria-label={t("app.languageMenu")}>
+                  <button type="button" role="menuitemradio" aria-checked={language === "RU"} onClick={() => changeLanguage("ru")}>Русский <span>RU</span></button>
+                  <button type="button" role="menuitemradio" aria-checked={language === "KK"} onClick={() => changeLanguage("kk")}>Қазақша <span>KK</span></button>
+                  <button type="button" role="menuitemradio" aria-checked={language === "EN"} onClick={() => changeLanguage("en")}>English <span>EN</span></button>
                 </div>
               )}
             </div>
-            {mode === "oidc" && <button className="icon-button" type="button" onClick={() => void signOut()} title={t("auth.signOut")}><LogOut size={17} /></button>}
+            {mode === "oidc" && <button className="icon-button" type="button" aria-label={t("auth.signOut")} onClick={() => void signOut()} title={t("auth.signOut")}><LogOut size={17} /></button>}
             <div className="analyst-avatar" title={`${user?.displayName || "KCSP"} · ${user?.role || ""}`}>{initials(user?.displayName)}</div>
           </div>
         </header>

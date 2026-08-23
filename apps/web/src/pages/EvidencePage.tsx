@@ -5,13 +5,7 @@ import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import type { EvidenceDto } from "../api/types";
 import { DetailRow, Drawer, EmptyState, ErrorState, InlineNotice, LoadingState, MetricCard, PageHeader, StatusBadge, TableAction, Tag } from "../components/ui";
-import { formatDateTime, formatFullDateTime } from "../utils/format";
-
-function formatBytes(value: number): string {
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
-}
+import { formatBytes, formatDateTime, formatFullDateTime } from "../utils/format";
 
 export default function EvidencePage() {
   const { t } = useTranslation();

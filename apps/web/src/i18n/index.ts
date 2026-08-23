@@ -3,9 +3,31 @@ import { initReactI18next } from "react-i18next";
 import { en } from "./locales/en";
 import { kk } from "./locales/kk";
 import { ru } from "./locales/ru";
+import {
+  normalizeLanguage,
+  readLanguagePreference,
+  resolveInitialLanguage,
+  supportedLanguages,
+  writeLanguagePreference,
+  type LanguageStorage,
+} from "./language";
 
-const storedLanguage = localStorage.getItem("kcsp.language");
-const initialLanguage = storedLanguage === "kk" || storedLanguage === "en" ? storedLanguage : "ru";
+function browserStorage(): LanguageStorage | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+function browserLanguages(): readonly string[] {
+  if (typeof navigator === "undefined") return [];
+  return navigator.languages?.length ? navigator.languages : navigator.language ? [navigator.language] : [];
+}
+
+const storage = browserStorage();
+const initialLanguage = resolveInitialLanguage(readLanguagePreference(storage), browserLanguages());
 
 void i18n.use(initReactI18next).init({
   resources: {
@@ -14,17 +36,19 @@ void i18n.use(initReactI18next).init({
     en: { translation: en },
   },
   lng: initialLanguage,
+  supportedLngs: supportedLanguages,
+  load: "languageOnly",
   fallbackLng: "ru",
   interpolation: { escapeValue: false },
   returnNull: false,
 });
 
-document.documentElement.lang = initialLanguage;
+if (typeof document !== "undefined") document.documentElement.lang = initialLanguage;
 
 i18n.on("languageChanged", (language) => {
-  const normalized = language.startsWith("kk") ? "kk" : language.startsWith("en") ? "en" : "ru";
-  localStorage.setItem("kcsp.language", normalized);
-  document.documentElement.lang = normalized;
+  const normalized = normalizeLanguage(language) || "ru";
+  writeLanguagePreference(storage, normalized);
+  if (typeof document !== "undefined") document.documentElement.lang = normalized;
 });
 
 export default i18n;

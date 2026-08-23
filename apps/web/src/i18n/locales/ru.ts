@@ -5,6 +5,12 @@ export const ru = {
     tenant: "Университет Кулажанова",
     environment: "On-premise",
     protected: "Защищённый контур",
+    primaryNavigation: "Основная навигация",
+    openNavigation: "Открыть навигацию",
+    closeNavigation: "Закрыть навигацию",
+    changeLanguage: "Изменить язык. Сейчас {{language}}",
+    languageMenu: "Выбор языка",
+    timeZone: "Часовой пояс университета",
   },
   auth: {
     loading: "Проверяем учётную запись", loadingHint: "Устанавливаем защищённую сессию с провайдером идентификации университета.",
@@ -89,6 +95,10 @@ export const ru = {
     approve: "Одобрить",
     reject: "Отклонить",
     accept: "Принять",
+    create: "Создать",
+    disable: "Отключить",
+    name: "Название",
+    tags: "Теги",
   },
   errors: {
     title: "Не удалось получить данные",

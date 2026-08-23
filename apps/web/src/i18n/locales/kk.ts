@@ -5,6 +5,12 @@ export const kk = {
     tenant: "Құлажанов университеті",
     environment: "On-premise",
     protected: "Қорғалған контур",
+    primaryNavigation: "Негізгі навигация",
+    openNavigation: "Навигацияны ашу",
+    closeNavigation: "Навигацияны жабу",
+    changeLanguage: "Тілді өзгерту. Қазір {{language}}",
+    languageMenu: "Тілді таңдау",
+    timeZone: "Университеттің уақыт белдеуі",
   },
   auth: {
     loading: "Тіркелгі тексерілуде", loadingHint: "Университеттің сәйкестендіру провайдерімен қорғалған сессия орнатылуда.",
@@ -34,6 +40,7 @@ export const kk = {
     rawData: "Бастапқы деректер", count: "Саны", action: "Әрекет", actor: "Бастамашы", outcome: "Нәтиже",
     next: "Келесі", previous: "Артқа", reason: "Себеп", decision: "Шешім", save: "Сақтау", verify: "Тексеру",
     download: "Жүктеп алу", approve: "Мақұлдау", reject: "Қабылдамау", accept: "Қабылдау",
+    create: "Жасау", disable: "Өшіру", name: "Атауы", tags: "Тегтер",
   },
   errors: {
     title: "Деректерді алу мүмкін болмады",

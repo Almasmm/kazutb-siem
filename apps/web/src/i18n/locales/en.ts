@@ -5,6 +5,12 @@ export const en = {
     tenant: "Kulazhanov University",
     environment: "On-premise",
     protected: "Protected environment",
+    primaryNavigation: "Primary navigation",
+    openNavigation: "Open navigation",
+    closeNavigation: "Close navigation",
+    changeLanguage: "Change language. Current language: {{language}}",
+    languageMenu: "Language selection",
+    timeZone: "University time zone",
   },
   auth: {
     loading: "Verifying identity", loadingHint: "Establishing a trusted session with the university identity provider.",
@@ -48,7 +54,7 @@ export const en = {
     notAvailable: "Not available", showDetails: "Open details", rawData: "Raw data", count: "Count",
     action: "Action", actor: "Actor", outcome: "Outcome", next: "Next", previous: "Previous",
     reason: "Reason", decision: "Decision", save: "Save", verify: "Verify", download: "Download",
-    approve: "Approve", reject: "Reject", accept: "Accept",
+    approve: "Approve", reject: "Reject", accept: "Accept", create: "Create", disable: "Disable", name: "Name", tags: "Tags",
   },
   errors: {
     title: "Could not load data",
