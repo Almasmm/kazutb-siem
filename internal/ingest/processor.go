@@ -87,6 +87,13 @@ func OpenProcessor(config ProcessorConfig, rawStore RawStore, eventParser Envelo
 
 func (p *Processor) Close() { p.consumer.Close() }
 
+func (p *Processor) Health(ctx context.Context) error {
+	if err := p.consumer.Ping(ctx); err != nil {
+		return fmt.Errorf("ping Kafka: %w", err)
+	}
+	return nil
+}
+
 func (p *Processor) Run(ctx context.Context) error {
 	for {
 		fetches := p.consumer.PollFetches(ctx)

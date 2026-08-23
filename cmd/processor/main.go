@@ -69,7 +69,12 @@ func run(logger *slog.Logger) error {
 			logger.Error("processor metrics endpoint failed", "error", err)
 		}
 	}()
-	observability.SetReadinessCheck(repository.Health)
+	observability.SetReadinessCheck(func(ctx context.Context) error {
+		if err := repository.Health(ctx); err != nil {
+			return err
+		}
+		return processor.Health(ctx)
+	})
 	observability.MarkReady()
 	defer observability.MarkNotReady()
 	logger.Info("KCSP processor started", "group", envOr("KCSP_KAFKA_CONSUMER_GROUP", "kcsp-canonical-processing-v1"), "topic", publisher.RawTopic(), "workers", processorWorkers)
