@@ -240,7 +240,7 @@ var rolePermissions = map[string][]string{
 	"platform_super_admin":   {"*"},
 	"platform_administrator": {"*"},
 	"tenant_admin": {
-		"platform.overview.read", "admin.users.manage", "admin.roles.manage", "admin.config.manage", "platform.audit.read",
+		"platform.overview.read", "admin.users.manage", "admin.roles.manage", "admin.config.manage", "platform.audit.read", "platform.service_accounts.read", "platform.service_accounts.write",
 		"platform.collectors.read", "platform.collectors.manage", "siem.parsers.read", "siem.parsers.write", "siem.parsers.publish", "siem.mitre.read", "soc.entities.read",
 		"licenses.read", "licenses.install", "reports.read", "reports.generate",
 		"siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read", "siem.rules.read",
@@ -289,7 +289,7 @@ var rolePermissions = map[string][]string{
 		"platform.overview.read", "soc.alerts.read", "soc.incidents.read", "soar.playbooks.read", "soar.playbooks.write", "soar.playbooks.execute", "soar.actions.approve", "soar.connectors.read", "soar.connectors.manage", "soar.connectors.test",
 	},
 	"auditor": {
-		"platform.overview.read", "siem.events.read", "siem.rules.read", "siem.parsers.read", "siem.mitre.read", "soc.alerts.read", "soc.incidents.read", "soc.cases.read", "soc.evidence.read", "soc.entities.read", "platform.audit.read", "audit.read", "ti.indicators.read", "ueba.read", "ai.read", "licenses.read", "reports.read",
+		"platform.overview.read", "siem.events.read", "siem.rules.read", "siem.parsers.read", "siem.mitre.read", "soc.alerts.read", "soc.incidents.read", "soc.cases.read", "soc.evidence.read", "soc.entities.read", "platform.audit.read", "platform.service_accounts.read", "audit.read", "ti.indicators.read", "ueba.read", "ai.read", "licenses.read", "reports.read",
 	},
 	"mssp_manager": {
 		"platform.overview.read", "soc.alerts.read", "soc.incidents.read", "platform.audit.read", "licenses.read", "reports.read", "mssp.tenants.read",
@@ -299,32 +299,48 @@ var rolePermissions = map[string][]string{
 }
 
 var permissionImplications = map[string][]string{
-	"siem.events.export":         {"siem.events.read"},
-	"platform.collectors.manage": {"platform.collectors.read"},
-	"siem.rules.write":           {"siem.rules.read"},
-	"siem.rules.publish":         {"siem.rules.write"},
-	"siem.hunt.execute":          {"siem.hunt.read"},
-	"siem.hunt.manage":           {"siem.hunt.read"},
-	"platform.retention.manage":  {"platform.retention.read"},
-	"soc.evidence.write":         {"soc.evidence.read"},
-	"soc.cases.manage":           {"soc.cases.read"},
-	"siem.parsers.write":         {"siem.parsers.read"},
-	"siem.parsers.publish":       {"siem.parsers.write"},
-	"reports.generate":           {"reports.read"},
-	"licenses.install":           {"licenses.read"},
-	"ti.indicators.manage":       {"ti.indicators.read"},
-	"soc.alerts.manage":          {"soc.alerts.read"},
-	"soc.alerts.triage":          {"soc.alerts.read"},
-	"soc.incidents.create":       {"soc.incidents.read"},
-	"soc.incidents.manage":       {"soc.incidents.read"},
-	"soar.playbooks.write":       {"soar.playbooks.read"},
-	"soar.playbooks.execute":     {"soar.playbooks.read"},
-	"soar.connectors.manage":     {"soar.connectors.read"},
-	"soar.connectors.test":       {"soar.connectors.read"},
-	"ueba.feedback":              {"ueba.read"},
-	"ai.request":                 {"ai.read"},
-	"ai.decide":                  {"ai.read"},
-	"ai.policy.manage":           {"ai.read"},
+	"platform.service_accounts.write": {"platform.service_accounts.read"},
+	"siem.events.export":              {"siem.events.read"},
+	"platform.collectors.manage":      {"platform.collectors.read"},
+	"siem.rules.write":                {"siem.rules.read"},
+	"siem.rules.publish":              {"siem.rules.write"},
+	"siem.hunt.execute":               {"siem.hunt.read"},
+	"siem.hunt.manage":                {"siem.hunt.read"},
+	"platform.retention.manage":       {"platform.retention.read"},
+	"soc.evidence.write":              {"soc.evidence.read"},
+	"soc.cases.manage":                {"soc.cases.read"},
+	"siem.parsers.write":              {"siem.parsers.read"},
+	"siem.parsers.publish":            {"siem.parsers.write"},
+	"reports.generate":                {"reports.read"},
+	"licenses.install":                {"licenses.read"},
+	"ti.indicators.manage":            {"ti.indicators.read"},
+	"soc.alerts.manage":               {"soc.alerts.read"},
+	"soc.alerts.triage":               {"soc.alerts.read"},
+	"soc.incidents.create":            {"soc.incidents.read"},
+	"soc.incidents.manage":            {"soc.incidents.read"},
+	"soar.playbooks.write":            {"soar.playbooks.read"},
+	"soar.playbooks.execute":          {"soar.playbooks.read"},
+	"soar.connectors.manage":          {"soar.connectors.read"},
+	"soar.connectors.test":            {"soar.connectors.read"},
+	"ueba.feedback":                   {"ueba.read"},
+	"ai.request":                      {"ai.read"},
+	"ai.decide":                       {"ai.read"},
+	"ai.policy.manage":                {"ai.read"},
+}
+
+func IsKnownPermission(permission string) bool {
+	return knownPermissions[strings.TrimSpace(permission)]
+}
+
+func PermissionsForScopes(scopes []string) map[string]bool {
+	permissions := map[string]bool{"platform.session.read": true}
+	for _, scope := range scopes {
+		scope = strings.TrimSpace(scope)
+		if knownPermissions[scope] {
+			grantPermission(permissions, scope)
+		}
+	}
+	return permissions
 }
 
 func grantPermission(permissions map[string]bool, permission string) {

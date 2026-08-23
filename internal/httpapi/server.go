@@ -29,6 +29,7 @@ import (
 	"github.com/kcsp/platform/internal/pipeline"
 	"github.com/kcsp/platform/internal/platform/auth"
 	"github.com/kcsp/platform/internal/reporting"
+	"github.com/kcsp/platform/internal/serviceaccount"
 	"github.com/kcsp/platform/internal/soar"
 	"github.com/kcsp/platform/internal/soc"
 	"github.com/kcsp/platform/internal/store"
@@ -74,6 +75,7 @@ type Server struct {
 	reports           *reporting.Service
 	licenses          *licensing.Service
 	enrollment        *enrollment.Service
+	serviceAccounts   *serviceaccount.Service
 	enrollmentLimiter AgentEnrollmentRateLimiter
 }
 
@@ -103,6 +105,7 @@ type Config struct {
 	ReportService                *reporting.Service
 	LicenseService               *licensing.Service
 	AgentEnrollmentService       *enrollment.Service
+	ServiceAccountService        *serviceaccount.Service
 	AgentEnrollmentRatePerMinute int
 	AgentEnrollmentRateLimiter   AgentEnrollmentRateLimiter
 }
@@ -124,7 +127,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		collectors: config.CollectorRegistry, requireCollectors: config.RequireRegisteredCollectors,
 		detections: config.DetectionService, hunts: config.HuntStore, retention: config.RetentionStore,
 		evidence: config.EvidenceService, threatIntel: config.ThreatIntelService, soar: config.SOARService,
-		ueba: config.UEBAService, aiSOC: config.AISOCService, cases: config.CasesService, entities: config.EntityService, parsers: config.ParserService, mitre: config.MITREService, reports: config.ReportService, licenses: config.LicenseService, enrollment: config.AgentEnrollmentService,
+		ueba: config.UEBAService, aiSOC: config.AISOCService, cases: config.CasesService, entities: config.EntityService, parsers: config.ParserService, mitre: config.MITREService, reports: config.ReportService, licenses: config.LicenseService, enrollment: config.AgentEnrollmentService, serviceAccounts: config.ServiceAccountService,
 		enrollmentLimiter: enrollmentLimiter,
 	}
 	server.routes()
@@ -161,6 +164,12 @@ func (s *Server) routes() {
 		s.mux.Handle("POST /api/v1/agent-enrollment/tokens/{tokenID}/revoke", s.protect("platform.collectors.manage", http.HandlerFunc(s.revokeAgentEnrollmentToken)))
 		s.mux.Handle("POST /api/v1/agent-enrollment", s.limitAgentEnrollment(http.HandlerFunc(s.enrollAgent)))
 		s.mux.Handle("POST /api/v1/agent-credentials/rotate", s.protect("platform.collectors.heartbeat", http.HandlerFunc(s.rotateAgentCredential)))
+	}
+	if s.serviceAccounts != nil {
+		s.mux.Handle("GET /api/v1/service-accounts", s.protect("platform.service_accounts.read", http.HandlerFunc(s.listServiceAccounts)))
+		s.mux.Handle("POST /api/v1/service-accounts", s.protect("platform.service_accounts.write", http.HandlerFunc(s.createServiceAccount)))
+		s.mux.Handle("POST /api/v1/service-accounts/{serviceAccountID}/rotate", s.protect("platform.service_accounts.write", http.HandlerFunc(s.rotateServiceAccount)))
+		s.mux.Handle("POST /api/v1/service-accounts/{serviceAccountID}/revoke", s.protect("platform.service_accounts.write", http.HandlerFunc(s.revokeServiceAccount)))
 	}
 	if s.detections != nil {
 		s.mux.Handle("GET /api/v1/detection/content", s.protect("siem.rules.read", http.HandlerFunc(s.listDetectionContent)))

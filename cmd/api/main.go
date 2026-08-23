@@ -31,6 +31,7 @@ import (
 	"github.com/kcsp/platform/internal/pipeline"
 	"github.com/kcsp/platform/internal/platform/auth"
 	"github.com/kcsp/platform/internal/reporting"
+	"github.com/kcsp/platform/internal/serviceaccount"
 	"github.com/kcsp/platform/internal/soar"
 	"github.com/kcsp/platform/internal/soc"
 	"github.com/kcsp/platform/internal/store"
@@ -157,7 +158,8 @@ func run(logger *slog.Logger) error {
 	enrollmentService := enrollment.NewService(repository, enrollment.Config{
 		CredentialTTL: credentialTTL, MaximumEnrollmentTTL: maximumEnrollmentTTL,
 	})
-	authenticator := auth.NewChainedAuthenticator(auth.NewAgentAuthenticator(repository), primaryAuthenticator)
+	serviceAccountService := serviceaccount.NewService(repository, serviceaccount.Config{})
+	authenticator := auth.NewChainedAuthenticator(auth.NewAgentAuthenticator(repository), auth.NewServiceAccountAuthenticator(repository), primaryAuthenticator)
 
 	var seed func(context.Context) error
 	if strings.EqualFold(os.Getenv("KCSP_DEMO_SEED"), "true") {
@@ -194,6 +196,7 @@ func run(logger *slog.Logger) error {
 			ReportService:                reportService,
 			LicenseService:               licenseService,
 			AgentEnrollmentService:       enrollmentService,
+			ServiceAccountService:        serviceAccountService,
 			AgentEnrollmentRatePerMinute: enrollmentRatePerMinute,
 			AgentEnrollmentRateLimiter:   enrollmentLimiter,
 			RequireRegisteredCollectors: strings.EqualFold(

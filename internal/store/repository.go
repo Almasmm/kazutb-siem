@@ -66,6 +66,9 @@ type MemoryRepository struct {
 	parserMu               sync.RWMutex
 	parserContents         map[string]map[string]map[int]core.ParserContent
 	parserRequests         map[string]core.ParserContent
+	serviceAccountMu       sync.RWMutex
+	serviceAccounts        map[string]map[string]core.ServiceAccount
+	serviceAccountTokens   map[string]memoryServiceAccountReference
 }
 
 func WrapMemory(memory *Memory) *MemoryRepository {
@@ -73,6 +76,7 @@ func WrapMemory(memory *Memory) *MemoryRepository {
 		memory: memory, entities: map[string]map[string]core.SecurityEntity{}, entityRelations: map[string]map[string]core.EntityRelation{},
 		seenEntityObservations: map[string]struct{}{}, seenRelationEvents: map[string]struct{}{},
 		parserContents: map[string]map[string]map[int]core.ParserContent{}, parserRequests: map[string]core.ParserContent{},
+		serviceAccounts: map[string]map[string]core.ServiceAccount{}, serviceAccountTokens: map[string]memoryServiceAccountReference{},
 	}
 }
 
@@ -94,6 +98,7 @@ func (m *MemoryRepository) ResetTenant(ctx context.Context, tenantID string) err
 	m.memory.ResetTenant(tenantID)
 	m.resetEntities(tenantID)
 	m.resetParsers(tenantID)
+	m.resetServiceAccounts(tenantID)
 	return nil
 }
 func (m *MemoryRepository) SetRules(ctx context.Context, rules []core.DetectionRule) error {
