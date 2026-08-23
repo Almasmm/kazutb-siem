@@ -39,6 +39,10 @@ func NewSysmonSource(stateDirectory, channel string) (*SysmonSource, error) {
 	return &SysmonSource{channel: channel, checkpointFile: filepath.Join(stateDirectory, "sysmon.checkpoint")}, nil
 }
 
+func (s *SysmonSource) Name() string {
+	return "sysmon"
+}
+
 func (s *SysmonSource) Read(ctx context.Context, limit int) ([]Event, error) {
 	if runtime.GOOS != "windows" {
 		return nil, fmt.Errorf("%w: Sysmon Event Log requires Windows", ErrUnsupportedSource)
@@ -98,6 +102,10 @@ func (s *SysmonSource) Commit(cursor uint64) error {
 	return os.Rename(name, s.checkpointFile)
 }
 
+func (s *SysmonSource) CommitEvent(event Event) error {
+	return s.Commit(event.Cursor)
+}
+
 func (s *SysmonSource) checkpoint() (uint64, error) {
 	body, err := os.ReadFile(s.checkpointFile)
 	if errors.Is(err, os.ErrNotExist) {
@@ -132,14 +140,20 @@ func parseSysmonEvents(document []byte, after uint64) ([]Event, error) {
 		if header.System.EventRecordID == 0 || header.System.EventRecordID <= after {
 			continue
 		}
+		computer := strings.TrimSpace(header.System.Computer)
+		if computer == "" {
+			return nil, errors.New("decode Sysmon event header: computer identity is required")
+		}
 		eventTime, err := time.Parse(time.RFC3339Nano, header.System.TimeCreated.SystemTime)
 		if err != nil {
 			return nil, fmt.Errorf("parse Sysmon event timestamp: %w", err)
 		}
-		identity := sha256.Sum256([]byte(strings.ToLower(header.System.Computer) + "|" + strconv.FormatUint(header.System.EventRecordID, 10)))
+		hostIdentity := strings.ToLower(computer)
+		identity := sha256.Sum256([]byte(hostIdentity + "|" + strconv.FormatUint(header.System.EventRecordID, 10)))
 		events = append(events, Event{
 			Format: ingest.FormatSysmonXML, ContentType: "application/xml",
 			EventID: "sysmon_" + hex.EncodeToString(identity[:12]), EventTimestamp: eventTime.UTC(),
+			SourceID: "host:" + hostIdentity, SourceAddress: computer,
 			Payload: append([]byte(nil), raw...), Cursor: header.System.EventRecordID,
 		})
 	}

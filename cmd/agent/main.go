@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -16,7 +17,7 @@ import (
 	"github.com/kcsp/platform/internal/agent"
 )
 
-const agentVersion = "0.2.0"
+const agentVersion = "0.3.0"
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -44,7 +45,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer forwarder.Close()
-	source, err := agent.NewSysmonSource(stateDirectory, os.Getenv("KCSP_AGENT_SYSMON_CHANNEL"))
+	source, err := telemetrySource(stateDirectory)
 	if err != nil {
 		return err
 	}
@@ -54,12 +55,12 @@ func run(logger *slog.Logger) error {
 	batchSize := int(envInt64("KCSP_AGENT_BATCH_SIZE", 100))
 	heartbeatInterval := envDuration("KCSP_AGENT_HEARTBEAT_INTERVAL", 30*time.Second)
 	nextHeartbeat := time.Time{}
-	logger.Info("KCSP Windows agent started", "version", agentVersion, "state_directory", stateDirectory)
+	logger.Info("KCSP lightweight agent started", "version", agentVersion, "source", source.Name(), "state_directory", stateDirectory)
 	for {
 		if time.Now().After(nextHeartbeat) {
 			depth, queueBytes, _ := queue.Depth()
 			if collector, heartbeatErr := forwarder.Heartbeat(ctx, agentVersion, map[string]interface{}{
-				"os": runtime.GOOS, "arch": runtime.GOARCH, "source": "sysmon", "queue_depth": depth, "queue_bytes": queueBytes,
+				"os": runtime.GOOS, "arch": runtime.GOARCH, "source": source.Name(), "queue_depth": depth, "queue_bytes": queueBytes,
 			}); heartbeatErr != nil {
 				logger.Warn("collector heartbeat failed", "error", heartbeatErr)
 			} else {
@@ -85,13 +86,14 @@ func run(logger *slog.Logger) error {
 				}
 				return err
 			}
-			if err := source.Commit(event.Cursor); err != nil {
+			if err := source.CommitEvent(event); err != nil {
 				return err
 			}
 			persisted++
 		}
 		if persisted > 0 {
-			logger.Info("Sysmon events persisted", "count", persisted, "last_cursor", events[persisted-1].Cursor)
+			last := events[persisted-1]
+			logger.Info("agent events persisted", "source", source.Name(), "count", persisted, "last_cursor", last.Cursor, "last_checkpoint", last.Checkpoint)
 		}
 		timer := time.NewTimer(pollInterval)
 		select {
@@ -100,6 +102,28 @@ func run(logger *slog.Logger) error {
 			return ctx.Err()
 		case <-timer.C:
 		}
+	}
+}
+
+func telemetrySource(stateDirectory string) (agent.TelemetrySource, error) {
+	name := strings.ToLower(strings.TrimSpace(os.Getenv("KCSP_AGENT_SOURCE")))
+	if name == "" || name == "auto" {
+		switch runtime.GOOS {
+		case "windows":
+			name = "sysmon"
+		case "linux":
+			name = "journald"
+		default:
+			return nil, fmt.Errorf("automatic telemetry source is not supported on %s", runtime.GOOS)
+		}
+	}
+	switch name {
+	case "sysmon":
+		return agent.NewSysmonSource(stateDirectory, os.Getenv("KCSP_AGENT_SYSMON_CHANNEL"))
+	case "journald":
+		return agent.NewJournalSource(stateDirectory, strings.Fields(os.Getenv("KCSP_AGENT_JOURNAL_MATCHES")))
+	default:
+		return nil, fmt.Errorf("unsupported KCSP_AGENT_SOURCE %q", name)
 	}
 }
 

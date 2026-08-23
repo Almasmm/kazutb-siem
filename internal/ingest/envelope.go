@@ -21,6 +21,7 @@ const (
 	FormatSysmonXML       = "microsoft-sysmon-xml-v1"
 	FormatWindowsEventXML = "microsoft-windows-event-xml-v1"
 	FormatLinuxAudit      = "linux-auditd-v1"
+	FormatJournaldJSON    = "linux-journald-json-v1"
 	FormatSyslog          = "syslog-v1"
 	FormatCEF             = "cef-v1"
 	FormatLEEF            = "leef-v2"

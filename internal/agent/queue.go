@@ -24,6 +24,7 @@ type Event struct {
 	SourceAddress  string    `json:"source_address,omitempty"`
 	Payload        []byte    `json:"payload"`
 	Cursor         uint64    `json:"cursor,omitempty"`
+	Checkpoint     string    `json:"checkpoint,omitempty"`
 }
 
 type QueueItem struct {

@@ -21,6 +21,7 @@ func TestXDRParsersNormalizeTrustedIdentity(t *testing.T) {
 	}{
 		{name: "windows security", format: ingest.FormatWindowsEventXML, category: "authentication", parserID: "microsoft-windows-event-xml", sourceIP: "10.20.30.40", payload: `<Event><System><Provider Name="Microsoft-Windows-Security-Auditing"/><EventID>4625</EventID><EventRecordID>88</EventRecordID><Channel>Security</Channel><Computer>dc-01</Computer><TimeCreated SystemTime="2026-08-23T01:02:03Z"/></System><EventData><Data Name="TargetUserName">alice</Data><Data Name="IpAddress">10.20.30.40</Data><Data Name="Status">0xC000006A</Data></EventData></Event>`},
 		{name: "linux auditd", format: ingest.FormatLinuxAudit, category: "process_activity", parserID: "linux-auditd", payload: `type=SYSCALL msg=audit(1787446923.120:91) arch=c000003e syscall=59 success=yes pid=4242 ppid=1 auid=1000 uid=1000 comm="curl" exe="/usr/bin/curl" key="network-tool"`},
+		{name: "journald sudo", format: ingest.FormatJournaldJSON, category: "authentication", parserID: "linux-journald-json", payload: `{"__CURSOR":"s=abc;i=42","__REALTIME_TIMESTAMP":"1787446923123456","_MACHINE_ID":"aabbcc","_HOSTNAME":"linux-01","PRIORITY":"3","SYSLOG_IDENTIFIER":"sudo","_COMM":"sudo","_PID":"4242","_UID":"1000","USER":"student","MESSAGE":"pam_unix(sudo:auth): authentication failure"}`},
 		{name: "syslog firewall", format: ingest.FormatSyslog, category: "network_activity", parserID: "ietf-syslog", sourceIP: "10.1.2.3", payload: `<134>1 2026-08-23T01:02:03Z fw-01 firewall 991 deny-1 - action=deny src=10.1.2.3 dst=198.51.100.8 spt=51515 dpt=443`},
 		{name: "cef", format: ingest.FormatCEF, category: "network_activity", parserID: "arcsite-cef", sourceIP: "10.1.2.3", payload: `CEF:0|Palo Alto Networks|PAN-OS|11.1|THREAT-1|Blocked C2 traffic|9|src=10.1.2.3 dst=198.51.100.8 spt=51515 dpt=443 act=blocked suser=alice`},
 		{name: "leef", format: ingest.FormatLEEF, category: "network_activity", parserID: "ibm-leef", sourceIP: "10.1.2.3", payload: "LEEF:2.0|Fortinet|FortiGate|7.4|deny|x09|src=10.1.2.3\tdst=198.51.100.8\tsrcPort=51515\tdstPort=443\taction=deny\tsev=8"},
@@ -68,8 +69,8 @@ func TestXDRParsersNormalizeTrustedIdentity(t *testing.T) {
 func TestRegistryPublishesXDRFormats(t *testing.T) {
 	t.Parallel()
 	descriptors := NewRegistry().Descriptors()
-	if len(descriptors) != 10 {
-		t.Fatalf("published parser descriptors = %d, want 10", len(descriptors))
+	if len(descriptors) != 11 {
+		t.Fatalf("published parser descriptors = %d, want 11", len(descriptors))
 	}
 	for _, descriptor := range descriptors {
 		if descriptor.ReleaseState != "published" || len(descriptor.Formats) == 0 {

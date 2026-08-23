@@ -11,6 +11,9 @@ func TestParseSysmonEventsPreservesRawAndCursor(t *testing.T) {
 	if len(events) != 1 || events[0].Cursor != 42 || events[0].EventID == "" {
 		t.Fatalf("unexpected events: %+v", events)
 	}
+	if events[0].SourceID != "host:dc01" || events[0].SourceAddress != "DC01" {
+		t.Fatalf("host identity was not preserved: %+v", events[0])
+	}
 	if string(events[0].Payload) != `<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event"><System><EventRecordID>42</EventRecordID><Computer>DC01</Computer><TimeCreated SystemTime="2026-08-23T08:09:11.123Z" /></System></Event>` {
 		t.Fatalf("raw event changed: %s", events[0].Payload)
 	}
