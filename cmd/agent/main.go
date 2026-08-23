@@ -17,7 +17,7 @@ import (
 	"github.com/kcsp/platform/internal/agent"
 )
 
-const agentVersion = "0.3.0"
+const agentVersion = "0.4.0"
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -33,18 +33,47 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	forwarder, err := agent.NewForwarder(agent.ForwarderConfig{
-		ServerURL: envOr("KCSP_AGENT_SERVER_URL", "https://soc.kaztbu.kz"), TenantID: os.Getenv("KCSP_AGENT_TENANT_ID"),
-		AccessToken: os.Getenv("KCSP_AGENT_ACCESS_TOKEN"), CAFile: os.Getenv("KCSP_AGENT_CA_FILE"),
-		OAuthTokenURL: os.Getenv("KCSP_AGENT_OAUTH_TOKEN_URL"), OAuthClientID: os.Getenv("KCSP_AGENT_OAUTH_CLIENT_ID"),
-		OAuthClientSecret: os.Getenv("KCSP_AGENT_OAUTH_CLIENT_SECRET"), OAuthScopes: strings.Fields(os.Getenv("KCSP_AGENT_OAUTH_SCOPES")),
-		CertificateFile: os.Getenv("KCSP_AGENT_CERT_FILE"), PrivateKeyFile: os.Getenv("KCSP_AGENT_KEY_FILE"),
-		AllowInsecureHTTP: strings.EqualFold(os.Getenv("KCSP_AGENT_ALLOW_INSECURE_HTTP"), "true"), Timeout: 30 * time.Second,
-	})
+	serverURL := envOr("KCSP_AGENT_SERVER_URL", "https://soc.kaztbu.kz")
+	tenantID := os.Getenv("KCSP_AGENT_TENANT_ID")
+	accessToken := strings.TrimSpace(os.Getenv("KCSP_AGENT_ACCESS_TOKEN"))
+	oauthTokenURL := strings.TrimSpace(os.Getenv("KCSP_AGENT_OAUTH_TOKEN_URL"))
+	allowInsecureHTTP := strings.EqualFold(os.Getenv("KCSP_AGENT_ALLOW_INSECURE_HTTP"), "true")
+	var credentialManager *agent.CredentialManager
+	if accessToken == "" && oauthTokenURL == "" {
+		credentialManager, err = agent.OpenCredentialManager(agent.CredentialManagerConfig{
+			ServerURL: serverURL, TenantID: tenantID, EnrollmentToken: os.Getenv("KCSP_AGENT_ENROLLMENT_TOKEN"),
+			StateDirectory: stateDirectory, CredentialFile: os.Getenv("KCSP_AGENT_CREDENTIAL_FILE"), IdentityFile: os.Getenv("KCSP_AGENT_IDENTITY_FILE"),
+			AgentID: os.Getenv("KCSP_AGENT_ID"), AgentName: os.Getenv("KCSP_AGENT_NAME"), AgentVersion: agentVersion,
+			CAFile: os.Getenv("KCSP_AGENT_CA_FILE"), CertificateFile: os.Getenv("KCSP_AGENT_CERT_FILE"), PrivateKeyFile: os.Getenv("KCSP_AGENT_KEY_FILE"),
+			AllowInsecure: allowInsecureHTTP, Timeout: 30 * time.Second,
+		})
+		if err != nil {
+			return err
+		}
+		bootstrapContext, cancelBootstrap := context.WithTimeout(context.Background(), 30*time.Second)
+		grant, ensureErr := credentialManager.Ensure(bootstrapContext)
+		cancelBootstrap()
+		if ensureErr != nil {
+			credentialManager.Close()
+			return ensureErr
+		}
+		accessToken = grant.AccessToken
+		defer credentialManager.Close()
+	}
+	newForwarder := func(token string) (*agent.Forwarder, error) {
+		return agent.NewForwarder(agent.ForwarderConfig{
+			ServerURL: serverURL, TenantID: tenantID, AccessToken: token, CAFile: os.Getenv("KCSP_AGENT_CA_FILE"),
+			OAuthTokenURL: oauthTokenURL, OAuthClientID: os.Getenv("KCSP_AGENT_OAUTH_CLIENT_ID"),
+			OAuthClientSecret: os.Getenv("KCSP_AGENT_OAUTH_CLIENT_SECRET"), OAuthScopes: strings.Fields(os.Getenv("KCSP_AGENT_OAUTH_SCOPES")),
+			CertificateFile: os.Getenv("KCSP_AGENT_CERT_FILE"), PrivateKeyFile: os.Getenv("KCSP_AGENT_KEY_FILE"),
+			AllowInsecureHTTP: allowInsecureHTTP, Timeout: 30 * time.Second,
+		})
+	}
+	forwarder, err := newForwarder(accessToken)
 	if err != nil {
 		return err
 	}
-	defer forwarder.Close()
+	defer func() { forwarder.Close() }()
 	sources, err := telemetrySources(stateDirectory)
 	if err != nil {
 		return err
@@ -58,9 +87,30 @@ func run(logger *slog.Logger) error {
 	pollInterval := envDuration("KCSP_AGENT_POLL_INTERVAL", 2*time.Second)
 	batchSize := int(envInt64("KCSP_AGENT_BATCH_SIZE", 100))
 	heartbeatInterval := envDuration("KCSP_AGENT_HEARTBEAT_INTERVAL", 30*time.Second)
+	credentialRotationBefore := envDuration("KCSP_AGENT_CREDENTIAL_ROTATE_BEFORE", 24*time.Hour)
+	nextCredentialRotationAttempt := time.Time{}
 	nextHeartbeat := time.Time{}
 	logger.Info("KCSP lightweight agent started", "version", agentVersion, "sources", sourceNames, "state_directory", stateDirectory)
 	for {
+		now := time.Now()
+		if credentialManager != nil && now.After(nextCredentialRotationAttempt) && credentialManager.ShouldRotate(now, credentialRotationBefore) {
+			rotationContext, cancelRotation := context.WithTimeout(ctx, 30*time.Second)
+			grant, rotateErr := credentialManager.Rotate(rotationContext)
+			cancelRotation()
+			if rotateErr != nil {
+				nextCredentialRotationAttempt = now.Add(5 * time.Minute)
+				logger.Warn("agent credential rotation failed", "error", rotateErr, "retry_at", nextCredentialRotationAttempt)
+			} else {
+				replacement, replacementErr := newForwarder(grant.AccessToken)
+				if replacementErr != nil {
+					return replacementErr
+				}
+				forwarder.Close()
+				forwarder = replacement
+				nextCredentialRotationAttempt = time.Time{}
+				logger.Info("agent credential rotated", "expires_at", grant.ExpiresAt)
+			}
+		}
 		if time.Now().After(nextHeartbeat) {
 			depth, queueBytes, _ := queue.Depth()
 			if collector, heartbeatErr := forwarder.Heartbeat(ctx, agentVersion, map[string]interface{}{
