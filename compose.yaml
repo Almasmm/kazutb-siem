@@ -258,6 +258,12 @@ services:
       KCSP_PROCESSOR_WORKERS: ${KCSP_PROCESSOR_WORKERS:-96}
       KCSP_METRICS_ADDR: ":9090"
       KCSP_VERSION: ${KCSP_VERSION:-development}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/health/ready"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
     depends_on:
       postgres:
         condition: service_healthy
@@ -334,6 +340,12 @@ services:
       KCSP_SOAR_LEASE_DURATION: 30s
       KCSP_METRICS_ADDR: ":9091"
       KCSP_VERSION: ${KCSP_VERSION:-development}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9091/health/ready"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
     depends_on:
       postgres:
         condition: service_healthy
@@ -365,6 +377,12 @@ services:
       KCSP_AI_CLOUD_API_KEY: ${KCSP_AI_CLOUD_API_KEY:-}
       KCSP_METRICS_ADDR: ":9092"
       KCSP_VERSION: ${KCSP_VERSION:-development}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9092/health/ready"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
     depends_on:
       postgres:
         condition: service_healthy

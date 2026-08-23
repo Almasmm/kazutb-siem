@@ -57,6 +57,9 @@ func run(logger *slog.Logger) error {
 			logger.Error("SOAR metrics endpoint failed", "error", err)
 		}
 	}()
+	observability.SetReadinessCheck(repository.Health)
+	observability.MarkReady()
+	defer observability.MarkNotReady()
 	logger.Info("KCSP SOAR worker started", "worker_id", workerID, "lease", lease, "poll_interval", pollInterval)
 	return worker.Run(runContext)
 }

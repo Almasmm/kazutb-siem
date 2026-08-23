@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,6 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 )
+
+var ErrNotReady = errors.New("service is not ready")
+
+type ReadinessCheck func(context.Context) error
 
 type histogram struct {
 	mu     sync.Mutex
@@ -49,6 +54,10 @@ func (h *histogram) write(builder *strings.Builder, name, help string) {
 }
 
 type Registry struct {
+	ready          atomic.Bool
+	readinessMu    sync.RWMutex
+	readinessCheck ReadinessCheck
+
 	eventsReceived          atomic.Uint64
 	eventsParsed            atomic.Uint64
 	eventsFailed            atomic.Uint64
@@ -68,6 +77,46 @@ type Registry struct {
 	startedAt       time.Time
 	service         string
 	version         string
+}
+
+func (r *Registry) SetReadinessCheck(check ReadinessCheck) {
+	r.readinessMu.Lock()
+	r.readinessCheck = check
+	r.readinessMu.Unlock()
+}
+
+func (r *Registry) MarkReady() {
+	r.ready.Store(true)
+}
+
+func (r *Registry) MarkNotReady() {
+	r.ready.Store(false)
+}
+
+func (r *Registry) Readiness(ctx context.Context) error {
+	if !r.ready.Load() {
+		return ErrNotReady
+	}
+
+	r.readinessMu.RLock()
+	check := r.readinessCheck
+	r.readinessMu.RUnlock()
+	if check == nil {
+		return nil
+	}
+	return check(ctx)
+}
+
+func SetReadinessCheck(check ReadinessCheck) {
+	Default.SetReadinessCheck(check)
+}
+
+func MarkReady() {
+	Default.MarkReady()
+}
+
+func MarkNotReady() {
+	Default.MarkNotReady()
 }
 
 func NewRegistry(service, version string) *Registry {
@@ -156,18 +205,40 @@ func writeHelp(builder *strings.Builder, name, help, metricType string) {
 	fmt.Fprintf(builder, "# HELP %s %s\n# TYPE %s %s\n", name, help, name, metricType)
 }
 
-func Handler() http.Handler {
+func HandlerFor(registry *Registry) http.Handler {
+	if registry == nil {
+		registry = Default
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		Default.WritePrometheus(w)
+		registry.WritePrometheus(w)
 	})
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, `{"status":"ok"}`)
 	})
+	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, request *http.Request) {
+		ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
+		defer cancel()
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := registry.Readiness(ctx); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, `{"status":"not_ready"}`)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"status":"ready"}`)
+	})
 	return mux
+}
+
+func Handler() http.Handler {
+	return HandlerFor(Default)
 }
 
 func Serve(ctx context.Context, address string, logger *slog.Logger) error {

@@ -77,6 +77,9 @@ func run(logger *slog.Logger) error {
 			logger.Error("AI SOC metrics endpoint failed", "error", err)
 		}
 	}()
+	observability.SetReadinessCheck(repository.Health)
+	observability.MarkReady()
+	defer observability.MarkNotReady()
 	logger.Info("KCSP AI SOC worker started", "worker_id", workerID, "lease", lease,
 		"poll_interval", pollInterval, "cloud_configured", cloud != nil)
 	return worker.Run(runContext)

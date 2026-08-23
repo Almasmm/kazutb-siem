@@ -311,7 +311,7 @@ workloads:
         failureThreshold: 3
       readiness:
         httpGet:
-          path: /health/live
+          path: /health/ready
           port: metrics
         periodSeconds: 5
         timeoutSeconds: 3
@@ -362,7 +362,7 @@ workloads:
         failureThreshold: 3
       readiness:
         httpGet:
-          path: /health/live
+          path: /health/ready
           port: metrics
         periodSeconds: 5
         timeoutSeconds: 3
@@ -413,7 +413,7 @@ workloads:
         failureThreshold: 3
       readiness:
         httpGet:
-          path: /health/live
+          path: /health/ready
           port: metrics
         periodSeconds: 5
         timeoutSeconds: 3
