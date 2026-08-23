@@ -53,6 +53,7 @@ func run(logger *slog.Logger) error {
 	processor, err := ingest.OpenProcessor(ingest.ProcessorConfig{
 		Brokers: strings.Split(os.Getenv("KCSP_KAFKA_BROKERS"), ","), ClientID: "kcsp-processor",
 		GroupID: envOr("KCSP_KAFKA_CONSUMER_GROUP", "kcsp-canonical-processing-v1"), Topic: publisher.RawTopic(),
+		EnvelopeHMACKey: os.Getenv("KCSP_KAFKA_ENVELOPE_HMAC_KEY"),
 	}, repository, parser.NewRegistry(), engine, publisher)
 	if err != nil {
 		return err

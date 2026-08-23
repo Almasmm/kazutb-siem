@@ -3,7 +3,6 @@ package ingest
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -28,21 +27,27 @@ type DeadLetterPublisher interface {
 }
 
 type ProcessorConfig struct {
-	Brokers  []string
-	ClientID string
-	GroupID  string
-	Topic    string
+	Brokers         []string
+	ClientID        string
+	GroupID         string
+	Topic           string
+	EnvelopeHMACKey string
 }
 
 type Processor struct {
-	consumer *kgo.Client
-	rawStore RawStore
-	parser   EnvelopeParser
-	pipeline DetectionPipeline
-	dlq      DeadLetterPublisher
+	consumer      *kgo.Client
+	rawStore      RawStore
+	parser        EnvelopeParser
+	pipeline      DetectionPipeline
+	dlq           DeadLetterPublisher
+	authenticator *EnvelopeAuthenticator
 }
 
 func OpenProcessor(config ProcessorConfig, rawStore RawStore, eventParser EnvelopeParser, pipeline DetectionPipeline, dlq DeadLetterPublisher) (*Processor, error) {
+	authenticator, err := NewEnvelopeAuthenticator(config.EnvelopeHMACKey)
+	if err != nil {
+		return nil, fmt.Errorf("configure Kafka envelope integrity: %w", err)
+	}
 	if config.ClientID == "" {
 		config.ClientID = "kcsp-processor"
 	}
@@ -64,7 +69,10 @@ func OpenProcessor(config ProcessorConfig, rawStore RawStore, eventParser Envelo
 	if err != nil {
 		return nil, fmt.Errorf("create Kafka processor: %w", err)
 	}
-	return &Processor{consumer: consumer, rawStore: rawStore, parser: eventParser, pipeline: pipeline, dlq: dlq}, nil
+	return &Processor{
+		consumer: consumer, rawStore: rawStore, parser: eventParser, pipeline: pipeline, dlq: dlq,
+		authenticator: authenticator,
+	}, nil
 }
 
 func (p *Processor) Close() { p.consumer.Close() }
@@ -110,8 +118,8 @@ func (p *Processor) processRecord(ctx context.Context, record *kgo.Record) error
 	if err := json.Unmarshal(record.Value, &envelope); err != nil {
 		return p.deadLetter(ctx, envelope, "envelope", fmt.Errorf("decode raw envelope: %w", err))
 	}
-	if envelope.TenantID == "" || envelope.EventID == "" || envelope.MessageID == "" {
-		return p.deadLetter(ctx, envelope, "envelope", errors.New("raw envelope identity fields are required"))
+	if err := p.authenticator.Verify(envelope); err != nil {
+		return p.deadLetter(ctx, envelope, "envelope", err)
 	}
 	if err := p.rawStore.PutRawEnvelope(ctx, envelope); err != nil {
 		return fmt.Errorf("persist raw envelope before acknowledgement: %w", err)

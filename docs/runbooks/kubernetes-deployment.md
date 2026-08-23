@@ -59,11 +59,17 @@ The runtime Secret must contain these keys:
 ```text
 database-url
 clickhouse-url
+kafka-envelope-hmac-key
 minio-access-key
 minio-secret-key
 ai-local-api-key
 ai-cloud-api-key
 ```
+
+`kafka-envelope-hmac-key` must contain at least 32 bytes. API signs every raw
+envelope and processor verifies it before persistence. Drain the raw topic
+before rotating this key; API and processor must switch to the new value in one
+controlled rollout so records signed with the previous key are not quarantined.
 
 The AI keys may be absent when the corresponding provider is disabled. URLs
 must enforce TLS and contain production credentials sourced from the secret

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kcsp/platform/internal/core"
+	"github.com/kcsp/platform/internal/platform/tenant"
 )
 
 const MaxEventBytes = 1 << 20
@@ -35,6 +36,7 @@ type RawEnvelope struct {
 	RawHash        string          `json:"raw_hash"`
 	Payload        json.RawMessage `json:"payload,omitempty"`
 	RawPayload     []byte          `json:"raw_payload,omitempty"`
+	Integrity      string          `json:"integrity"`
 }
 
 func (e RawEnvelope) PayloadBytes() []byte {
@@ -66,12 +68,13 @@ type Publisher interface {
 }
 
 type Gateway struct {
-	publisher Publisher
-	now       func() time.Time
+	publisher     Publisher
+	authenticator *EnvelopeAuthenticator
+	now           func() time.Time
 }
 
-func NewGateway(publisher Publisher) *Gateway {
-	return &Gateway{publisher: publisher, now: func() time.Time { return time.Now().UTC() }}
+func NewGateway(publisher Publisher, authenticator *EnvelopeAuthenticator) *Gateway {
+	return &Gateway{publisher: publisher, authenticator: authenticator, now: func() time.Time { return time.Now().UTC() }}
 }
 
 func (g *Gateway) SubmitJSON(ctx context.Context, tenantID, collectorID string, payload []byte) (Receipt, error) {
@@ -122,7 +125,7 @@ func (g *Gateway) submit(ctx context.Context, tenantID, collectorID string, subm
 	if tenantID == "" || collectorID == "" {
 		return Receipt{}, fmt.Errorf("%w: tenant and collector identity are required", ErrInvalidEnvelope)
 	}
-	if len(tenantID) > 128 || len(collectorID) > 256 || !validFormat(format) {
+	if !tenant.Valid(tenantID) || len(collectorID) > 256 || !validFormat(format) {
 		return Receipt{}, fmt.Errorf("%w: invalid tenant, collector, or format identity", ErrInvalidEnvelope)
 	}
 	if len(submission.Payload) == 0 || len(submission.Payload) > MaxEventBytes {
@@ -161,6 +164,9 @@ func (g *Gateway) submit(ctx context.Context, tenantID, collectorID string, subm
 		envelope.Payload = append(json.RawMessage(nil), submission.Payload...)
 	} else {
 		envelope.RawPayload = append([]byte(nil), submission.Payload...)
+	}
+	if err := g.authenticator.Sign(&envelope); err != nil {
+		return Receipt{}, fmt.Errorf("authenticate raw envelope: %w", err)
 	}
 	if err := g.publisher.Publish(ctx, envelope); err != nil {
 		return Receipt{}, fmt.Errorf("publish raw event: %w", err)

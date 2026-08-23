@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/kcsp/platform/internal/platform/tenant"
 )
 
 type OIDCConfig struct {
@@ -78,12 +79,14 @@ func (a *OIDCAuthenticator) Authenticate(r *http.Request) (Principal, error) {
 	}
 	tenants := map[string]bool{}
 	for _, tenantID := range stringSliceClaim(claims, a.tenantClaim) {
-		if tenantID = strings.TrimSpace(tenantID); tenantID != "" {
-			tenants[tenantID] = true
+		if err := addTenantMembership(tenants, tenantID); err != nil {
+			return Principal{}, err
 		}
 	}
 	if tenantID := stringClaim(claims, "tenant_id"); tenantID != "" {
-		tenants[tenantID] = true
+		if err := addTenantMembership(tenants, tenantID); err != nil {
+			return Principal{}, err
+		}
 	}
 	if !platformScope && len(tenants) == 0 {
 		return Principal{}, fmt.Errorf("%w: no KCSP tenant membership", ErrUnauthenticated)
@@ -100,6 +103,18 @@ func (a *OIDCAuthenticator) Authenticate(r *http.Request) (Principal, error) {
 		ID: subject, DisplayName: displayName, Role: role,
 		Permissions: permissions, AllowedTenants: tenants, PlatformScope: platformScope,
 	}, nil
+}
+
+func addTenantMembership(memberships map[string]bool, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	if err := tenant.Validate(value); err != nil {
+		return fmt.Errorf("%w: invalid KCSP tenant membership", ErrUnauthenticated)
+	}
+	memberships[value] = true
+	return nil
 }
 
 func bearerToken(value string) (string, error) {

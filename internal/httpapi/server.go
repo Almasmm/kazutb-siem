@@ -234,7 +234,7 @@ func (s *Server) protect(permission string, next http.Handler) http.Handler {
 			s.problem(w, r, http.StatusForbidden, "permission_denied", "Permission denied", "The principal does not have "+permission+".")
 			return
 		}
-		tenantID := strings.TrimSpace(r.Header.Get("X-KCSP-Tenant-ID"))
+		tenantID := tenantIDFromHeader(r.Header.Values("X-KCSP-Tenant-ID"))
 		if !principal.CanAccessTenant(tenantID) {
 			s.problem(w, r, http.StatusForbidden, "tenant_denied", "Tenant access denied", "The requested tenant is not in the principal membership.")
 			return

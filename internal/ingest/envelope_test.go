@@ -22,7 +22,7 @@ func (p *recordingPublisher) RawTopic() string { return "kcsp.test.raw.events.v1
 
 func TestGatewayBindsTrustContextAndCreatesDeterministicIdentity(t *testing.T) {
 	publisher := &recordingPublisher{}
-	gateway := NewGateway(publisher)
+	gateway := NewGateway(publisher, testEnvelopeAuthenticator(t))
 	payload := []byte(`{
 		"tenant_id":"trusted-tenant",
 		"collector_id":"registered-collector",
@@ -67,7 +67,7 @@ func TestGatewayBindsTrustContextAndCreatesDeterministicIdentity(t *testing.T) {
 }
 
 func TestGatewayRejectsInvalidAndOversizedPayloads(t *testing.T) {
-	gateway := NewGateway(&recordingPublisher{})
+	gateway := NewGateway(&recordingPublisher{}, testEnvelopeAuthenticator(t))
 	cases := []struct {
 		name    string
 		payload []byte
@@ -95,7 +95,7 @@ func TestGatewayPreservesBinarySafeRawSubmission(t *testing.T) {
 	publisher := &recordingPublisher{}
 	payload := []byte(`<Event><Data Name="CommandLine">a &amp; b</Data></Event>`)
 	eventTime := time.Date(2026, 8, 23, 8, 9, 10, 0, time.UTC)
-	receipt, err := NewGateway(publisher).SubmitRaw(context.Background(), "tenant", "agent-01", RawSubmission{
+	receipt, err := NewGateway(publisher, testEnvelopeAuthenticator(t)).SubmitRaw(context.Background(), "tenant", "agent-01", RawSubmission{
 		Format: FormatSysmonXML, ContentType: "application/xml", EventID: "sysmon-1",
 		EventTimestamp: eventTime, Payload: payload,
 	})

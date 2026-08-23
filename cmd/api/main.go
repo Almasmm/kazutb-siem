@@ -100,7 +100,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer publisher.Close()
-	gateway := ingest.NewGateway(publisher)
+	envelopeAuthenticator, err := ingest.NewEnvelopeAuthenticator(os.Getenv("KCSP_KAFKA_ENVELOPE_HMAC_KEY"))
+	if err != nil {
+		return fmt.Errorf("configure Kafka envelope integrity: %w", err)
+	}
+	gateway := ingest.NewGateway(publisher, envelopeAuthenticator)
 	authenticator, err := configureAuthenticator(startupContext, profile, authMode)
 	if err != nil {
 		return err

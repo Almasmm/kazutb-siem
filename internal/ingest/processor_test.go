@@ -6,7 +6,6 @@ import (
 	"errors"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/kcsp/platform/internal/core"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -50,11 +49,11 @@ func TestProcessorPersistsRawBeforeParserFailureIsQuarantined(t *testing.T) {
 	dlq := &recordingDeadLetter{order: &order}
 	processor := &Processor{
 		rawStore: orderedRawStore{order: &order}, parser: orderedFailingParser{order: &order},
-		pipeline: pipeline, dlq: dlq,
+		pipeline: pipeline, dlq: dlq, authenticator: testEnvelopeAuthenticator(t),
 	}
-	envelope := RawEnvelope{
-		MessageID: "message-1", EventID: "event-1", TenantID: "tenant-1", CollectorID: "collector-1",
-		Format: "unknown-vendor-v1", ReceivedAt: time.Now().UTC(), RawPayload: []byte("opaque evidence"),
+	envelope := testRawEnvelope("tenant-1", []byte("opaque evidence"))
+	if err := processor.authenticator.Sign(&envelope); err != nil {
+		t.Fatal(err)
 	}
 	body, err := json.Marshal(envelope)
 	if err != nil {

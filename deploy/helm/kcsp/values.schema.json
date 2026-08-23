@@ -47,6 +47,7 @@
           "required": [
             "databaseURL",
             "clickhouseURL",
+            "kafkaEnvelopeHMACKey",
             "minioAccessKey",
             "minioSecretKey",
             "aiLocalAPIKey",

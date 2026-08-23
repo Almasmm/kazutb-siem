@@ -36,6 +36,7 @@ single-node data stores from being presented as a production topology.
 | --- | --- |
 | `database-url` | API, processor, SOAR, AI |
 | `clickhouse-url` | API, processor, AI |
+| `kafka-envelope-hmac-key` | API, processor; minimum 32 bytes |
 | `minio-access-key` | API |
 | `minio-secret-key` | API |
 | `ai-local-api-key` | AI, optional |

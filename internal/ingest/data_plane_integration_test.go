@@ -60,10 +60,16 @@ func TestKafkaClickHousePostgresDetectionFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer publisher.Close()
+	const envelopeHMACKey = "kcsp-integration-envelope-hmac-key-not-for-runtime"
+	envelopeAuthenticator, err := ingest.NewEnvelopeAuthenticator(envelopeHMACKey)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	processor, err := ingest.OpenProcessor(ingest.ProcessorConfig{
 		Brokers: brokers, ClientID: "kcsp-integration-processor",
 		GroupID: "kcsp-integration-" + core.NewID("group"), Topic: publisher.RawTopic(),
+		EnvelopeHMACKey: envelopeHMACKey,
 	}, repository, parser.NewRegistry(), engine, publisher)
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +97,7 @@ func TestKafkaClickHousePostgresDetectionFlow(t *testing.T) {
   <EventData><Data Name="User">KCSP\admin</Data><Data Name="Image">C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe</Data>
   <Data Name="ProcessId">4242</Data><Data Name="CommandLine">powershell.exe -EncodedCommand SQBFAFgA</Data><Data Name="ParentImage">C:\Windows\System32\services.exe</Data></EventData>
 </Event>`, eventTime.Format(time.RFC3339Nano)))
-	receipt, err := ingest.NewGateway(publisher).SubmitRaw(ctx, tenantID, "sysmon-collector-01", ingest.RawSubmission{
+	receipt, err := ingest.NewGateway(publisher, envelopeAuthenticator).SubmitRaw(ctx, tenantID, "sysmon-collector-01", ingest.RawSubmission{
 		Format: ingest.FormatSysmonXML, ContentType: "application/xml", EventID: eventID,
 		EventTimestamp: eventTime, Payload: payload,
 	})

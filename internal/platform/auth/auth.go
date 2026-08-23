@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+
+	"github.com/kcsp/platform/internal/platform/tenant"
 )
 
 var (
@@ -25,7 +27,7 @@ func (p Principal) Can(permission string) bool {
 }
 
 func (p Principal) CanAccessTenant(tenantID string) bool {
-	return tenantID != "" && (p.PlatformScope || p.AllowedTenants[tenantID])
+	return tenant.Valid(tenantID) && (p.PlatformScope || p.AllowedTenants[tenantID])
 }
 
 type DemoAuthenticator struct {

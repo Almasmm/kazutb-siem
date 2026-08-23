@@ -106,6 +106,13 @@ spec:
                   name: {{ $root.Values.secrets.existingSecret }}
                   key: {{ $root.Values.secrets.keys.clickhouseURL }}
             {{- end }}
+            {{- if or (eq $name "api") (eq $name "processor") }}
+            - name: KCSP_KAFKA_ENVELOPE_HMAC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.secrets.existingSecret }}
+                  key: {{ $root.Values.secrets.keys.kafkaEnvelopeHMACKey }}
+            {{- end }}
             {{- if eq $name "api" }}
             - name: KCSP_LISTEN_ADDR
               value: ":8080"

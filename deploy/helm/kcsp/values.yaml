@@ -47,6 +47,7 @@ secrets:
   keys:
     databaseURL: database-url
     clickhouseURL: clickhouse-url
+    kafkaEnvelopeHMACKey: kafka-envelope-hmac-key
     minioAccessKey: minio-access-key
     minioSecretKey: minio-secret-key
     aiLocalAPIKey: ai-local-api-key
