@@ -192,7 +192,8 @@ curl --fail --silent --show-error https://soc.example.edu/api/health/ready
 
 Then verify:
 
-- OIDC login and tenant-scoped authorization.
+- OIDC login and tenant-scoped authorization, including the executable
+  [two-tenant isolation gate](oidc-tenant-acceptance.md).
 - Collector ingestion through the approved gateway.
 - Kafka processing and ClickHouse event search.
 - Alert-to-incident creation.

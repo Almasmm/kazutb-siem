@@ -52,4 +52,6 @@ supported tenancy boundary.
 - Store and service tests use same-ID and cross-tenant lookups for events,
   alerts, incidents, evidence, hunts, threat intelligence, SOAR, and UEBA.
 - A deployment acceptance run must use two real OIDC tenant identities before
-  onboarding an additional organization.
+  onboarding an additional organization. Execute the fail-closed gate in
+  [OIDC two-tenant isolation acceptance](../runbooks/oidc-tenant-acceptance.md)
+  and retain its secret-free report with the release evidence.
