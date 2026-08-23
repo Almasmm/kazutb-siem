@@ -15,11 +15,12 @@ const (
 )
 
 const (
-	SOARConnectorAuthNone   = "NONE"
-	SOARConnectorAuthBearer = "BEARER"
-	SOARConnectorAuthHMAC   = "HMAC_SHA256"
-	SOARConnectorAuthBasic  = "BASIC"
-	SOARConnectorAuthAPIKey = "API_KEY"
+	SOARConnectorAuthNone                    = "NONE"
+	SOARConnectorAuthBearer                  = "BEARER"
+	SOARConnectorAuthHMAC                    = "HMAC_SHA256"
+	SOARConnectorAuthBasic                   = "BASIC"
+	SOARConnectorAuthAPIKey                  = "API_KEY"
+	SOARConnectorAuthOAuth2ClientCredentials = "OAUTH2_CLIENT_CREDENTIALS"
 )
 
 const (

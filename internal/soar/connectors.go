@@ -244,7 +244,8 @@ func normalizeConnectorDraft(draft ConnectorDraft) (core.SOARConnector, error) {
 	}
 	switch draft.AuthType {
 	case core.SOARConnectorAuthNone, core.SOARConnectorAuthBearer, core.SOARConnectorAuthHMAC,
-		core.SOARConnectorAuthBasic, core.SOARConnectorAuthAPIKey:
+		core.SOARConnectorAuthBasic, core.SOARConnectorAuthAPIKey,
+		core.SOARConnectorAuthOAuth2ClientCredentials:
 	default:
 		return core.SOARConnector{}, fmt.Errorf("%w: unsupported connector authentication", ErrInvalidConnector)
 	}
@@ -265,6 +266,9 @@ func normalizeConnectorDraft(draft ConnectorDraft) (core.SOARConnector, error) {
 	}
 	settings, err := normalizeConnectorSettings(draft.Kind, draft.AuthType, draft.Settings)
 	if err != nil {
+		return core.SOARConnector{}, err
+	}
+	if err := validateNativeEDRConnectorConfiguration(draft.Kind, draft.AuthType, endpoint, settings); err != nil {
 		return core.SOARConnector{}, err
 	}
 	if draft.TimeoutSeconds == 0 {
@@ -339,6 +343,9 @@ func normalizeConnectorSettings(kind, authType string, settings map[string]inter
 	if kind == core.SOARConnectorKindITSMREST {
 		result["provider"] = "GENERIC"
 	}
+	if kind == core.SOARConnectorKindEDRXDRREST {
+		result["provider"] = edrXDRProviderGeneric
+	}
 	if kind == core.SOARConnectorKindLDAPDirectory {
 		result["directory_type"] = "LDAP"
 	}
@@ -385,6 +392,11 @@ func normalizeConnectorSettings(kind, authType string, settings map[string]inter
 			case core.SOARConnectorKindITSMREST:
 				if provider != "GENERIC" && provider != "SERVICENOW" && provider != "JIRA" {
 					return nil, fmt.Errorf("%w: ITSM provider must be GENERIC, SERVICENOW, or JIRA", ErrInvalidConnector)
+				}
+			case core.SOARConnectorKindEDRXDRREST:
+				if provider != edrXDRProviderGeneric && provider != edrXDRProviderMicrosoftDefender &&
+					provider != edrXDRProviderCrowdStrikeFalcon {
+					return nil, fmt.Errorf("%w: EDR/XDR provider is unsupported", ErrInvalidConnector)
 				}
 			default:
 				return nil, fmt.Errorf("%w: provider is unavailable for this connector kind", ErrInvalidConnector)
@@ -514,6 +526,15 @@ func normalizeConnectorSettings(kind, authType string, settings map[string]inter
 					return nil, fmt.Errorf("%w: %s is available only for Jira connectors", ErrInvalidConnector, key)
 				}
 			}
+		}
+	}
+	if kind == core.SOARConnectorKindEDRXDRREST {
+		provider, _ := result["provider"].(string)
+		if provider == edrXDRProviderGeneric && authType == core.SOARConnectorAuthOAuth2ClientCredentials {
+			return nil, fmt.Errorf("%w: OAuth2 client credentials are available only for native EDR/XDR providers", ErrInvalidConnector)
+		}
+		if provider != edrXDRProviderGeneric && authType != core.SOARConnectorAuthOAuth2ClientCredentials {
+			return nil, fmt.Errorf("%w: native EDR/XDR providers require OAUTH2_CLIENT_CREDENTIALS", ErrInvalidConnector)
 		}
 	}
 	if kind == core.SOARConnectorKindEmailSMTP && result["from_address"] == nil {

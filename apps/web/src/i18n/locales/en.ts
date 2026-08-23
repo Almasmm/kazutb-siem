@@ -162,6 +162,7 @@ export const en = {
     nativeITSMHint: "Native ITSM actions use provider-specific APIs and verify every ticket with a read-after-write request.",
     teamId: "Microsoft Teams team ID", channelId: "Microsoft Teams channel ID",
     nativeNotificationHint: "Native notification actions use the provider API and verify the posted message with a separate read request.",
+    nativeEDRHint: "Native EDR/XDR actions use short-lived OAuth2 tokens and verify endpoint state with a separate provider read. The secret binding must resolve to the provider credential JSON document.",
     apiKeyHeader: "API key header", healthMethod: "Health method", healthPath: "Health path", expectedStatus: "Expected HTTP status",
     fromAddress: "Envelope sender", heloName: "SMTP HELO name",
     directoryType: "Directory type", baseDN: "Directory base DN", accountAttribute: "Account attribute",

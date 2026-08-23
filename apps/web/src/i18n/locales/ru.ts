@@ -278,6 +278,7 @@ export const ru = {
     nativeITSMHint: "Native ITSM использует API выбранного провайдера и проверяет каждую заявку отдельным read-after-write запросом.",
     teamId: "ID команды Microsoft Teams", channelId: "ID канала Microsoft Teams",
     nativeNotificationHint: "Native notification использует API провайдера и проверяет отправленное сообщение отдельным read-запросом.",
+    nativeEDRHint: "Native EDR/XDR использует короткоживущие OAuth2-токены и проверяет состояние endpoint отдельным запросом к провайдеру. Привязка секрета должна возвращать JSON-документ credentials провайдера.",
     apiKeyHeader: "Заголовок API key", healthMethod: "Метод проверки", healthPath: "Путь проверки", expectedStatus: "Ожидаемый HTTP-статус",
     fromAddress: "Адрес отправителя", heloName: "Имя SMTP HELO",
     directoryType: "Тип каталога", baseDN: "Базовый DN каталога", accountAttribute: "Атрибут учётной записи",

@@ -77,11 +77,12 @@ func (EnvironmentSecretResolver) Resolve(_ context.Context, reference string) (s
 }
 
 type ManagedConnectorExecutor struct {
-	store    ConnectorActionStore
-	secrets  SecretResolver
-	client   *http.Client
-	smtpDial smtpConnectorDialer
-	ldapDial ldapConnectorDialer
+	store      ConnectorActionStore
+	secrets    SecretResolver
+	client     *http.Client
+	smtpDial   smtpConnectorDialer
+	ldapDial   ldapConnectorDialer
+	oauthCache *connectorOAuthTokenCache
 }
 
 func NewManagedConnectorExecutor(store ConnectorActionStore, secrets SecretResolver,
@@ -89,7 +90,7 @@ func NewManagedConnectorExecutor(store ConnectorActionStore, secrets SecretResol
 	if secrets == nil {
 		secrets = EnvironmentSecretResolver{}
 	}
-	return &ManagedConnectorExecutor{store: store, secrets: secrets, client: client}
+	return &ManagedConnectorExecutor{store: store, secrets: secrets, client: client, oauthCache: newConnectorOAuthTokenCache()}
 }
 
 func (e *ManagedConnectorExecutor) Execute(ctx context.Context, request ActionRequest) (ActionResult, error) {
@@ -159,6 +160,9 @@ func (e *ManagedConnectorExecutor) Execute(ctx context.Context, request ActionRe
 	}
 	if connector.Kind == core.SOARConnectorKindNotification && isNativeNotificationProvider(connector) {
 		return e.executeNativeNotificationConnector(ctx, connector, request, secret)
+	}
+	if connector.Kind == core.SOARConnectorKindEDRXDRREST && isNativeEDRXDRProvider(connector) {
+		return e.executeNativeEDRXDRConnector(ctx, connector, request, secret)
 	}
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, connector.Endpoint, bytes.NewReader(payload))
 	if err != nil {
@@ -271,6 +275,9 @@ func (e *ManagedConnectorExecutor) TestConnector(ctx context.Context,
 	}
 	if connector.Kind == core.SOARConnectorKindNotification && isNativeNotificationProvider(connector) {
 		return e.testNativeNotificationConnector(ctx, connector, secret), nil
+	}
+	if connector.Kind == core.SOARConnectorKindEDRXDRREST && isNativeEDRXDRProvider(connector) {
+		return e.testNativeEDRXDRConnector(ctx, connector, secret), nil
 	}
 	endpoint, err := connectorHealthURL(connector)
 	if err != nil {

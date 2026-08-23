@@ -22,6 +22,11 @@ var standardHTTPConnectorAuth = map[string]bool{
 	core.SOARConnectorAuthBearer: true, core.SOARConnectorAuthHMAC: true,
 	core.SOARConnectorAuthBasic: true, core.SOARConnectorAuthAPIKey: true,
 }
+var edrHTTPConnectorAuth = map[string]bool{
+	core.SOARConnectorAuthBearer: true, core.SOARConnectorAuthHMAC: true,
+	core.SOARConnectorAuthBasic: true, core.SOARConnectorAuthAPIKey: true,
+	core.SOARConnectorAuthOAuth2ClientCredentials: true,
+}
 var webhookConnectorAuth = map[string]bool{
 	core.SOARConnectorAuthNone: true, core.SOARConnectorAuthBearer: true,
 	core.SOARConnectorAuthHMAC: true, core.SOARConnectorAuthBasic: true,
@@ -68,7 +73,7 @@ var connectorProfiles = map[string]connectorProfile{
 	core.SOARConnectorKindEDRXDRREST: {
 		SchemaVersion:   "kcsp.edr-xdr.v1",
 		Actions:         map[string]bool{"endpoint.isolate": true, "endpoint.release": true},
-		EndpointSchemes: httpsConnectorSchemes, AuthTypes: standardHTTPConnectorAuth,
+		EndpointSchemes: httpsConnectorSchemes, AuthTypes: edrHTTPConnectorAuth,
 	},
 	core.SOARConnectorKindEmailSMTP: {
 		SchemaVersion:   "kcsp.email.v1",
