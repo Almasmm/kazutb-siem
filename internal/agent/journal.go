@@ -39,8 +39,7 @@ func NewJournalSource(stateDirectory string, matches []string) (*JournalSource, 
 		if match == "" {
 			continue
 		}
-		field, value, found := strings.Cut(match, "=")
-		if !found || strings.TrimSpace(field) == "" || strings.TrimSpace(value) == "" || strings.ContainsAny(match, "\r\n") {
+		if !validJournalMatch(match) {
 			return nil, fmt.Errorf("invalid journald match %q; expected FIELD=value", match)
 		}
 		validated = append(validated, match)
@@ -49,6 +48,21 @@ func NewJournalSource(stateDirectory string, matches []string) (*JournalSource, 
 		checkpointFile: filepath.Join(stateDirectory, "journald.checkpoint"),
 		matches:        validated,
 	}, nil
+}
+
+func validJournalMatch(match string) bool {
+	field, value, found := strings.Cut(match, "=")
+	if !found || len(field) == 0 || len(field) > 64 || value == "" || strings.ContainsAny(value, "\x00\r\n") {
+		return false
+	}
+	for index := 0; index < len(field); index++ {
+		character := field[index]
+		if character == '_' || (character >= 'A' && character <= 'Z') || (index > 0 && character >= '0' && character <= '9') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (s *JournalSource) Name() string {
