@@ -1,14 +1,16 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, LoaderCircle, LogIn, ShieldCheck } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { UserManager, type User } from "oidc-client-ts";
+import { UserManager, WebStorageStateStore, type User } from "oidc-client-ts";
 import {
   authConfig,
   clearOIDCSession,
   getSessionUser,
+  safeReturnPath,
   type SessionUser,
   setOIDCSession,
 } from "./session";
+import { authSessionStorage } from "./storage";
 
 interface AuthContextValue {
   mode: "demo" | "oidc";
@@ -28,6 +30,9 @@ const manager = oidcConfigured ? new UserManager({
   scope: authConfig.scope,
   automaticSilentRenew: true,
   monitorSession: true,
+  revokeTokensOnSignout: true,
+  stateStore: new WebStorageStateStore({ prefix: "kcsp.oidc.state.", store: authSessionStorage }),
+  userStore: new WebStorageStateStore({ prefix: "kcsp.oidc.user.", store: authSessionStorage }),
 }) : null;
 
 let initialization: Promise<User | null> | null = null;
@@ -40,7 +45,7 @@ async function initializeOIDC(): Promise<User | null> {
       if (params.has("code") && params.has("state")) {
         const user = await manager.signinRedirectCallback();
         const state = user.state as { returnUrl?: string } | undefined;
-        window.history.replaceState({}, document.title, state?.returnUrl || "/soc");
+        window.history.replaceState({}, document.title, safeReturnPath(state?.returnUrl, window.location.origin));
         return user;
       }
       const user = await manager.getUser();
@@ -81,8 +86,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearOIDCSession();
       if (active) setUser(null);
     };
+    const expireUser = () => {
+      clearOIDCSession();
+      if (active) setUser(null);
+    };
     manager.events.addUserLoaded(acceptUser);
     manager.events.addUserUnloaded(removeUser);
+    manager.events.addAccessTokenExpired(expireUser);
     void initializeOIDC()
       .then((oidcUser) => { if (oidcUser) acceptUser(oidcUser); })
       .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : t("auth.failed")); })
@@ -91,6 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       active = false;
       manager.events.removeUserLoaded(acceptUser);
       manager.events.removeUserUnloaded(removeUser);
+      manager.events.removeAccessTokenExpired(expireUser);
     };
   }, [t]);
 
@@ -105,6 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signOut: async () => {
       if (authConfig.mode === "demo" || !manager) return;
       clearOIDCSession();
+      setUser(null);
       await manager.signoutRedirect();
     },
   }), [user]);

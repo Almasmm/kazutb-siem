@@ -1,4 +1,5 @@
 import { runtimeConfig } from "../config/runtime";
+import { authSessionStorage } from "./storage";
 
 export type AuthMode = "demo" | "oidc";
 
@@ -24,7 +25,9 @@ export const authConfig = {
 };
 
 let accessToken = authConfig.mode === "demo" ? runtimeConfig.apiToken : "";
-let tenantId = authConfig.configuredTenant;
+let tenantId = normalizeTenantId(authConfig.configuredTenant) || authConfig.configuredTenant;
+let allowedTenantIds = new Set(authConfig.mode === "demo" && tenantId ? [tenantId] : []);
+let platformScoped = false;
 let currentUser: SessionUser | null = authConfig.mode === "demo"
   ? { id: "user-soc-l2", displayName: "Development SOC L2", role: "SOC L2" }
   : null;
@@ -32,23 +35,20 @@ let currentUser: SessionUser | null = authConfig.mode === "demo"
 export function setOIDCSession(user: OIDCUserLike): SessionUser {
   const tokenClaims = decodeJWTClaims(user.access_token);
   const claims = { ...tokenClaims, ...user.profile };
-  const tenants = stringArray(claims.kcsp_tenants);
-  const singleTenant = typeof claims.tenant_id === "string" ? claims.tenant_id : "";
-  if (singleTenant && !tenants.includes(singleTenant)) tenants.push(singleTenant);
-  const rememberedTenant = sessionStorage.getItem("kcsp.tenant") || "";
-  if (rememberedTenant && tenants.includes(rememberedTenant)) {
-    tenantId = rememberedTenant;
-  } else if (tenants.includes(authConfig.configuredTenant)) {
-    tenantId = authConfig.configuredTenant;
-  } else if (tenants.length > 0) {
-		tenantId = tenants[0] ?? authConfig.configuredTenant;
-  } else if (authConfig.configuredTenant) {
-    tenantId = authConfig.configuredTenant;
-  } else {
-    throw new Error("The identity token does not contain a KCSP tenant membership.");
-  }
-  sessionStorage.setItem("kcsp.tenant", tenantId);
   const roles = collectRoles(claims);
+  platformScoped = roles.some((role) => ["platform_super_admin", "platform_administrator", "mssp_manager"].includes(role));
+  const tenants = stringArray(claims.kcsp_tenants).map(normalizeTenantId).filter((value): value is string => Boolean(value));
+  const singleTenant = typeof claims.tenant_id === "string" ? claims.tenant_id : "";
+  const normalizedSingleTenant = normalizeTenantId(singleTenant);
+  if (normalizedSingleTenant && !tenants.includes(normalizedSingleTenant)) tenants.push(normalizedSingleTenant);
+  allowedTenantIds = new Set(tenants);
+  tenantId = selectTenant({
+    remembered: authSessionStorage.getItem("kcsp.tenant"),
+    configured: authConfig.configuredTenant,
+    memberships: tenants,
+    platformScope: platformScoped,
+  });
+  authSessionStorage.setItem("kcsp.tenant", tenantId);
   currentUser = {
     id: String(claims.sub || ""),
     displayName: String(claims.name || claims.preferred_username || claims.email || claims.sub || "KCSP user"),
@@ -62,6 +62,9 @@ export function clearOIDCSession(): void {
   if (authConfig.mode !== "demo") {
     accessToken = "";
     currentUser = null;
+    allowedTenantIds = new Set();
+    platformScoped = false;
+    authSessionStorage.removeItem("kcsp.tenant");
   }
 }
 
@@ -74,10 +77,11 @@ export function getTenantId(): string {
 }
 
 export function setTenantId(value: string): void {
-  const normalized = value.trim().toLowerCase();
-  if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(normalized)) throw new Error("Invalid KCSP tenant identifier.");
+  const normalized = normalizeTenantId(value);
+  if (!normalized) throw new Error("Invalid KCSP tenant identifier.");
+  if (!platformScoped && !allowedTenantIds.has(normalized)) throw new Error("The authenticated user is not a member of this KCSP tenant.");
   tenantId = normalized;
-  sessionStorage.setItem("kcsp.tenant", tenantId);
+  authSessionStorage.setItem("kcsp.tenant", tenantId);
 }
 
 export function getSessionUser(): SessionUser | null {
@@ -95,6 +99,38 @@ function decodeJWTClaims(token: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+export function selectTenant(input: {
+  remembered?: string | null;
+  configured?: string | null;
+  memberships: readonly string[];
+  platformScope: boolean;
+}): string {
+  const memberships = new Set(input.memberships.map(normalizeTenantId).filter((value): value is string => Boolean(value)));
+  const remembered = normalizeTenantId(input.remembered);
+  const configured = normalizeTenantId(input.configured);
+  if (remembered && (input.platformScope || memberships.has(remembered))) return remembered;
+  if (configured && (input.platformScope || memberships.has(configured))) return configured;
+  const firstMembership = memberships.values().next().value as string | undefined;
+  if (firstMembership) return firstMembership;
+  throw new Error("The identity token does not contain a KCSP tenant membership.");
+}
+
+export function safeReturnPath(value: unknown, origin: string): string {
+  if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//")) return "/soc";
+  try {
+    const resolved = new URL(value, origin);
+    if (resolved.origin !== origin) return "/soc";
+    return `${resolved.pathname}${resolved.search}${resolved.hash}`;
+  } catch {
+    return "/soc";
+  }
+}
+
+function normalizeTenantId(value?: string | null): string | null {
+  const normalized = value?.trim().toLowerCase() || "";
+  return /^[a-z0-9][a-z0-9-]{1,62}$/.test(normalized) ? normalized : null;
 }
 
 function stringArray(value: unknown): string[] {
