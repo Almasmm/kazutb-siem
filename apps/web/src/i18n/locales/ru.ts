@@ -272,6 +272,8 @@ export const ru = {
     multiSelectHint: "Выберите одно или несколько разрешённых действий.", provider: "Контракт провайдера", channel: "Канал",
     apiKeyHeader: "Заголовок API key", healthMethod: "Метод проверки", healthPath: "Путь проверки", expectedStatus: "Ожидаемый HTTP-статус",
     fromAddress: "Адрес отправителя", heloName: "Имя SMTP HELO",
+    directoryType: "Тип каталога", baseDN: "Базовый DN каталога", accountAttribute: "Атрибут учётной записи",
+    disabledAttribute: "Атрибут блокировки", disabledValue: "Значение блокировки", enabledValue: "Значение разблокировки (пустое удаляет атрибут)",
     timeoutSeconds: "Таймаут (секунды)", rateLimit: "Вызовов в минуту", healthDetail: "Детали состояния",
     connectionTests: "Проверки соединения", noConnectionTests: "Проверки соединения ещё не запускались", testQueued: "Проверка соединения поставлена в очередь.",
     connectorSaved: "Настройки коннектора сохранены. Перед LIVE-выполнением запустите проверку соединения.", connectorDisabled: "Коннектор отключён.",

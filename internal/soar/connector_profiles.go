@@ -73,6 +73,12 @@ var connectorProfiles = map[string]connectorProfile{
 		EndpointSchemes: map[string]bool{"smtps": true},
 		AuthTypes:       map[string]bool{core.SOARConnectorAuthBasic: true},
 	},
+	core.SOARConnectorKindLDAPDirectory: {
+		SchemaVersion:   "kcsp.ldap-directory.v1",
+		Actions:         map[string]bool{"identity.disable_account": true, "identity.enable_account": true},
+		EndpointSchemes: map[string]bool{"ldaps": true},
+		AuthTypes:       map[string]bool{core.SOARConnectorAuthBasic: true},
+	},
 }
 
 func connectorProfileFor(kind string) (connectorProfile, bool) {
@@ -188,6 +194,19 @@ func buildConnectorPayload(connector core.SOARConnector, request ActionRequest) 
 		payload = map[string]interface{}{
 			"schema_version": profile.SchemaVersion, "operation": "send_email", "to": to,
 			"subject": subject, "body": body, "kcsp": metadata,
+		}
+	case core.SOARConnectorKindLDAPDirectory:
+		account, err := requiredConnectorParameter(parameters, "account", "user", "distinguished_name")
+		if err != nil {
+			return nil, err
+		}
+		operation := "disable_account"
+		if request.Attempt.ActionType == "identity.enable_account" {
+			operation = "enable_account"
+		}
+		payload = map[string]interface{}{
+			"schema_version": profile.SchemaVersion, "operation": operation,
+			"account": account, "request": parameters, "kcsp": metadata,
 		}
 	default:
 		return nil, fmt.Errorf("%w: connector kind has no runtime adapter", ErrInvalidConnector)

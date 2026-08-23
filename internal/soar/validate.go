@@ -37,6 +37,7 @@ func DefaultActionCatalog() ActionCatalog {
 		"endpoint.isolate":              {Type: "endpoint.isolate", Level: 3, Reversible: true},
 		"endpoint.release":              {Type: "endpoint.release", Level: 3},
 		"identity.disable_account":      {Type: "identity.disable_account", Level: 4, Reversible: true},
+		"identity.enable_account":       {Type: "identity.enable_account", Level: 4},
 		"firewall.block_ip":             {Type: "firewall.block_ip", Level: 5, Reversible: true},
 		"firewall.unblock_ip":           {Type: "firewall.unblock_ip", Level: 5},
 		"threat_intel.indicator.submit": {Type: "threat_intel.indicator.submit", Level: 1},

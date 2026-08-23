@@ -11,6 +11,7 @@ const (
 	SOARConnectorKindNotification    = "NOTIFICATION_REST"
 	SOARConnectorKindEDRXDRREST      = "EDR_XDR_REST"
 	SOARConnectorKindEmailSMTP       = "EMAIL_SMTP"
+	SOARConnectorKindLDAPDirectory   = "LDAP_DIRECTORY"
 )
 
 const (

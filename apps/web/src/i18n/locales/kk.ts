@@ -146,6 +146,8 @@ export const kk = {
     multiSelectHint: "Осы коннекторға рұқсат етілген бір немесе бірнеше әрекетті таңдаңыз.", provider: "Провайдер келісімшарты", channel: "Арна",
     apiKeyHeader: "API key тақырыбы", healthMethod: "Тексеру әдісі", healthPath: "Тексеру жолы", expectedStatus: "Күтілетін HTTP күйі",
     fromAddress: "Жіберуші мекенжайы", heloName: "SMTP HELO атауы",
+    directoryType: "Каталог түрі", baseDN: "Каталогтың негізгі DN мәні", accountAttribute: "Тіркелгі атрибуты",
+    disabledAttribute: "Бұғаттау атрибуты", disabledValue: "Бұғатталған мән", enabledValue: "Белсенді мән (бос болса атрибут жойылады)",
     timeoutSeconds: "Күту уақыты (секунд)", rateLimit: "Минутына шақыру", healthDetail: "Күй мәліметтері",
     connectionTests: "Қосылым тексерістері", noConnectionTests: "Қосылым тексерістері әлі орындалмады", testQueued: "Қосылым тексерісі кезекке қойылды.",
     connectorSaved: "Коннектор баптауы сақталды. LIVE орындау алдында қосылымды тексеріңіз.", connectorDisabled: "Коннектор өшірілді.",

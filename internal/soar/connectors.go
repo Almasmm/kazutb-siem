@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	goldap "github.com/go-ldap/ldap/v3"
 	"github.com/kcsp/platform/internal/core"
 )
 
@@ -58,6 +59,7 @@ type ConnectorPatch struct {
 var secretEnvironmentName = regexp.MustCompile(`^KCSP_CONNECTOR_SECRET_[A-Z0-9_]{1,96}$`)
 var connectorHeaderName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]{0,63}$`)
 var connectorHELOName = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)
+var connectorLDAPAttribute = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]{0,63}$`)
 
 func (s *Service) CreateConnector(ctx context.Context, tenantID, actor string,
 	draft ConnectorDraft) (core.SOARConnector, error) {
@@ -231,8 +233,9 @@ func normalizeConnectorDraft(draft ConnectorDraft) (core.SOARConnector, error) {
 		endpoint.Fragment != "" || endpoint.RawQuery != "" {
 		return core.SOARConnector{}, fmt.Errorf("%w: endpoint scheme is unsupported or URL contains credentials, query, or fragment", ErrInvalidConnector)
 	}
-	if strings.EqualFold(endpoint.Scheme, "smtps") && endpoint.Path != "" && endpoint.Path != "/" {
-		return core.SOARConnector{}, fmt.Errorf("%w: SMTPS endpoint must not contain a path", ErrInvalidConnector)
+	if (strings.EqualFold(endpoint.Scheme, "smtps") || strings.EqualFold(endpoint.Scheme, "ldaps")) &&
+		endpoint.Path != "" && endpoint.Path != "/" {
+		return core.SOARConnector{}, fmt.Errorf("%w: native protocol endpoint must not contain a path", ErrInvalidConnector)
 	}
 	switch draft.AuthType {
 	case core.SOARConnectorAuthNone, core.SOARConnectorAuthBearer, core.SOARConnectorAuthHMAC,
@@ -321,31 +324,34 @@ func normalizeConnectorSettings(kind, authType string, settings map[string]inter
 		settings = map[string]interface{}{}
 	}
 	result := map[string]interface{}{}
-	if kind != core.SOARConnectorKindEmailSMTP {
+	if kind != core.SOARConnectorKindEmailSMTP && kind != core.SOARConnectorKindLDAPDirectory {
 		result["health_method"] = "HEAD"
 		result["expected_status"] = 200
 	}
 	if kind == core.SOARConnectorKindNotification {
 		result["provider"] = "GENERIC"
 	}
+	if kind == core.SOARConnectorKindLDAPDirectory {
+		result["directory_type"] = "LDAP"
+	}
 	for key, value := range settings {
 		switch key {
 		case "health_method":
 			method, ok := value.(string)
 			method = strings.ToUpper(strings.TrimSpace(method))
-			if !ok || kind == core.SOARConnectorKindEmailSMTP || (method != "HEAD" && method != "GET") {
+			if !ok || kind == core.SOARConnectorKindEmailSMTP || kind == core.SOARConnectorKindLDAPDirectory || (method != "HEAD" && method != "GET") {
 				return nil, fmt.Errorf("%w: health_method must be HEAD or GET", ErrInvalidConnector)
 			}
 			result[key] = method
 		case "health_path":
 			path, ok := value.(string)
-			if !ok || kind == core.SOARConnectorKindEmailSMTP || len(path) > 512 || (path != "" && (!strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//"))) {
+			if !ok || kind == core.SOARConnectorKindEmailSMTP || kind == core.SOARConnectorKindLDAPDirectory || len(path) > 512 || (path != "" && (!strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//"))) {
 				return nil, fmt.Errorf("%w: health_path must be an absolute URL path", ErrInvalidConnector)
 			}
 			result[key] = path
 		case "expected_status":
 			status, ok := configInt(settings, key)
-			if !ok || kind == core.SOARConnectorKindEmailSMTP || status < 100 || status > 599 {
+			if !ok || kind == core.SOARConnectorKindEmailSMTP || kind == core.SOARConnectorKindLDAPDirectory || status < 100 || status > 599 {
 				return nil, fmt.Errorf("%w: expected_status must be a valid HTTP status", ErrInvalidConnector)
 			}
 			result[key] = status
@@ -384,6 +390,33 @@ func normalizeConnectorSettings(kind, authType string, settings map[string]inter
 				return nil, fmt.Errorf("%w: SMTP helo_name is invalid", ErrInvalidConnector)
 			}
 			result[key] = helo
+		case "directory_type":
+			directoryType, ok := value.(string)
+			directoryType = strings.ToUpper(strings.TrimSpace(directoryType))
+			if !ok || kind != core.SOARConnectorKindLDAPDirectory || (directoryType != "LDAP" && directoryType != "ACTIVE_DIRECTORY") {
+				return nil, fmt.Errorf("%w: directory_type must be LDAP or ACTIVE_DIRECTORY", ErrInvalidConnector)
+			}
+			result[key] = directoryType
+		case "base_dn":
+			baseDN, ok := value.(string)
+			parsed, err := goldap.ParseDN(strings.TrimSpace(baseDN))
+			if !ok || err != nil || kind != core.SOARConnectorKindLDAPDirectory || len(parsed.RDNs) == 0 || len(parsed.String()) > 2048 {
+				return nil, fmt.Errorf("%w: LDAP base_dn is invalid", ErrInvalidConnector)
+			}
+			result[key] = parsed.String()
+		case "account_attribute", "disabled_attribute":
+			attribute, ok := value.(string)
+			attribute = strings.TrimSpace(attribute)
+			if !ok || kind != core.SOARConnectorKindLDAPDirectory || !connectorLDAPAttribute.MatchString(attribute) {
+				return nil, fmt.Errorf("%w: LDAP attribute name is invalid", ErrInvalidConnector)
+			}
+			result[key] = attribute
+		case "disabled_value", "enabled_value":
+			directoryValue, ok := value.(string)
+			if !ok || kind != core.SOARConnectorKindLDAPDirectory || len(directoryValue) > 512 || strings.ContainsAny(directoryValue, "\x00\r\n") || (key == "disabled_value" && directoryValue == "") {
+				return nil, fmt.Errorf("%w: LDAP account state value is invalid", ErrInvalidConnector)
+			}
+			result[key] = directoryValue
 		default:
 			return nil, fmt.Errorf("%w: unsupported or secret-bearing connector setting %q", ErrInvalidConnector, key)
 		}
@@ -398,6 +431,36 @@ func normalizeConnectorSettings(kind, authType string, settings map[string]inter
 	}
 	if kind == core.SOARConnectorKindEmailSMTP && result["from_address"] == nil {
 		return nil, fmt.Errorf("%w: SMTP connectors require from_address", ErrInvalidConnector)
+	}
+	if kind == core.SOARConnectorKindLDAPDirectory {
+		if result["base_dn"] == nil {
+			return nil, fmt.Errorf("%w: LDAP connectors require base_dn", ErrInvalidConnector)
+		}
+		directoryType, _ := result["directory_type"].(string)
+		if result["account_attribute"] == nil {
+			if directoryType == "ACTIVE_DIRECTORY" {
+				result["account_attribute"] = "sAMAccountName"
+			} else {
+				result["account_attribute"] = "uid"
+			}
+		}
+		if directoryType == "ACTIVE_DIRECTORY" {
+			for _, key := range []string{"disabled_attribute", "disabled_value", "enabled_value"} {
+				if _, configured := settings[key]; configured {
+					return nil, fmt.Errorf("%w: Active Directory account state uses userAccountControl", ErrInvalidConnector)
+				}
+			}
+		} else {
+			if result["disabled_attribute"] == nil {
+				result["disabled_attribute"] = "pwdAccountLockedTime"
+			}
+			if result["disabled_value"] == nil {
+				result["disabled_value"] = "000001010000Z"
+			}
+			if result["enabled_value"] == nil {
+				result["enabled_value"] = ""
+			}
+		}
 	}
 	payload, err := json.Marshal(result)
 	if err != nil || len(payload) > 16<<10 {

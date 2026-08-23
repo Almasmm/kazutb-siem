@@ -81,6 +81,7 @@ type ManagedConnectorExecutor struct {
 	secrets  SecretResolver
 	client   *http.Client
 	smtpDial smtpConnectorDialer
+	ldapDial ldapConnectorDialer
 }
 
 func NewManagedConnectorExecutor(store ConnectorActionStore, secrets SecretResolver,
@@ -149,6 +150,9 @@ func (e *ManagedConnectorExecutor) Execute(ctx context.Context, request ActionRe
 	}
 	if connector.Kind == core.SOARConnectorKindEmailSMTP {
 		return e.executeSMTPConnector(ctx, connector, request, secret)
+	}
+	if connector.Kind == core.SOARConnectorKindLDAPDirectory {
+		return e.executeLDAPConnector(ctx, connector, request, secret)
 	}
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, connector.Endpoint, bytes.NewReader(payload))
 	if err != nil {
@@ -252,6 +256,9 @@ func (e *ManagedConnectorExecutor) TestConnector(ctx context.Context,
 	}
 	if connector.Kind == core.SOARConnectorKindEmailSMTP {
 		return e.testSMTPConnector(ctx, connector, secret), nil
+	}
+	if connector.Kind == core.SOARConnectorKindLDAPDirectory {
+		return e.testLDAPConnector(ctx, connector, secret), nil
 	}
 	endpoint, err := connectorHealthURL(connector)
 	if err != nil {
