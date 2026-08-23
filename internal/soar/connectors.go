@@ -55,6 +55,7 @@ type ConnectorPatch struct {
 }
 
 var secretEnvironmentName = regexp.MustCompile(`^KCSP_CONNECTOR_SECRET_[A-Z0-9_]{1,96}$`)
+var connectorHeaderName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]{0,63}$`)
 
 func (s *Service) CreateConnector(ctx context.Context, tenantID, actor string,
 	draft ConnectorDraft) (core.SOARConnector, error) {
@@ -96,7 +97,7 @@ func (s *Service) Connectors(ctx context.Context, tenantID string,
 	}
 	filter.Kind = strings.ToUpper(strings.TrimSpace(filter.Kind))
 	filter.State = strings.ToUpper(strings.TrimSpace(filter.State))
-	if filter.Kind != "" && filter.Kind != core.SOARConnectorKindWebhook {
+	if _, ok := connectorProfileFor(filter.Kind); filter.Kind != "" && !ok {
 		return nil, fmt.Errorf("%w: unsupported connector kind", ErrInvalidConnector)
 	}
 	switch filter.State {
@@ -219,8 +220,9 @@ func normalizeConnectorDraft(draft ConnectorDraft) (core.SOARConnector, error) {
 	draft.Endpoint = strings.TrimSpace(draft.Endpoint)
 	draft.AuthType = strings.ToUpper(strings.TrimSpace(draft.AuthType))
 	draft.SecretRef = strings.TrimSpace(draft.SecretRef)
-	if len(draft.Name) < 2 || len(draft.Name) > 160 || draft.Kind != core.SOARConnectorKindWebhook {
-		return core.SOARConnector{}, fmt.Errorf("%w: a 2-160 character name and WEBHOOK kind are required", ErrInvalidConnector)
+	profile, kindSupported := connectorProfileFor(draft.Kind)
+	if len(draft.Name) < 2 || len(draft.Name) > 160 || !kindSupported {
+		return core.SOARConnector{}, fmt.Errorf("%w: a 2-160 character name and supported connector kind are required", ErrInvalidConnector)
 	}
 	endpoint, err := url.Parse(draft.Endpoint)
 	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil ||
@@ -228,20 +230,24 @@ func normalizeConnectorDraft(draft ConnectorDraft) (core.SOARConnector, error) {
 		return core.SOARConnector{}, fmt.Errorf("%w: endpoint must be an absolute HTTPS URL without credentials, query, or fragment", ErrInvalidConnector)
 	}
 	switch draft.AuthType {
-	case core.SOARConnectorAuthNone, core.SOARConnectorAuthBearer, core.SOARConnectorAuthHMAC:
+	case core.SOARConnectorAuthNone, core.SOARConnectorAuthBearer, core.SOARConnectorAuthHMAC,
+		core.SOARConnectorAuthBasic, core.SOARConnectorAuthAPIKey:
 	default:
 		return core.SOARConnector{}, fmt.Errorf("%w: unsupported connector authentication", ErrInvalidConnector)
+	}
+	if draft.AuthType == core.SOARConnectorAuthNone && !profile.AllowAnonymous {
+		return core.SOARConnector{}, fmt.Errorf("%w: this connector kind requires bound authentication", ErrInvalidConnector)
 	}
 	if draft.SecretRef != "" {
 		if err := validateConnectorSecretRef(draft.SecretRef); err != nil {
 			return core.SOARConnector{}, err
 		}
 	}
-	actions, err := normalizeConnectorActions(draft.AllowedActions)
+	actions, err := normalizeConnectorActions(draft.Kind, draft.AllowedActions)
 	if err != nil {
 		return core.SOARConnector{}, err
 	}
-	settings, err := normalizeConnectorSettings(draft.Settings)
+	settings, err := normalizeConnectorSettings(draft.Kind, draft.AuthType, draft.Settings)
 	if err != nil {
 		return core.SOARConnector{}, err
 	}
@@ -278,13 +284,16 @@ func normalizeConnectorDraft(draft ConnectorDraft) (core.SOARConnector, error) {
 	}, nil
 }
 
-func normalizeConnectorActions(values []string) ([]string, error) {
-	allowed := map[string]bool{"kcsp.ticket.create": true, "kcsp.notification.send": true}
+func normalizeConnectorActions(kind string, values []string) ([]string, error) {
+	profile, ok := connectorProfileFor(kind)
+	if !ok {
+		return nil, fmt.Errorf("%w: unsupported connector kind", ErrInvalidConnector)
+	}
 	unique := map[string]bool{}
 	for _, value := range values {
 		value = strings.TrimSpace(value)
-		if !allowed[value] {
-			return nil, fmt.Errorf("%w: WEBHOOK connectors only support registered A1/A2 actions", ErrInvalidConnector)
+		if !profile.Actions[value] {
+			return nil, fmt.Errorf("%w: action %q is unsupported by %s connectors", ErrInvalidConnector, value, kind)
 		}
 		unique[value] = true
 	}
@@ -299,11 +308,14 @@ func normalizeConnectorActions(values []string) ([]string, error) {
 	return result, nil
 }
 
-func normalizeConnectorSettings(settings map[string]interface{}) (map[string]interface{}, error) {
+func normalizeConnectorSettings(kind, authType string, settings map[string]interface{}) (map[string]interface{}, error) {
 	if settings == nil {
 		settings = map[string]interface{}{}
 	}
 	result := map[string]interface{}{"health_method": "HEAD", "expected_status": 200}
+	if kind == core.SOARConnectorKindNotification {
+		result["provider"] = "GENERIC"
+	}
 	for key, value := range settings {
 		switch key {
 		case "health_method":
@@ -325,15 +337,54 @@ func normalizeConnectorSettings(settings map[string]interface{}) (map[string]int
 				return nil, fmt.Errorf("%w: expected_status must be a valid HTTP status", ErrInvalidConnector)
 			}
 			result[key] = status
+		case "api_key_header":
+			header, ok := value.(string)
+			header = strings.TrimSpace(header)
+			if !ok || authType != core.SOARConnectorAuthAPIKey || !connectorHeaderName.MatchString(header) || forbiddenConnectorHeader(header) {
+				return nil, fmt.Errorf("%w: api_key_header is invalid or unavailable for this auth type", ErrInvalidConnector)
+			}
+			result[key] = header
+		case "provider":
+			provider, ok := value.(string)
+			provider = strings.ToUpper(strings.TrimSpace(provider))
+			if !ok || kind != core.SOARConnectorKindNotification || (provider != "GENERIC" && provider != "SLACK" && provider != "TEAMS") {
+				return nil, fmt.Errorf("%w: notification provider must be GENERIC, SLACK, or TEAMS", ErrInvalidConnector)
+			}
+			result[key] = provider
+		case "channel":
+			channel, ok := value.(string)
+			channel = strings.TrimSpace(channel)
+			if !ok || kind != core.SOARConnectorKindNotification || channel == "" || len(channel) > 200 || strings.ContainsAny(channel, "\r\n") {
+				return nil, fmt.Errorf("%w: notification channel is invalid", ErrInvalidConnector)
+			}
+			result[key] = channel
 		default:
 			return nil, fmt.Errorf("%w: unsupported or secret-bearing connector setting %q", ErrInvalidConnector, key)
 		}
+	}
+	if authType == core.SOARConnectorAuthAPIKey {
+		if _, ok := result["api_key_header"]; !ok {
+			result["api_key_header"] = "X-API-Key"
+		}
+	}
+	if result["provider"] == "SLACK" && result["channel"] == nil {
+		return nil, fmt.Errorf("%w: Slack notification connectors require a channel", ErrInvalidConnector)
 	}
 	payload, err := json.Marshal(result)
 	if err != nil || len(payload) > 16<<10 {
 		return nil, fmt.Errorf("%w: connector settings exceed safe bounds", ErrInvalidConnector)
 	}
 	return result, nil
+}
+
+func forbiddenConnectorHeader(value string) bool {
+	switch strings.ToLower(value) {
+	case "host", "content-length", "connection", "cookie", "set-cookie", "transfer-encoding",
+		"proxy-authorization", "proxy-authenticate", "idempotency-key", "x-kcsp-connector-id":
+		return true
+	default:
+		return strings.HasPrefix(strings.ToLower(value), "x-kcsp-")
+	}
 }
 
 func validateConnectorSecretRef(reference string) error {

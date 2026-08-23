@@ -31,13 +31,16 @@ type ActionCatalog map[string]ActionDescriptor
 
 func DefaultActionCatalog() ActionCatalog {
 	return ActionCatalog{
-		"kcsp.enrich.threat_intel":   {Type: "kcsp.enrich.threat_intel", Level: 0},
-		"kcsp.ticket.create":         {Type: "kcsp.ticket.create", Level: 1},
-		"kcsp.notification.send":     {Type: "kcsp.notification.send", Level: 2},
-		"endpoint.isolate":           {Type: "endpoint.isolate", Level: 3, Reversible: true},
-		"identity.disable_account":   {Type: "identity.disable_account", Level: 4, Reversible: true},
-		"firewall.block_ip":          {Type: "firewall.block_ip", Level: 5, Reversible: true},
-		"destructive.erase_evidence": {Type: "destructive.erase_evidence", Level: 6},
+		"kcsp.enrich.threat_intel":      {Type: "kcsp.enrich.threat_intel", Level: 0},
+		"kcsp.ticket.create":            {Type: "kcsp.ticket.create", Level: 1},
+		"kcsp.notification.send":        {Type: "kcsp.notification.send", Level: 2},
+		"endpoint.isolate":              {Type: "endpoint.isolate", Level: 3, Reversible: true},
+		"endpoint.release":              {Type: "endpoint.release", Level: 3},
+		"identity.disable_account":      {Type: "identity.disable_account", Level: 4, Reversible: true},
+		"firewall.block_ip":             {Type: "firewall.block_ip", Level: 5, Reversible: true},
+		"firewall.unblock_ip":           {Type: "firewall.unblock_ip", Level: 5},
+		"threat_intel.indicator.submit": {Type: "threat_intel.indicator.submit", Level: 1},
+		"destructive.erase_evidence":    {Type: "destructive.erase_evidence", Level: 6},
 	}
 }
 

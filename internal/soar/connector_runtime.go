@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -98,15 +99,18 @@ func (e *ManagedConnectorExecutor) Execute(ctx context.Context, request ActionRe
 			Code: "connector_unavailable", Detail: "managed connector runtime is unavailable", Permanent: true,
 		}
 	}
-	if request.Attempt.RiskLevel > 2 {
-		return ActionResult{}, &NodeError{
-			Code: "connector_policy_denied", Detail: "webhook connectors only execute A1/A2 actions", Permanent: true,
-		}
-	}
 	connector, err := e.store.GetSOARConnector(ctx, request.Attempt.TenantID, request.Attempt.ConnectorID)
 	if err != nil {
 		return ActionResult{}, &NodeError{
 			Code: "connector_not_found", Detail: "configured connector is unavailable", Permanent: true,
+		}
+	}
+	profile, profileExists := connectorProfileFor(connector.Kind)
+	descriptor, actionExists := DefaultActionCatalog()[request.Attempt.ActionType]
+	if !profileExists || !actionExists || !profile.Actions[request.Attempt.ActionType] ||
+		descriptor.Level != request.Attempt.RiskLevel || descriptor.Level >= 6 {
+		return ActionResult{}, &NodeError{
+			Code: "connector_policy_denied", Detail: "connector kind and server-side action risk policy do not match", Permanent: true,
 		}
 	}
 	if connector.State != core.SOARConnectorReady || connector.HealthStatus != core.SOARConnectorHealthHealthy {
@@ -123,16 +127,13 @@ func (e *ManagedConnectorExecutor) Execute(ctx context.Context, request ActionRe
 	if nodeError != nil {
 		return ActionResult{}, nodeError
 	}
-	payload, err := json.Marshal(map[string]interface{}{
-		"schema_version":  "1.0",
-		"action_type":     request.Attempt.ActionType,
-		"idempotency_key": request.Attempt.IdempotencyKey,
-		"execution_id":    request.Attempt.ExecutionID,
-		"parameters":      request.Attempt.Request,
-	})
-	if err != nil || len(payload) > 1<<20 {
+	if nodeError := validateResolvedConnectorAuthentication(connector, secret); nodeError != nil {
+		return ActionResult{}, nodeError
+	}
+	payload, err := buildConnectorPayload(connector, request)
+	if err != nil {
 		return ActionResult{}, &NodeError{
-			Code: "connector_payload_invalid", Detail: "connector action payload exceeds safe bounds", Permanent: true,
+			Code: "connector_payload_invalid", Detail: err.Error(), Permanent: true,
 		}
 	}
 	if err := e.store.ReserveSOARConnectorCall(
@@ -154,8 +155,10 @@ func (e *ManagedConnectorExecutor) Execute(ctx context.Context, request ActionRe
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("User-Agent", "KCSP-SOAR-Connector/1.0")
 	httpRequest.Header.Set("X-KCSP-Connector-ID", connector.ID)
+	httpRequest.Header.Set("X-KCSP-Connector-Kind", connector.Kind)
+	httpRequest.Header.Set("X-KCSP-Action", request.Attempt.ActionType)
 	httpRequest.Header.Set("Idempotency-Key", request.Attempt.IdempotencyKey)
-	applyConnectorAuthentication(httpRequest, connector.AuthType, secret, payload)
+	applyConnectorAuthentication(httpRequest, connector, secret, payload)
 	timeout := time.Duration(connector.TimeoutSeconds) * time.Second
 	if timeout <= 0 || timeout > time.Minute {
 		timeout = 10 * time.Second
@@ -193,7 +196,7 @@ func (e *ManagedConnectorExecutor) Execute(ctx context.Context, request ActionRe
 	verification := "ACKNOWLEDGED"
 	var responseObject map[string]interface{}
 	if len(body) > 0 && json.Unmarshal(body, &responseObject) == nil {
-		for _, key := range []string{"id", "ticket_id", "message_id"} {
+		for _, key := range []string{"id", "ticket_id", "message_id", "action_id", "job_id", "incident_id"} {
 			if value, ok := responseObject[key].(string); ok && len(value) <= 256 {
 				output[key] = value
 			}
@@ -210,6 +213,11 @@ func (e *ManagedConnectorExecutor) TestConnector(ctx context.Context,
 	if connector.State == core.SOARConnectorDisabled {
 		return ConnectorTestResult{
 			Status: core.SOARConnectorTestFailed, ErrorClass: "DISABLED", Detail: "connector is disabled",
+		}, nil
+	}
+	if _, ok := connectorProfileFor(connector.Kind); !ok {
+		return ConnectorTestResult{
+			Status: core.SOARConnectorTestFailed, ErrorClass: "CONFIGURATION", Detail: "connector kind has no runtime adapter",
 		}, nil
 	}
 	var secret string
@@ -233,6 +241,11 @@ func (e *ManagedConnectorExecutor) TestConnector(ctx context.Context,
 		}
 		secret = resolved
 	}
+	if nodeError := validateResolvedConnectorAuthentication(connector, secret); nodeError != nil {
+		return ConnectorTestResult{
+			Status: core.SOARConnectorTestCredentials, ErrorClass: "CREDENTIALS_INVALID", Detail: nodeError.Detail,
+		}, nil
+	}
 	endpoint, err := connectorHealthURL(connector)
 	if err != nil {
 		return ConnectorTestResult{
@@ -252,6 +265,10 @@ func (e *ManagedConnectorExecutor) TestConnector(ctx context.Context,
 	switch connector.AuthType {
 	case core.SOARConnectorAuthBearer:
 		request.Header.Set("Authorization", "Bearer "+secret)
+	case core.SOARConnectorAuthBasic:
+		request.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(secret)))
+	case core.SOARConnectorAuthAPIKey:
+		request.Header.Set(connectorAPIKeyHeader(connector), secret)
 	case core.SOARConnectorAuthHMAC:
 		timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
 		message := timestamp + "\n" + method + "\n" + endpoint.EscapedPath()
@@ -333,10 +350,14 @@ func connectorAllowsAction(connector core.SOARConnector, action string) bool {
 	return false
 }
 
-func applyConnectorAuthentication(request *http.Request, authType, secret string, payload []byte) {
-	switch authType {
+func applyConnectorAuthentication(request *http.Request, connector core.SOARConnector, secret string, payload []byte) {
+	switch connector.AuthType {
 	case core.SOARConnectorAuthBearer:
 		request.Header.Set("Authorization", "Bearer "+secret)
+	case core.SOARConnectorAuthBasic:
+		request.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(secret)))
+	case core.SOARConnectorAuthAPIKey:
+		request.Header.Set(connectorAPIKeyHeader(connector), secret)
 	case core.SOARConnectorAuthHMAC:
 		timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
 		bodyHash := sha256.Sum256(payload)
@@ -347,6 +368,29 @@ func applyConnectorAuthentication(request *http.Request, authType, secret string
 		request.Header.Set("X-KCSP-Timestamp", timestamp)
 		request.Header.Set("X-KCSP-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 	}
+}
+
+func validateResolvedConnectorAuthentication(connector core.SOARConnector, secret string) *NodeError {
+	if connector.AuthType == core.SOARConnectorAuthNone {
+		return nil
+	}
+	if secret == "" || len(secret) > 16<<10 {
+		return &NodeError{Code: "connector_credentials_invalid", Detail: "connector credential is empty or exceeds safe bounds", Permanent: true}
+	}
+	if connector.AuthType == core.SOARConnectorAuthBasic {
+		parts := strings.SplitN(secret, ":", 2)
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || parts[1] == "" {
+			return &NodeError{Code: "connector_credentials_invalid", Detail: "BASIC credential must use a non-empty username:password value", Permanent: true}
+		}
+	}
+	return nil
+}
+
+func connectorAPIKeyHeader(connector core.SOARConnector) string {
+	if header, ok := connector.Settings["api_key_header"].(string); ok && header != "" {
+		return header
+	}
+	return "X-API-Key"
 }
 
 func connectorHTTPStatusError(status int) *NodeError {

@@ -3,13 +3,21 @@ package core
 import "time"
 
 const (
-	SOARConnectorKindWebhook = "WEBHOOK"
+	SOARConnectorKindWebhook         = "WEBHOOK"
+	SOARConnectorKindFirewallREST    = "FIREWALL_REST"
+	SOARConnectorKindITSMREST        = "ITSM_REST"
+	SOARConnectorKindKCSPAPI         = "KCSP_API"
+	SOARConnectorKindThreatIntelREST = "THREAT_INTEL_REST"
+	SOARConnectorKindNotification    = "NOTIFICATION_REST"
+	SOARConnectorKindEDRXDRREST      = "EDR_XDR_REST"
 )
 
 const (
 	SOARConnectorAuthNone   = "NONE"
 	SOARConnectorAuthBearer = "BEARER"
 	SOARConnectorAuthHMAC   = "HMAC_SHA256"
+	SOARConnectorAuthBasic  = "BASIC"
+	SOARConnectorAuthAPIKey = "API_KEY"
 )
 
 const (
