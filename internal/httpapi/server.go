@@ -139,6 +139,7 @@ func (s *Server) routes() {
 	}
 	if s.gateway != nil {
 		s.mux.Handle("POST /api/v1/ingest/events", s.protect("siem.events.ingest", http.HandlerFunc(s.queueEvent)))
+		s.mux.Handle("POST /api/v1/ingest/events/batch", s.protect("siem.events.ingest", http.HandlerFunc(s.queueEventBatch)))
 	}
 	if s.collectors != nil {
 		s.mux.Handle("GET /api/v1/collectors", s.protect("platform.collectors.read", http.HandlerFunc(s.listCollectors)))
@@ -473,23 +474,9 @@ func (s *Server) queueEvent(w http.ResponseWriter, r *http.Request) {
 		s.handleDecodeError(w, r, "Invalid event payload", err)
 		return
 	}
-	principal := principalFrom(r.Context())
-	collectorID := principal.ID
-	if s.collectors != nil {
-		collector, lookupErr := s.collectors.CollectorBySubject(r.Context(), tenantFrom(r.Context()), principal.ID)
-		switch {
-		case lookupErr == nil && collector.State == "ACTIVE":
-			collectorID = collector.ID
-		case lookupErr == nil:
-			s.problem(w, r, http.StatusForbidden, "collector_revoked", "Collector revoked", "The collector identity is not active.")
-			return
-		case s.requireCollectors && errors.Is(lookupErr, store.ErrNotFound):
-			s.problem(w, r, http.StatusForbidden, "collector_not_registered", "Collector not registered", "The service identity is not bound to an active collector in this tenant.")
-			return
-		case s.requireCollectors:
-			s.handleDomainError(w, r, lookupErr)
-			return
-		}
+	collectorID, ok := s.ingestCollectorID(w, r)
+	if !ok {
+		return
 	}
 	format := strings.TrimSpace(r.Header.Get("X-KCSP-Event-Format"))
 	var receipt ingest.Receipt
@@ -515,6 +502,79 @@ func (s *Server) queueEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.json(w, http.StatusAccepted, receipt)
+}
+
+func (s *Server) queueEventBatch(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, ingest.MaxBatchRequestBytes)
+	var request ingest.RawBatchRequest
+	if err := decodeJSON(w, r, &request); err != nil {
+		s.handleDecodeError(w, r, "Invalid event batch", err)
+		return
+	}
+	if len(request.Items) == 0 || len(request.Items) > ingest.MaxBatchEvents {
+		s.problem(w, r, http.StatusBadRequest, "validation_error", "Invalid event batch", fmt.Sprintf("Batch must contain between 1 and %d events.", ingest.MaxBatchEvents))
+		return
+	}
+	collectorID, ok := s.ingestCollectorID(w, r)
+	if !ok {
+		return
+	}
+	var payloadBytes int64
+	for _, item := range request.Items {
+		payloadBytes += int64(len(item.Payload))
+		if len(item.Payload) == 0 || len(item.Payload) > ingest.MaxEventBytes {
+			s.problem(w, r, http.StatusBadRequest, "validation_error", "Invalid event batch", fmt.Sprintf("Each event payload must contain up to %d bytes.", ingest.MaxEventBytes))
+			return
+		}
+	}
+	if s.licenses != nil {
+		if err := s.licenses.AuthorizeIngestBatch(r.Context(), tenantFrom(r.Context()), len(request.Items), payloadBytes); err != nil {
+			s.handleLicenseAuthorization(w, r, err)
+			return
+		}
+	}
+	receipts := make([]ingest.Receipt, 0, len(request.Items))
+	for _, item := range request.Items {
+		var receipt ingest.Receipt
+		var err error
+		if strings.TrimSpace(item.Format) == "" || item.Format == ingest.FormatCanonicalJSON {
+			receipt, err = s.gateway.SubmitJSON(r.Context(), tenantFrom(r.Context()), collectorID, item.Payload)
+		} else {
+			receipt, err = s.gateway.SubmitRaw(r.Context(), tenantFrom(r.Context()), collectorID, ingest.RawSubmission{
+				Format: item.Format, ContentType: item.ContentType, EventID: item.EventID, EventTimestamp: item.EventTimestamp,
+				SourceID: item.SourceID, SourceAddress: item.SourceAddress, Payload: item.Payload,
+			})
+		}
+		if err != nil {
+			w.Header().Set("X-KCSP-Batch-Accepted", strconv.Itoa(len(receipts)))
+			s.handleDomainError(w, r, err)
+			return
+		}
+		receipts = append(receipts, receipt)
+	}
+	s.json(w, http.StatusAccepted, ingest.RawBatchReceipt{Receipts: receipts})
+}
+
+func (s *Server) ingestCollectorID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	principal := principalFrom(r.Context())
+	collectorID := principal.ID
+	if s.collectors == nil {
+		return collectorID, true
+	}
+	collector, lookupErr := s.collectors.CollectorBySubject(r.Context(), tenantFrom(r.Context()), principal.ID)
+	switch {
+	case lookupErr == nil && collector.State == "ACTIVE":
+		return collector.ID, true
+	case lookupErr == nil:
+		s.problem(w, r, http.StatusForbidden, "collector_revoked", "Collector revoked", "The collector identity is not active.")
+	case s.requireCollectors && errors.Is(lookupErr, store.ErrNotFound):
+		s.problem(w, r, http.StatusForbidden, "collector_not_registered", "Collector not registered", "The service identity is not bound to an active collector in this tenant.")
+	case s.requireCollectors:
+		s.handleDomainError(w, r, lookupErr)
+	default:
+		return collectorID, true
+	}
+	return "", false
 }
 
 func (s *Server) listCollectors(w http.ResponseWriter, r *http.Request) {

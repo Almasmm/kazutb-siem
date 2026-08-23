@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kcsp/platform/internal/agent"
+	"github.com/kcsp/platform/internal/ingest"
 )
 
 const agentVersion = "0.4.0"
@@ -86,6 +87,13 @@ func run(logger *slog.Logger) error {
 	defer stop()
 	pollInterval := envDuration("KCSP_AGENT_POLL_INTERVAL", 2*time.Second)
 	batchSize := int(envInt64("KCSP_AGENT_BATCH_SIZE", 100))
+	if batchSize > ingest.MaxBatchEvents {
+		batchSize = ingest.MaxBatchEvents
+	}
+	batchMaxBytes := envInt64("KCSP_AGENT_BATCH_MAX_BYTES", 8<<20)
+	if batchMaxBytes > ingest.MaxBatchRequestBytes {
+		batchMaxBytes = ingest.MaxBatchRequestBytes
+	}
 	heartbeatInterval := envDuration("KCSP_AGENT_HEARTBEAT_INTERVAL", 30*time.Second)
 	credentialRotationBefore := envDuration("KCSP_AGENT_CREDENTIAL_ROTATE_BEFORE", 24*time.Hour)
 	nextCredentialRotationAttempt := time.Time{}
@@ -122,7 +130,7 @@ func run(logger *slog.Logger) error {
 			}
 			nextHeartbeat = time.Now().Add(heartbeatInterval)
 		}
-		if err := flush(ctx, queue, forwarder, batchSize); err != nil {
+		if err := flush(ctx, queue, forwarder, batchSize, batchMaxBytes); err != nil {
 			depth, bytes, _ := queue.Depth()
 			logger.Warn("KCSP gateway unavailable; events remain on disk", "error", err, "queue_depth", depth, "queue_bytes", bytes)
 		}
@@ -246,15 +254,33 @@ func windowsEventChannels() []string {
 	return channels
 }
 
-func flush(ctx context.Context, queue *agent.DiskQueue, forwarder *agent.Forwarder, batchSize int) error {
+func flush(ctx context.Context, queue *agent.DiskQueue, forwarder *agent.Forwarder, batchSize int, maximumBytes int64) error {
 	items, err := queue.Peek(batchSize)
 	if err != nil {
 		return err
 	}
+	selected := make([]agent.QueueItem, 0, len(items))
+	events := make([]agent.Event, 0, len(items))
+	var estimatedBytes int64
 	for _, item := range items {
-		if _, err := forwarder.Send(ctx, item.Event); err != nil {
-			return err
+		estimate := int64(len(item.Event.Payload))*4/3 + 1024
+		if estimate > maximumBytes {
+			return fmt.Errorf("queued event %s exceeds configured batch byte limit", item.Event.EventID)
 		}
+		if len(selected) > 0 && estimatedBytes+estimate > maximumBytes {
+			break
+		}
+		selected = append(selected, item)
+		events = append(events, item.Event)
+		estimatedBytes += estimate
+	}
+	if len(events) == 0 {
+		return nil
+	}
+	if _, err := forwarder.SendBatch(ctx, events); err != nil {
+		return err
+	}
+	for _, item := range selected {
 		if err := queue.Ack(item); err != nil {
 			return err
 		}

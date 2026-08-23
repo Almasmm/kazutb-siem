@@ -238,6 +238,44 @@ func (s *Service) Authorize(ctx context.Context, tenantID, permission, method st
 	return nil
 }
 
+func (s *Service) AuthorizeIngestBatch(ctx context.Context, tenantID string, eventCount int, payloadBytes int64) error {
+	if eventCount < 1 || eventCount > ingestBatchMaximum || payloadBytes < 0 {
+		return fmt.Errorf("%w: invalid ingest batch dimensions", ErrQuotaExceeded)
+	}
+	if err := s.Authorize(ctx, tenantID, "siem.events.ingest", http.MethodPost); err != nil {
+		return err
+	}
+	record, found, err := s.repository.CurrentLicense(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	if !found && (s.profile == "development" || s.profile == "test") {
+		record = developmentLicense(tenantID, s.now())
+		found = true
+	}
+	if !found {
+		return ErrLicenseRestricted
+	}
+	overview, err := s.repository.Overview(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	limits := record.Payload.Limits
+	if limits.EventsPerDay > 0 && numeric(overview, "events_24h")+float64(eventCount) > float64(limits.EventsPerDay) {
+		return fmt.Errorf("%w: events_per_day maximum is %d", ErrQuotaExceeded, limits.EventsPerDay)
+	}
+	if limits.EPS > 0 && numeric(overview, "ingestion_eps", "ingest_rate_eps", "eps")+float64(eventCount) > float64(limits.EPS) {
+		return fmt.Errorf("%w: eps maximum is %d", ErrQuotaExceeded, limits.EPS)
+	}
+	batchGB := float64(payloadBytes) / float64(1<<30)
+	if limits.GBPerDay > 0 && numeric(overview, "ingested_gb_24h", "gb_24h")+batchGB > limits.GBPerDay {
+		return fmt.Errorf("%w: gb_per_day maximum is %.2f", ErrQuotaExceeded, limits.GBPerDay)
+	}
+	return nil
+}
+
+const ingestBatchMaximum = 500
+
 // ValidateRetention ensures every configured retention tier stays within the
 // active tenant license. A zero limit means the issuer did not impose a cap.
 func (s *Service) ValidateRetention(ctx context.Context, tenantID string, rawDays, normalizedDays, findingsDays, evidenceDays int) error {

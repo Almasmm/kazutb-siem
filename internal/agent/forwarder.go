@@ -36,6 +36,7 @@ type ForwarderConfig struct {
 
 type Forwarder struct {
 	endpoint          string
+	batchEndpoint     string
 	heartbeatEndpoint string
 	tenantID          string
 	tokenSource       bearerTokenSource
@@ -93,8 +94,9 @@ func NewForwarder(config ForwarderConfig) (*Forwarder, error) {
 	}
 	baseURL := strings.TrimRight(serverURL.String(), "/")
 	return &Forwarder{
-		endpoint: baseURL + "/api/v1/ingest/events", heartbeatEndpoint: baseURL + "/api/v1/collectors/heartbeat",
-		tenantID: strings.TrimSpace(config.TenantID), tokenSource: tokenSource, client: client,
+		endpoint: baseURL + "/api/v1/ingest/events", batchEndpoint: baseURL + "/api/v1/ingest/events/batch",
+		heartbeatEndpoint: baseURL + "/api/v1/collectors/heartbeat",
+		tenantID:          strings.TrimSpace(config.TenantID), tokenSource: tokenSource, client: client,
 	}, nil
 }
 
@@ -169,6 +171,58 @@ func (f *Forwarder) Send(ctx context.Context, event Event) (ingest.Receipt, erro
 		return ingest.Receipt{}, fmt.Errorf("invalid KCSP receipt for event %s", event.EventID)
 	}
 	return receipt, nil
+}
+
+func (f *Forwarder) SendBatch(ctx context.Context, events []Event) ([]ingest.Receipt, error) {
+	if len(events) == 0 || len(events) > ingest.MaxBatchEvents {
+		return nil, fmt.Errorf("agent batch must contain between 1 and %d events", ingest.MaxBatchEvents)
+	}
+	batch := ingest.RawBatchRequest{Items: make([]ingest.RawBatchItem, len(events))}
+	for index, event := range events {
+		batch.Items[index] = ingest.RawBatchItem{
+			Format: event.Format, ContentType: event.ContentType, EventID: event.EventID,
+			EventTimestamp: event.EventTimestamp, SourceID: event.SourceID, SourceAddress: event.SourceAddress,
+			Payload: event.Payload,
+		}
+	}
+	body, err := json.Marshal(batch)
+	if err != nil {
+		return nil, fmt.Errorf("encode agent ingest batch: %w", err)
+	}
+	if len(body) > ingest.MaxBatchRequestBytes {
+		return nil, fmt.Errorf("encoded agent ingest batch exceeds %d bytes", ingest.MaxBatchRequestBytes)
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, f.batchEndpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create batch ingest request: %w", err)
+	}
+	if err := f.authorize(ctx, request); err != nil {
+		return nil, err
+	}
+	request.Header.Set("X-KCSP-Tenant-ID", f.tenantID)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := f.client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("send event batch to KCSP: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		responseBody, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return nil, fmt.Errorf("KCSP batch ingest returned %d: %s", response.StatusCode, strings.TrimSpace(string(responseBody)))
+	}
+	var receipt ingest.RawBatchReceipt
+	if err := json.NewDecoder(io.LimitReader(response.Body, 2<<20)).Decode(&receipt); err != nil {
+		return nil, fmt.Errorf("decode KCSP batch receipt: %w", err)
+	}
+	if len(receipt.Receipts) != len(events) {
+		return nil, fmt.Errorf("KCSP batch receipt count %d does not match submitted count %d", len(receipt.Receipts), len(events))
+	}
+	for index, item := range receipt.Receipts {
+		if item.Status != "QUEUED" || item.EventID != events[index].EventID {
+			return nil, fmt.Errorf("invalid KCSP batch receipt at index %d for event %s", index, events[index].EventID)
+		}
+	}
+	return receipt.Receipts, nil
 }
 
 func (f *Forwarder) authorize(ctx context.Context, request *http.Request) error {

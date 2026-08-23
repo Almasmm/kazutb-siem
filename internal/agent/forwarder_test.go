@@ -45,6 +45,41 @@ func TestForwarderSendsBoundRawEventAndRequiresQueueReceipt(t *testing.T) {
 	}
 }
 
+func TestForwarderSendsBoundBatchInOneRequest(t *testing.T) {
+	eventTime := time.Date(2026, 8, 23, 8, 9, 10, 0, time.UTC)
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path != "/api/v1/ingest/events/batch" || r.Header.Get("Authorization") != "Bearer service-token" || r.Header.Get("X-KCSP-Tenant-ID") != "tenant-a" {
+			t.Fatalf("unexpected batch request: %s headers=%v", r.URL.Path, r.Header)
+		}
+		var batch ingest.RawBatchRequest
+		if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
+			t.Fatal(err)
+		}
+		if len(batch.Items) != 2 || batch.Items[0].EventID != "event-1" || batch.Items[1].SourceID != "host:linux-01" || !batch.Items[0].EventTimestamp.Equal(eventTime) {
+			t.Fatalf("unexpected batch: %+v", batch)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(ingest.RawBatchReceipt{Receipts: []ingest.Receipt{
+			{EventID: "event-1", Status: "QUEUED"}, {EventID: "event-2", Status: "QUEUED"},
+		}})
+	}))
+	defer server.Close()
+	forwarder, err := NewForwarder(ForwarderConfig{ServerURL: server.URL, TenantID: "tenant-a", AccessToken: "service-token", AllowInsecureHTTP: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer forwarder.Close()
+	receipts, err := forwarder.SendBatch(t.Context(), []Event{
+		{Format: ingest.FormatSysmonXML, ContentType: "application/xml", EventID: "event-1", EventTimestamp: eventTime, Payload: []byte("<Event />")},
+		{Format: ingest.FormatJournaldJSON, ContentType: "application/json", EventID: "event-2", SourceID: "host:linux-01", Payload: []byte(`{"MESSAGE":"test"}`)},
+	})
+	if err != nil || len(receipts) != 2 || requests != 1 {
+		t.Fatalf("batch forwarding failed: receipts=%+v requests=%d err=%v", receipts, requests, err)
+	}
+}
+
 func TestForwarderRejectsPlainHTTPByDefault(t *testing.T) {
 	if _, err := NewForwarder(ForwarderConfig{ServerURL: "http://kcsp.local", TenantID: "tenant", AccessToken: "token"}); err == nil {
 		t.Fatal("expected plain HTTP to be rejected")

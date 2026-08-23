@@ -103,6 +103,38 @@ func TestDevelopmentProfileIsExplicitlyEntitled(t *testing.T) {
 	}
 }
 
+func TestBatchIngestQuotaIncludesPendingEventsAndBytes(t *testing.T) {
+	now := time.Date(2026, 8, 23, 3, 0, 0, 0, time.UTC)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := newLicenseRepository(now)
+	payload := validPayload(now)
+	payload.Limits.EventsPerDay = 100
+	payload.Limits.EPS = 10
+	payload.Limits.GBPerDay = 1
+	service := NewService(repository, Config{Profile: "production", TrustedKeys: map[string]ed25519.PublicKey{"offline": publicKey}, Now: func() time.Time { return now }})
+	if _, _, err := service.Install(context.Background(), "tenant-a", "admin", InstallInput{Envelope: signLicense(t, "offline", payload, privateKey)}); err != nil {
+		t.Fatal(err)
+	}
+	repository.overview["tenant-a"] = map[string]interface{}{"events_24h": float64(99), "ingestion_eps": float64(0), "ingested_gb_24h": float64(0)}
+	if err := service.AuthorizeIngestBatch(context.Background(), "tenant-a", 2, 1024); !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("pending events did not enforce daily quota: %v", err)
+	}
+	repository.overview["tenant-a"] = map[string]interface{}{"events_24h": float64(0), "ingestion_eps": float64(5), "ingested_gb_24h": float64(0)}
+	if err := service.AuthorizeIngestBatch(context.Background(), "tenant-a", 6, 1024); !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("pending events did not enforce EPS quota: %v", err)
+	}
+	repository.overview["tenant-a"] = map[string]interface{}{"events_24h": float64(0), "ingestion_eps": float64(0), "ingested_gb_24h": float64(0.75)}
+	if err := service.AuthorizeIngestBatch(context.Background(), "tenant-a", 1, 300<<20); !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("pending bytes did not enforce GB quota: %v", err)
+	}
+	if err := service.AuthorizeIngestBatch(context.Background(), "tenant-a", 1, 1<<20); err != nil {
+		t.Fatalf("valid bounded batch was rejected: %v", err)
+	}
+}
+
 func TestTenantCatalogPaginationAndSuspension(t *testing.T) {
 	now := time.Date(2026, 8, 23, 3, 0, 0, 0, time.UTC)
 	repository := newLicenseRepository(now)
