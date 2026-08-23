@@ -13,10 +13,14 @@ import (
 
 func (s *Server) uploadEvidence(w http.ResponseWriter, r *http.Request) {
 	principal := principalFrom(r.Context())
+	requestID := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if requestID == "" {
+		requestID = requestIDFrom(r.Context())
+	}
 	item, duplicate, err := s.evidence.Upload(r.Context(), evidence.UploadInput{
-		TenantID: tenantFrom(r.Context()), RequestID: requestIDFrom(r.Context()), Actor: principal.ID,
+		TenantID: tenantFrom(r.Context()), RequestID: requestID, Actor: principal.ID,
 		Filename: r.Header.Get("X-KCSP-Filename"), ContentType: r.Header.Get("Content-Type"),
-		Description: r.Header.Get("X-KCSP-Description"), IncidentID: r.Header.Get("X-KCSP-Incident-ID"),
+		Description: r.Header.Get("X-KCSP-Description"), CaseID: r.Header.Get("X-KCSP-Case-ID"), IncidentID: r.Header.Get("X-KCSP-Incident-ID"),
 		AlertID: r.Header.Get("X-KCSP-Alert-ID"), EventID: r.Header.Get("X-KCSP-Event-ID"),
 		ExpectedSHA256: r.Header.Get("X-KCSP-SHA256"), Reader: r.Body,
 	})
@@ -41,7 +45,7 @@ func (s *Server) uploadEvidence(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listEvidence(w http.ResponseWriter, r *http.Request) {
 	items, err := s.evidence.List(r.Context(), tenantFrom(r.Context()), core.EvidenceFilter{
-		IncidentID: r.URL.Query().Get("incident_id"), AlertID: r.URL.Query().Get("alert_id"),
+		CaseID: r.URL.Query().Get("case_id"), IncidentID: r.URL.Query().Get("incident_id"), AlertID: r.URL.Query().Get("alert_id"),
 		EventID: r.URL.Query().Get("event_id"), Status: r.URL.Query().Get("status"), Limit: intQuery(r, "limit"),
 	})
 	if err != nil {

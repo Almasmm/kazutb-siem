@@ -6,6 +6,7 @@ type EvidenceItem struct {
 	ID              string                 `json:"evidence_id"`
 	TenantID        string                 `json:"tenant_id"`
 	RequestID       string                 `json:"request_id"`
+	CaseID          string                 `json:"case_id,omitempty"`
 	IncidentID      string                 `json:"incident_id,omitempty"`
 	AlertID         string                 `json:"alert_id,omitempty"`
 	EventID         string                 `json:"event_id,omitempty"`
@@ -54,6 +55,7 @@ type EvidenceCustodyEntry struct {
 }
 
 type EvidenceFilter struct {
+	CaseID     string
 	IncidentID string
 	AlertID    string
 	EventID    string

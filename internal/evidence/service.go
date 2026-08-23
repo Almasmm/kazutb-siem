@@ -44,6 +44,7 @@ type UploadInput struct {
 	Filename       string
 	ContentType    string
 	Description    string
+	CaseID         string
 	IncidentID     string
 	AlertID        string
 	EventID        string
@@ -74,6 +75,7 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (core.EvidenceI
 	input.RequestID = strings.TrimSpace(input.RequestID)
 	input.Actor = strings.TrimSpace(input.Actor)
 	input.Description = strings.TrimSpace(input.Description)
+	input.CaseID = strings.TrimSpace(input.CaseID)
 	input.IncidentID = strings.TrimSpace(input.IncidentID)
 	input.AlertID = strings.TrimSpace(input.AlertID)
 	input.EventID = strings.TrimSpace(input.EventID)
@@ -86,7 +88,7 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (core.EvidenceI
 		return core.EvidenceItem{}, false, err
 	}
 	if input.TenantID == "" || input.RequestID == "" || input.Actor == "" || input.Reader == nil ||
-		(input.IncidentID == "" && input.AlertID == "" && input.EventID == "") || len(input.Description) > 4000 {
+		(input.CaseID == "" && input.IncidentID == "" && input.AlertID == "" && input.EventID == "") || len(input.Description) > 4000 {
 		return core.EvidenceItem{}, false, fmt.Errorf("%w: tenant, request, actor, content and one investigation link are required", ErrInvalidEvidence)
 	}
 	temporary, err := os.CreateTemp("", "kcsp-evidence-*")
@@ -125,7 +127,7 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (core.EvidenceI
 	evidenceID := core.NewID("evd")
 	objectKey := evidenceObjectKey(input.TenantID, evidenceID, filename, now)
 	item := core.EvidenceItem{
-		ID: evidenceID, TenantID: input.TenantID, RequestID: input.RequestID, IncidentID: input.IncidentID,
+		ID: evidenceID, TenantID: input.TenantID, RequestID: input.RequestID, CaseID: input.CaseID, IncidentID: input.IncidentID,
 		AlertID: input.AlertID, EventID: input.EventID, Filename: filename, ContentType: contentType,
 		Description: input.Description, Size: size, SHA256: digest, Bucket: s.blobs.Bucket(), ObjectKey: objectKey,
 		Status: "PENDING", RetainUntil: now.AddDate(0, 0, policy.EvidenceDays), Uploader: input.Actor,

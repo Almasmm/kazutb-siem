@@ -6,6 +6,7 @@ import type {
   AISOCRequestDto,
   ApiProblem,
   AuditDto,
+  CaseDto,
   CollectorDto,
   EventDto,
   EvidenceCustodyResponse,
@@ -305,6 +306,30 @@ export const api = {
   updateRetention: (payload: Pick<RetentionPolicyDto, "raw_days" | "normalized_days" | "findings_days" | "evidence_days" | "version">) =>
     request<RetentionPolicyDto>("/retention", { method: "PATCH", body: JSON.stringify(payload) }),
   healthReady: (signal?: AbortSignal) => publicRequest<HealthDto>("/health/ready", signal),
+  cases: (params?: Record<string, QueryValue>, signal?: AbortSignal) => getList<CaseDto>("/cases", params, signal),
+  case: (id: string, signal?: AbortSignal) => request<CaseDto>(`/cases/${encodeURIComponent(id)}`, { signal }),
+  createCase: (payload: Record<string, unknown>) => request<CaseDto>("/cases", { method: "POST", body: JSON.stringify(payload), headers: { "Idempotency-Key": crypto.randomUUID() } }),
+  updateCase: (id: string, payload: Record<string, unknown>) => request<CaseDto>(`/cases/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  addCaseComment: (id: string, body: string, version: number) => request<CaseDto>(`/cases/${encodeURIComponent(id)}/comments`, { method: "POST", body: JSON.stringify({ body, version }) }),
+  addCaseTask: (id: string, payload: Record<string, unknown>) => request<CaseDto>(`/cases/${encodeURIComponent(id)}/tasks`, { method: "POST", body: JSON.stringify(payload) }),
+  updateCaseTask: (id: string, taskID: string, payload: Record<string, unknown>) => request<CaseDto>(`/cases/${encodeURIComponent(id)}/tasks/${encodeURIComponent(taskID)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  addCaseParticipant: (id: string, payload: Record<string, unknown>) => request<CaseDto>(`/cases/${encodeURIComponent(id)}/participants`, { method: "POST", body: JSON.stringify(payload) }),
+  addCaseObservable: (id: string, payload: Record<string, unknown>) => request<CaseDto>(`/cases/${encodeURIComponent(id)}/observables`, { method: "POST", body: JSON.stringify(payload) }),
+  linkCaseIncident: (id: string, incidentID: string, version: number) => request<CaseDto>(`/cases/${encodeURIComponent(id)}/incidents`, { method: "POST", body: JSON.stringify({ incident_id: incidentID, version }) }),
+  uploadCaseEvidence: (caseID: string, file: File, description: string) => {
+    const filename = file.name.normalize("NFKD").replace(/[^\x20-\x7E]/g, "_").slice(0, 255) || "evidence.bin";
+    return request<EvidenceDto>("/evidence", {
+      method: "POST",
+      body: file,
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+        "X-KCSP-Filename": filename,
+        "X-KCSP-Description": description.slice(0, 4000),
+        "X-KCSP-Case-ID": caseID,
+        "Idempotency-Key": crypto.randomUUID(),
+      },
+    });
+  },
 };
 
 export const apiConfig = { base: API_BASE, get tenantId() { return getTenantId(); } };

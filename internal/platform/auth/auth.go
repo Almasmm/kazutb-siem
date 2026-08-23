@@ -41,12 +41,13 @@ func NewDemoAuthenticator() *DemoAuthenticator {
 		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage",
 		"platform.retention.read",
 		"soc.evidence.read",
+		"soc.cases.read",
 		"ti.indicators.read",
 		"soar.playbooks.read", "soar.connectors.read",
 		"ueba.read",
 		"ai.read", "ai.request",
 	}
-	l2 := append(append([]string{}, read...), "soc.alerts.manage", "soc.incidents.create", "soc.incidents.manage", "platform.audit.read", "soc.evidence.write", "soar.playbooks.execute", "soar.actions.approve", "ueba.feedback", "ai.decide")
+	l2 := append(append([]string{}, read...), "soc.alerts.manage", "soc.incidents.create", "soc.incidents.manage", "soc.cases.manage", "platform.audit.read", "soc.evidence.write", "soar.playbooks.execute", "soar.actions.approve", "ueba.feedback", "ai.decide")
 	return &DemoAuthenticator{tokens: map[string]Principal{
 		"kcsp-demo-l1":                 principal("user-soc-l1", "Айдана Сәрсен", "SOC L1", append(read, "soc.alerts.manage", "soc.incidents.create")),
 		"kcsp-demo-l2":                 principal("user-soc-l2", "Данияр Нұрлан", "SOC L2", l2),

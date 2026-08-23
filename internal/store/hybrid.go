@@ -236,6 +236,19 @@ func (h *Hybrid) VerifyEvidenceCustody(ctx context.Context, tenantID, evidenceID
 	return h.control.VerifyEvidenceCustody(ctx, tenantID, evidenceID)
 }
 
+func (h *Hybrid) CreateCase(ctx context.Context, item core.Case) (core.Case, bool, error) {
+	return h.control.CreateCase(ctx, item)
+}
+func (h *Hybrid) GetCase(ctx context.Context, tenantID, caseID string) (core.Case, error) {
+	return h.control.GetCase(ctx, tenantID, caseID)
+}
+func (h *Hybrid) ListCases(ctx context.Context, tenantID string, filter core.CaseFilter) ([]core.Case, error) {
+	return h.control.ListCases(ctx, tenantID, filter)
+}
+func (h *Hybrid) MutateCase(ctx context.Context, tenantID, caseID string, version int, mutate func(*core.Case) error) (core.Case, error) {
+	return h.control.MutateCase(ctx, tenantID, caseID, version, mutate)
+}
+
 func (h *Hybrid) CreateThreatIntelFeed(ctx context.Context, feed core.ThreatIntelFeed) (core.ThreatIntelFeed, error) {
 	return h.control.CreateThreatIntelFeed(ctx, feed)
 }

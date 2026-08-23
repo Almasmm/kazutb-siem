@@ -265,6 +265,7 @@ export interface EvidenceDto {
   evidence_id: string;
   tenant_id?: string;
   request_id?: string;
+  case_id?: string;
   incident_id?: string;
   alert_id?: string;
   event_id?: string;
@@ -593,4 +594,77 @@ export interface HealthDto {
   status?: string;
   ready?: boolean;
   [key: string]: unknown;
+}
+
+export interface CaseParticipantDto {
+  user_id: string;
+  role: string;
+  added_by: string;
+  added_at: string;
+}
+
+export interface CaseObservableDto {
+  observable_id: string;
+  type: string;
+  value: string;
+  source?: string;
+  added_by: string;
+  created_at: string;
+}
+
+export interface CaseTaskDto {
+  task_id: string;
+  title: string;
+  description?: string;
+  status: string;
+  assignee?: string;
+  due_at?: string;
+  created_by: string;
+  completed_by?: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+}
+
+export interface CaseCommentDto {
+  comment_id: string;
+  body: string;
+  author: string;
+  created_at: string;
+}
+
+export interface CaseHistoryDto {
+  history_id: string;
+  action: string;
+  message: string;
+  actor: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface CaseDto {
+  case_id: string;
+  tenant_id?: string;
+  title: string;
+  description?: string;
+  status: string;
+  severity: Severity;
+  owner: string;
+  closure_summary?: string;
+  incident_ids: string[];
+  evidence_ids: string[];
+  participants: CaseParticipantDto[];
+  observables: CaseObservableDto[];
+  tasks: CaseTaskDto[];
+  comments: CaseCommentDto[];
+  history: CaseHistoryDto[];
+  sla: { due_at: string; breached: boolean };
+  allowed_transitions: string[];
+  version: number;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+  closed_at?: string;
 }

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kcsp/platform/internal/aisoc"
+	"github.com/kcsp/platform/internal/cases"
 	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/detection"
 	"github.com/kcsp/platform/internal/evidence"
@@ -60,6 +61,7 @@ type Server struct {
 	soar              *soar.Service
 	ueba              *ueba.Service
 	aiSOC             *aisoc.Service
+	cases             *cases.Service
 }
 
 type Authenticator interface {
@@ -81,6 +83,7 @@ type Config struct {
 	SOARService                 *soar.Service
 	UEBAService                 *ueba.Service
 	AISOCService                *aisoc.Service
+	CasesService                *cases.Service
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -96,7 +99,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		collectors: config.CollectorRegistry, requireCollectors: config.RequireRegisteredCollectors,
 		detections: config.DetectionService, hunts: config.HuntStore, retention: config.RetentionStore,
 		evidence: config.EvidenceService, threatIntel: config.ThreatIntelService, soar: config.SOARService,
-		ueba: config.UEBAService, aiSOC: config.AISOCService,
+		ueba: config.UEBAService, aiSOC: config.AISOCService, cases: config.CasesService,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -156,6 +159,18 @@ func (s *Server) routes() {
 		s.mux.Handle("GET /api/v1/evidence/{evidenceID}/content", s.protect("soc.evidence.read", http.HandlerFunc(s.downloadEvidence)))
 		s.mux.Handle("POST /api/v1/evidence/{evidenceID}/verify", s.protect("soc.evidence.read", http.HandlerFunc(s.verifyEvidence)))
 		s.mux.Handle("GET /api/v1/evidence/{evidenceID}/custody", s.protect("soc.evidence.read", http.HandlerFunc(s.listEvidenceCustody)))
+	}
+	if s.cases != nil {
+		s.mux.Handle("GET /api/v1/cases", s.protect("soc.cases.read", http.HandlerFunc(s.listCases)))
+		s.mux.Handle("POST /api/v1/cases", s.protect("soc.cases.manage", http.HandlerFunc(s.createCase)))
+		s.mux.Handle("GET /api/v1/cases/{caseID}", s.protect("soc.cases.read", http.HandlerFunc(s.getCase)))
+		s.mux.Handle("PATCH /api/v1/cases/{caseID}", s.protect("soc.cases.manage", http.HandlerFunc(s.updateCase)))
+		s.mux.Handle("POST /api/v1/cases/{caseID}/comments", s.protect("soc.cases.manage", http.HandlerFunc(s.addCaseComment)))
+		s.mux.Handle("POST /api/v1/cases/{caseID}/tasks", s.protect("soc.cases.manage", http.HandlerFunc(s.addCaseTask)))
+		s.mux.Handle("PATCH /api/v1/cases/{caseID}/tasks/{taskID}", s.protect("soc.cases.manage", http.HandlerFunc(s.updateCaseTask)))
+		s.mux.Handle("POST /api/v1/cases/{caseID}/participants", s.protect("soc.cases.manage", http.HandlerFunc(s.addCaseParticipant)))
+		s.mux.Handle("POST /api/v1/cases/{caseID}/observables", s.protect("soc.cases.manage", http.HandlerFunc(s.addCaseObservable)))
+		s.mux.Handle("POST /api/v1/cases/{caseID}/incidents", s.protect("soc.cases.manage", http.HandlerFunc(s.linkCaseIncident)))
 	}
 	if s.threatIntel != nil {
 		s.mux.Handle("GET /api/v1/threat-intel/feeds", s.protect("ti.indicators.read", http.HandlerFunc(s.listThreatIntelFeeds)))
@@ -847,6 +862,10 @@ func (s *Server) handleDomainError(w http.ResponseWriter, r *http.Request, err e
 		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_ueba_filter", "Invalid UEBA filter", err.Error())
 	case errors.Is(err, ueba.ErrInvalidFeedback):
 		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_ueba_feedback", "Invalid UEBA feedback", err.Error())
+	case errors.Is(err, cases.ErrInvalidCase), errors.Is(err, cases.ErrClosureDetails):
+		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_case", "Invalid case", err.Error())
+	case errors.Is(err, cases.ErrInvalidTransition), errors.Is(err, cases.ErrTaskTransition):
+		s.problem(w, r, http.StatusConflict, "invalid_case_transition", "Invalid case transition", err.Error())
 	case errors.Is(err, detection.ErrInvalidRule):
 		s.problem(w, r, http.StatusBadRequest, "invalid_detection_rule", "Invalid detection rule", err.Error())
 	case errors.Is(err, detection.ErrValidationFailed):

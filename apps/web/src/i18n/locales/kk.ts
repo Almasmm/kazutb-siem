@@ -14,7 +14,7 @@ export const kk = {
   },
   nav: {
     operations: "Операциялар", intelligence: "Талдау", governance: "Басқару", soc: "SOC панелі",
-    alerts: "Ескертулер кезегі", hunt: "Іздеу / Hunt", incidents: "Инциденттер", rules: "Анықтау ережелері", collectors: "Коллекторлар",
+    alerts: "Ескертулер кезегі", hunt: "Іздеу / Hunt", incidents: "Инциденттер", cases: "Кейстер", rules: "Анықтау ережелері", collectors: "Коллекторлар",
     threatIntel: "Threat Intelligence", ueba: "UEBA", evidence: "Дәлелдер", soar: "SOAR", aiSoc: "AI SOC", system: "Жүйе", audit: "Аудит",
   },
   common: {
@@ -150,6 +150,18 @@ export const kk = {
     readiness: "API дайындығы", readinessHint: "Тәуелділіктердің ағымдағы күйі", healthDetails: "Тәуелділік мәліметтері", retentionPolicy: "Сақтау саясаты",
     raw_days: "Бастапқы оқиғалар", normalized_days: "Қалыпқа келтірілген оқиғалар", findings_days: "Анықтаулар",
     evidence_days: "Дәлелдер", updatedBy: "Жаңартқан", saved: "Сақтау саясаты сақталды.",
+  },
+  casesPage: {
+    eyebrow: "Тергеу жұмыс аймағы", title: "Кейстер", subtitle: "Инциденттер, дәлелдер, observables, тапсырмалар және тергеу тарихы бір жазбада.",
+    create: "Кейс ашу", createTitle: "Тергеу кейсін ашу", total: "Барлық кейс", open: "Ашық кейстер", overdue: "SLA мерзімі өтті",
+    openTasks: "Ашық тапсырмалар", searchPlaceholder: "Кейс ID, атауы немесе сипаттамасы", noCases: "Тергеу кейстері жоқ", owner: "Иесі",
+    relatedIncidents: "Байланысты инциденттер", relatedIncident: "Бастапқы инцидент", sla: "Кейс SLA", moveTo: "{{status}} күйіне ауыстыру",
+    tasks: "Тапсырмалар", taskPlaceholder: "Жаңа тергеу тапсырмасы", addTask: "Тапсырма қосу", noTasks: "Тапсырмалар жоқ",
+    participants: "Қатысушылар", participantPlaceholder: "Пайдаланушы немесе service identity", observables: "Бақыланатын нысандар",
+    observablePlaceholder: "IP, домен, URL, хэш немесе email", evidence: "Дәлелдер", attachEvidence: "Дәлел тіркеу",
+    evidenceAttached: "Дәлел бекітіліп, кейспен байланыстырылды.", noEvidence: "Дәлелдер тіркелмеген", comments: "Пікірлер",
+    commentPlaceholder: "Тергеу жазбасын енгізіңіз", addComment: "Пікір қосу", history: "Кейс тарихы",
+    closeTitle: "Тергеу кейсін жабу", closeHint: "Жабу алдында расталған нәтиже, қалпына келтіру және қорытындыны жазыңыз.", closureSummary: "Тергеу қорытындысы",
   },
   severity: { critical: "Сындарлы", high: "Жоғары", medium: "Орташа", low: "Төмен", informational: "Ақпараттық", unknown: "Берілмеген" },
   status: {

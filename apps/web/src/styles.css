@@ -396,3 +396,15 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 980px) { .system-grid { grid-template-columns: 1fr; } }
 @media (max-width: 620px) { .policy-strip { align-items: flex-start; flex-direction: column; }.retention-form { grid-template-columns: 1fr; }.retention-actions { grid-column: 1; }.compact-metrics { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 420px) { .compact-metrics { grid-template-columns: 1fr; } }
+
+.case-command { display: flex; align-items: center; gap: 8px; margin-bottom: 11px; }
+.case-command > input, .case-command > select { min-width: 0; flex: 1; height: 36px; padding: 0 10px; color: var(--text); background: #090f16; border: 1px solid var(--border); border-radius: 8px; outline: 0; font-size: 10px; color-scheme: dark; }
+.observable-command > select { flex: 0 0 105px; }
+.case-task-list { display: grid; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.case-task-list > div { min-height: 57px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 10px; border-bottom: 1px solid var(--border); }
+.case-task-list > div:last-child { border-bottom: 0; }.case-task-list strong, .case-task-list small { display: block; }.case-task-list strong { color: #d5dde6; font-size: 10px; }.case-task-list small { margin-top: 4px; color: var(--muted-2); font-size: 8px; }
+.task-check { width: 30px; height: 30px; display: grid; place-items: center; padding: 0; color: var(--muted); background: transparent; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }.task-check.done { color: var(--accent); background: var(--accent-soft); border-color: rgba(73,214,186,.18); }.task-check:disabled { cursor: default; }
+.case-comments { display: grid; gap: 8px; }.case-comments article { padding: 11px; border: 1px solid var(--border); border-radius: 9px; background: rgba(255,255,255,.014); }.case-comments strong { color: var(--accent); font-size: 9px; }.case-comments p { margin: 6px 0; color: #b7c1cd; font-size: 10px; line-height: 1.55; }.case-comments small { color: var(--muted-2); font-size: 8px; }
+.evidence-upload { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 9px; margin-bottom: 11px; }.file-button { position: relative; overflow: hidden; }.file-button input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.status-breached { color: #ff8290; background: rgba(255,100,117,.08); border-color: rgba(255,100,117,.18); }.status-on_track { color: #68dec5; background: rgba(73,214,186,.08); border-color: rgba(73,214,186,.16); }
+@media (max-width: 620px) { .case-command, .evidence-upload { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; }.case-command .button, .evidence-upload .button { width: 100%; }.observable-command > select { flex-basis: 36px; } }

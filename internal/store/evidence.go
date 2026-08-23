@@ -31,8 +31,17 @@ type EvidenceStore interface {
 func (p *Postgres) ReserveEvidence(ctx context.Context, item core.EvidenceItem, mutation core.EvidenceMutation) (core.EvidenceItem, bool, error) {
 	if item.ID == "" || item.TenantID == "" || item.RequestID == "" || item.Filename == "" || item.ContentType == "" ||
 		item.SHA256 == "" || item.Bucket == "" || item.ObjectKey == "" || item.Uploader == "" || item.RetainUntil.IsZero() ||
-		(item.IncidentID == "" && item.AlertID == "" && item.EventID == "") {
+		(item.CaseID == "" && item.IncidentID == "" && item.AlertID == "" && item.EventID == "") {
 		return core.EvidenceItem{}, false, errors.New("reserve evidence: required fields are missing")
+	}
+	if item.CaseID != "" {
+		var exists bool
+		if err := p.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM cases WHERE tenant_id=$1 AND case_id=$2)`, item.TenantID, item.CaseID).Scan(&exists); err != nil {
+			return core.EvidenceItem{}, false, err
+		}
+		if !exists {
+			return core.EvidenceItem{}, false, ErrNotFound
+		}
 	}
 	metadata, err := json.Marshal(item.Metadata)
 	if err != nil {
@@ -46,11 +55,11 @@ func (p *Postgres) ReserveEvidence(ctx context.Context, item core.EvidenceItem, 
 	now := time.Now().UTC()
 	item.Status = "PENDING"
 	reserved, err := scanEvidence(tx.QueryRow(ctx, `INSERT INTO evidence_items(
-		tenant_id,evidence_id,request_id,incident_id,alert_id,event_id,filename,content_type,description,size_bytes,sha256,
+		tenant_id,evidence_id,request_id,case_id,incident_id,alert_id,event_id,filename,content_type,description,size_bytes,sha256,
 		bucket,object_key,status,retain_until,legal_hold,uploader,metadata,created_at,updated_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'PENDING',$14,$15,$16,$17,$18,$18)
+		VALUES($1,$2,$3,NULLIF($4,''),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'PENDING',$15,$16,$17,$18,$19,$19)
 		ON CONFLICT (tenant_id,request_id) DO NOTHING
-		RETURNING `+evidenceColumns, item.TenantID, item.ID, item.RequestID, item.IncidentID, item.AlertID, item.EventID,
+		RETURNING `+evidenceColumns, item.TenantID, item.ID, item.RequestID, item.CaseID, item.IncidentID, item.AlertID, item.EventID,
 		item.Filename, item.ContentType, item.Description, item.Size, item.SHA256, item.Bucket, item.ObjectKey,
 		item.RetainUntil.UTC(), item.LegalHold, item.Uploader, metadata, now))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -136,7 +145,7 @@ func (p *Postgres) ListEvidence(ctx context.Context, tenantID string, filter cor
 	where := []string{"tenant_id=$1"}
 	for _, item := range []struct {
 		column, value string
-	}{{"incident_id", filter.IncidentID}, {"alert_id", filter.AlertID}, {"event_id", filter.EventID}, {"status", strings.ToUpper(filter.Status)}} {
+	}{{"case_id", filter.CaseID}, {"incident_id", filter.IncidentID}, {"alert_id", filter.AlertID}, {"event_id", filter.EventID}, {"status", strings.ToUpper(filter.Status)}} {
 		if item.value != "" {
 			args = append(args, item.value)
 			where = append(where, fmt.Sprintf("%s=$%d", item.column, len(args)))
@@ -290,14 +299,14 @@ func (p *Postgres) VerifyEvidenceCustody(ctx context.Context, tenantID, evidence
 	return item.CustodyHeadHash == previous, nil
 }
 
-const evidenceColumns = `tenant_id,evidence_id,request_id,incident_id,alert_id,event_id,filename,content_type,
+const evidenceColumns = `tenant_id,evidence_id,request_id,COALESCE(case_id,''),incident_id,alert_id,event_id,filename,content_type,
 	description,size_bytes,sha256,bucket,object_key,object_version,etag,status,failure,retain_until,legal_hold,
 	uploader,metadata,verified_at,custody_head_hash,created_at,updated_at`
 
 func scanEvidence(scanner detectionScanner) (core.EvidenceItem, error) {
 	var item core.EvidenceItem
 	var metadata []byte
-	err := scanner.Scan(&item.TenantID, &item.ID, &item.RequestID, &item.IncidentID, &item.AlertID, &item.EventID,
+	err := scanner.Scan(&item.TenantID, &item.ID, &item.RequestID, &item.CaseID, &item.IncidentID, &item.AlertID, &item.EventID,
 		&item.Filename, &item.ContentType, &item.Description, &item.Size, &item.SHA256, &item.Bucket, &item.ObjectKey,
 		&item.ObjectVersion, &item.ETag, &item.Status, &item.Failure, &item.RetainUntil, &item.LegalHold,
 		&item.Uploader, &metadata, &item.VerifiedAt, &item.CustodyHeadHash, &item.CreatedAt, &item.UpdatedAt)

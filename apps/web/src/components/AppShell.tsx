@@ -3,6 +3,7 @@ import {
   Activity,
   Archive,
   BellRing,
+  Briefcase,
   BrainCircuit,
   ChevronDown,
   ClipboardList,
@@ -35,6 +36,7 @@ const navGroups = [
       { to: "/soc", label: "nav.soc", icon: LayoutDashboard },
       { to: "/alerts", label: "nav.alerts", icon: ShieldAlert },
       { to: "/incidents", label: "nav.incidents", icon: BellRing },
+      { to: "/cases", label: "nav.cases", icon: Briefcase },
       { to: "/soar", label: "nav.soar", icon: Workflow },
     ],
   },
@@ -73,6 +75,7 @@ const pageKeys: Record<string, string> = {
   "/soar": "nav.soar",
   "/ai-soc": "nav.aiSoc",
   "/system": "nav.system",
+  "/cases": "nav.cases",
 };
 
 export function AppShell() {
