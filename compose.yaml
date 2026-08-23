@@ -409,15 +409,21 @@ services:
       - kcsp-prometheus-data:/prometheus
     ports:
       - "127.0.0.1:9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/ready"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
     depends_on:
       api:
         condition: service_healthy
       processor:
-        condition: service_started
+        condition: service_healthy
       soar-worker:
-        condition: service_started
+        condition: service_healthy
       ai-worker:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -434,8 +440,15 @@ services:
       - kcsp-grafana-data:/var/lib/grafana
     ports:
       - "127.0.0.1:3001:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+      start_period: 10s
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_healthy
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
