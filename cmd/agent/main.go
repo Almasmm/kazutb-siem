@@ -18,10 +18,15 @@ import (
 	"github.com/kcsp/platform/internal/ingest"
 )
 
-const agentVersion = "0.5.0"
+var agentVersion = "0.5.0"
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger, logCloser, err := newAgentLogger()
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "initialize KCSP agent logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer func() { _ = logCloser.Close() }()
 	if err := runProcess(logger); err != nil && !errors.Is(err, context.Canceled) {
 		logger.Error("KCSP agent failed", "error", err)
 		os.Exit(1)

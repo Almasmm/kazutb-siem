@@ -1,0 +1,46 @@
+<Sysmon schemaversion="4.90">
+  <HashAlgorithms>sha256</HashAlgorithms>
+  <CheckRevocation />
+  <EventFiltering>
+    <RuleGroup name="Process creation" groupRelation="or">
+      <ProcessCreate onmatch="exclude" />
+    </RuleGroup>
+    <RuleGroup name="Network connections" groupRelation="or">
+      <NetworkConnect onmatch="exclude" />
+    </RuleGroup>
+    <RuleGroup name="Driver and remote thread activity" groupRelation="or">
+      <DriverLoad onmatch="exclude" />
+      <CreateRemoteThread onmatch="exclude" />
+    </RuleGroup>
+    <RuleGroup name="Credential access" groupRelation="or">
+      <ProcessAccess onmatch="include">
+        <TargetImage condition="end with">\lsass.exe</TargetImage>
+      </ProcessAccess>
+    </RuleGroup>
+    <RuleGroup name="Persistence files" groupRelation="or">
+      <FileCreate onmatch="include">
+        <TargetFilename condition="contains">\Start Menu\Programs\Startup\</TargetFilename>
+        <TargetFilename condition="end with">.ps1</TargetFilename>
+        <TargetFilename condition="end with">.vbs</TargetFilename>
+        <TargetFilename condition="end with">.js</TargetFilename>
+        <TargetFilename condition="end with">.hta</TargetFilename>
+      </FileCreate>
+    </RuleGroup>
+    <RuleGroup name="Registry persistence" groupRelation="or">
+      <RegistryEvent onmatch="include">
+        <TargetObject condition="contains">\Software\Microsoft\Windows\CurrentVersion\Run</TargetObject>
+        <TargetObject condition="contains">\Services\</TargetObject>
+        <TargetObject condition="contains">\Winlogon\</TargetObject>
+      </RegistryEvent>
+    </RuleGroup>
+    <RuleGroup name="DNS queries" groupRelation="or">
+      <DnsQuery onmatch="exclude">
+        <QueryName condition="end with">.in-addr.arpa</QueryName>
+      </DnsQuery>
+    </RuleGroup>
+    <RuleGroup name="WMI and process tampering" groupRelation="or">
+      <WmiEvent onmatch="exclude" />
+      <ProcessTampering onmatch="exclude" />
+    </RuleGroup>
+  </EventFiltering>
+</Sysmon>

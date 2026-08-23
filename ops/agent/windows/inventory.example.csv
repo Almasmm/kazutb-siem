@@ -1,0 +1,4 @@
+Hostname,Site,Criticality,Owner
+lab-pc-001,main,standard,IT Lab
+faculty-pc-001,main,standard,Faculty IT
+dc-001,datacenter,critical,Infrastructure

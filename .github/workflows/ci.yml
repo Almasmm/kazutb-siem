@@ -78,6 +78,9 @@ jobs:
         run: go vet ./...
       - name: Build Windows lightweight agent
         run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o /tmp/kcsp-agent.exe ./cmd/agent
+      - name: Validate Windows deployment and 2000-host rollout contracts
+        shell: pwsh
+        run: ./ops/agent/windows/Self-Test.ps1 -PrebuiltBinary /tmp/kcsp-agent.exe
 
   web:
     runs-on: ubuntu-latest
