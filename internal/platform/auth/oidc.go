@@ -2,12 +2,15 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/kcsp/platform/internal/platform/tenant"
@@ -20,6 +23,11 @@ type OIDCConfig struct {
 	RolesClaim          string
 	PermissionClaim     string
 	AllowInsecureIssuer bool
+	RequireMFA          bool
+	MFAAMRValues        []string
+	MFAACRValues        []string
+	MaximumAuthAge      time.Duration
+	Now                 func() time.Time
 }
 
 type OIDCAuthenticator struct {
@@ -28,6 +36,11 @@ type OIDCAuthenticator struct {
 	tenantClaim     string
 	rolesClaim      string
 	permissionClaim string
+	requireMFA      bool
+	mfaAMRValues    map[string]bool
+	mfaACRValues    map[string]bool
+	maximumAuthAge  time.Duration
+	now             func() time.Time
 }
 
 func NewOIDCAuthenticator(ctx context.Context, config OIDCConfig) (*OIDCAuthenticator, error) {
@@ -50,12 +63,26 @@ func NewOIDCAuthenticator(ctx context.Context, config OIDCConfig) (*OIDCAuthenti
 	if err != nil {
 		return nil, fmt.Errorf("discover OIDC provider: %w", err)
 	}
+	if config.MaximumAuthAge < 0 {
+		return nil, errors.New("OIDC maximum authentication age cannot be negative")
+	}
+	if config.Now == nil {
+		config.Now = func() time.Time { return time.Now().UTC() }
+	}
+	if config.RequireMFA && len(config.MFAAMRValues) == 0 && len(config.MFAACRValues) == 0 {
+		config.MFAAMRValues = []string{"mfa", "otp", "hwk", "webauthn", "fido", "fido2"}
+	}
 	return &OIDCAuthenticator{
 		verifier:        provider.Verifier(&oidc.Config{ClientID: config.ClientID}),
 		clientID:        config.ClientID,
 		tenantClaim:     defaultClaim(config.TenantClaim, "kcsp_tenants"),
 		rolesClaim:      defaultClaim(config.RolesClaim, "kcsp_roles"),
 		permissionClaim: defaultClaim(config.PermissionClaim, "kcsp_permissions"),
+		requireMFA:      config.RequireMFA,
+		mfaAMRValues:    normalizedAssuranceValues(config.MFAAMRValues, true),
+		mfaACRValues:    normalizedAssuranceValues(config.MFAACRValues, false),
+		maximumAuthAge:  config.MaximumAuthAge,
+		now:             config.Now,
 	}, nil
 }
 
@@ -71,6 +98,9 @@ func (a *OIDCAuthenticator) Authenticate(r *http.Request) (Principal, error) {
 	claims := map[string]interface{}{}
 	if err := token.Claims(&claims); err != nil {
 		return Principal{}, fmt.Errorf("%w: invalid OIDC claims", ErrUnauthenticated)
+	}
+	if a.requireMFA && !a.hasMFAAssurance(claims) {
+		return Principal{}, fmt.Errorf("%w: MFA assurance is required", ErrUnauthenticated)
 	}
 	subject := stringClaim(claims, "sub")
 	if subject == "" {
@@ -115,6 +145,75 @@ func (a *OIDCAuthenticator) Authenticate(r *http.Request) (Principal, error) {
 		ID: subject, DisplayName: displayName, Role: role,
 		Permissions: permissions, AllowedTenants: tenants, PlatformScope: platformScope,
 	}, nil
+}
+
+func (a *OIDCAuthenticator) hasMFAAssurance(claims map[string]interface{}) bool {
+	assured := false
+	for _, method := range stringSliceClaim(claims, "amr") {
+		if a.mfaAMRValues[strings.ToLower(strings.TrimSpace(method))] {
+			assured = true
+			break
+		}
+	}
+	if !assured {
+		assured = a.mfaACRValues[strings.TrimSpace(stringClaim(claims, "acr"))]
+	}
+	if !assured {
+		return false
+	}
+	if a.maximumAuthAge <= 0 {
+		return true
+	}
+	authenticatedAt, ok := unixClaim(claims, "auth_time")
+	if !ok {
+		return false
+	}
+	now := a.now().UTC()
+	return !authenticatedAt.After(now.Add(5*time.Minute)) && now.Sub(authenticatedAt) <= a.maximumAuthAge
+}
+
+func normalizedAssuranceValues(values []string, lowercase bool) map[string]bool {
+	result := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if lowercase {
+			value = strings.ToLower(value)
+		}
+		if value != "" && len(value) <= 256 {
+			result[value] = true
+		}
+	}
+	return result
+}
+
+func unixClaim(claims map[string]interface{}, name string) (time.Time, bool) {
+	value, found := claims[name]
+	if !found {
+		return time.Time{}, false
+	}
+	var seconds int64
+	switch typed := value.(type) {
+	case float64:
+		seconds = int64(typed)
+	case json.Number:
+		parsed, err := typed.Int64()
+		if err != nil {
+			return time.Time{}, false
+		}
+		seconds = parsed
+	case string:
+		parsed, err := strconv.ParseInt(strings.TrimSpace(typed), 10, 64)
+		if err != nil {
+			return time.Time{}, false
+		}
+		seconds = parsed
+	default:
+		return time.Time{}, false
+	}
+	if seconds <= 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(seconds, 0).UTC(), true
 }
 
 func addTenantMembership(memberships map[string]bool, value string) error {

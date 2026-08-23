@@ -80,6 +80,10 @@ config:
       permissionClaim: permissions
       tenantClaim: tenant_id
       scope: openid profile email offline_access
+      requireMFA: true
+      mfaAMRValues: mfa otp hwk webauthn fido fido2
+      mfaACRValues: ""
+      maximumAuthAge: 0s
   collectors:
     requireRegistered: true
     agentCredentialTTL: 720h

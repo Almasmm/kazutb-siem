@@ -17,6 +17,10 @@ data:
   KCSP_OIDC_ROLES_CLAIM: {{ .Values.config.auth.oidc.rolesClaim | quote }}
   KCSP_OIDC_PERMISSION_CLAIM: {{ .Values.config.auth.oidc.permissionClaim | quote }}
   KCSP_OIDC_TENANT_CLAIM: {{ .Values.config.auth.oidc.tenantClaim | quote }}
+  KCSP_OIDC_REQUIRE_MFA: {{ ternary "true" "false" .Values.config.auth.oidc.requireMFA | quote }}
+  KCSP_OIDC_MFA_AMR_VALUES: {{ .Values.config.auth.oidc.mfaAMRValues | quote }}
+  KCSP_OIDC_MFA_ACR_VALUES: {{ .Values.config.auth.oidc.mfaACRValues | quote }}
+  KCSP_OIDC_MAX_AUTH_AGE: {{ .Values.config.auth.oidc.maximumAuthAge | quote }}
   KCSP_REQUIRE_REGISTERED_COLLECTORS: {{ ternary "true" "false" .Values.config.collectors.requireRegistered | quote }}
   KCSP_AGENT_CREDENTIAL_TTL: {{ .Values.config.collectors.agentCredentialTTL | quote }}
   KCSP_AGENT_ENROLLMENT_MAX_TTL: {{ .Values.config.collectors.agentEnrollmentMaxTTL | quote }}

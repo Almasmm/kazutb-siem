@@ -264,6 +264,10 @@ func configureAuthenticator(ctx context.Context, profile, mode string) (httpapi.
 		}
 		return auth.NewDemoAuthenticator(), nil
 	case "oidc":
+		maximumAuthAge, err := time.ParseDuration(envOr("KCSP_OIDC_MAX_AUTH_AGE", "0s"))
+		if err != nil || maximumAuthAge < 0 {
+			return nil, errors.New("KCSP_OIDC_MAX_AUTH_AGE must be a non-negative duration")
+		}
 		return auth.NewOIDCAuthenticator(ctx, auth.OIDCConfig{
 			IssuerURL:           os.Getenv("KCSP_OIDC_ISSUER_URL"),
 			ClientID:            os.Getenv("KCSP_OIDC_CLIENT_ID"),
@@ -271,6 +275,9 @@ func configureAuthenticator(ctx context.Context, profile, mode string) (httpapi.
 			RolesClaim:          os.Getenv("KCSP_OIDC_ROLES_CLAIM"),
 			PermissionClaim:     os.Getenv("KCSP_OIDC_PERMISSION_CLAIM"),
 			AllowInsecureIssuer: profile == "development" || profile == "test",
+			RequireMFA:          strings.EqualFold(envOr("KCSP_OIDC_REQUIRE_MFA", strconv.FormatBool(profile != "development" && profile != "test")), "true"),
+			MFAAMRValues:        strings.Fields(envOr("KCSP_OIDC_MFA_AMR_VALUES", "mfa otp hwk webauthn fido fido2")),
+			MFAACRValues:        strings.Fields(os.Getenv("KCSP_OIDC_MFA_ACR_VALUES")), MaximumAuthAge: maximumAuthAge,
 		})
 	default:
 		return nil, fmt.Errorf("unsupported KCSP_AUTH_MODE %q", mode)
