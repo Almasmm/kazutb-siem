@@ -52,6 +52,8 @@ secrets:
   keys:
     databaseURL: database-url
     clickhouseURL: clickhouse-url
+    valkeyURL: valkey-url
+    valkeyPassword: valkey-password
     kafkaEnvelopeHMACKey: kafka-envelope-hmac-key
     collectorOAuthClientID: collector-oauth-client-id
     collectorOAuthClientSecret: collector-oauth-client-secret
@@ -65,6 +67,8 @@ trustBundle:
   key: ca-certificates.crt
 
 config:
+  state:
+    valkeyNamespace: kcsp
   licensing:
     trustedKeysJSON: "{}"
   auth:

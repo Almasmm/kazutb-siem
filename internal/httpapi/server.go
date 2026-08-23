@@ -74,7 +74,7 @@ type Server struct {
 	reports           *reporting.Service
 	licenses          *licensing.Service
 	enrollment        *enrollment.Service
-	enrollmentLimiter *ipRateLimiter
+	enrollmentLimiter AgentEnrollmentRateLimiter
 }
 
 type Authenticator interface {
@@ -104,6 +104,7 @@ type Config struct {
 	LicenseService               *licensing.Service
 	AgentEnrollmentService       *enrollment.Service
 	AgentEnrollmentRatePerMinute int
+	AgentEnrollmentRateLimiter   AgentEnrollmentRateLimiter
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -111,6 +112,10 @@ func New(repository store.Repository, engine *pipeline.Engine, socService *soc.S
 }
 
 func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error, config Config) http.Handler {
+	enrollmentLimiter := config.AgentEnrollmentRateLimiter
+	if enrollmentLimiter == nil {
+		enrollmentLimiter = newIPRateLimiter(config.AgentEnrollmentRatePerMinute, time.Minute)
+	}
 	server := &Server{
 		store: repository, engine: engine, soc: socService, auth: authenticator,
 		logger: logger, mux: http.NewServeMux(), seed: seed, startedAt: time.Now().UTC(),
@@ -120,7 +125,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		detections: config.DetectionService, hunts: config.HuntStore, retention: config.RetentionStore,
 		evidence: config.EvidenceService, threatIntel: config.ThreatIntelService, soar: config.SOARService,
 		ueba: config.UEBAService, aiSOC: config.AISOCService, cases: config.CasesService, entities: config.EntityService, parsers: config.ParserService, mitre: config.MITREService, reports: config.ReportService, licenses: config.LicenseService, enrollment: config.AgentEnrollmentService,
-		enrollmentLimiter: newIPRateLimiter(config.AgentEnrollmentRatePerMinute, time.Minute),
+		enrollmentLimiter: enrollmentLimiter,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -399,7 +404,13 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.json(w, http.StatusOK, map[string]interface{}{"status": "ready", "profile": s.profile, "audit_chain_valid": auditValid})
+	if s.enrollmentLimiter != nil {
+		if err := s.enrollmentLimiter.Health(r.Context()); err != nil {
+			s.problem(w, r, http.StatusServiceUnavailable, "ephemeral_state_unavailable", "Service unavailable", "Valkey shared state is not ready.")
+			return
+		}
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"status": "ready", "profile": s.profile, "audit_chain_valid": auditValid, "valkey_state": "ready"})
 }
 
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {

@@ -49,12 +49,14 @@ func (h *histogram) write(builder *strings.Builder, name, help string) {
 }
 
 type Registry struct {
-	eventsReceived   atomic.Uint64
-	eventsParsed     atomic.Uint64
-	eventsFailed     atomic.Uint64
-	alertsCreated    atomic.Uint64
-	incidentsCreated atomic.Uint64
-	recentErrors     atomic.Uint64
+	eventsReceived          atomic.Uint64
+	eventsParsed            atomic.Uint64
+	eventsFailed            atomic.Uint64
+	alertsCreated           atomic.Uint64
+	incidentsCreated        atomic.Uint64
+	recentErrors            atomic.Uint64
+	enrollmentLimited       atomic.Uint64
+	enrollmentLimiterErrors atomic.Uint64
 
 	detectionLatency  histogram
 	apiLatency        histogram
@@ -106,6 +108,8 @@ func (r *Registry) EventParsed()                         { r.eventsParsed.Add(1)
 func (r *Registry) EventFailed()                         { r.eventsFailed.Add(1); r.recentErrors.Add(1) }
 func (r *Registry) AlertCreated()                        { r.alertsCreated.Add(1) }
 func (r *Registry) IncidentCreated()                     { r.incidentsCreated.Add(1) }
+func (r *Registry) EnrollmentRateLimited()               { r.enrollmentLimited.Add(1) }
+func (r *Registry) EnrollmentLimiterError()              { r.enrollmentLimiterErrors.Add(1); r.recentErrors.Add(1) }
 func (r *Registry) ObserveDetection(value time.Duration) { r.detectionLatency.observe(value.Seconds()) }
 func (r *Registry) ObserveAPI(value time.Duration)       { r.apiLatency.observe(value.Seconds()) }
 func (r *Registry) ObserveClickHouse(value time.Duration) {
@@ -131,6 +135,8 @@ func (r *Registry) WritePrometheus(writer io.Writer) {
 	writeCounter(builder, "alerts_created_total", "New alerts created by this process.", r.alertsCreated.Load())
 	writeCounter(builder, "incidents_created_total", "New incidents created by this process.", r.incidentsCreated.Load())
 	writeCounter(builder, "kcsp_recent_errors_total", "Errors observed since process start.", r.recentErrors.Load())
+	writeCounter(builder, "agent_enrollment_rate_limited_total", "Agent enrollment requests rejected by the shared rate limiter.", r.enrollmentLimited.Load())
+	writeCounter(builder, "agent_enrollment_rate_limiter_errors_total", "Agent enrollment attempts blocked because shared rate state was unavailable.", r.enrollmentLimiterErrors.Load())
 	writeHelp(builder, "ingestion_eps", "Approximate events per second in the current ten-second process window.", "gauge")
 	fmt.Fprintf(builder, "ingestion_eps %g\n", r.ingestionEPS())
 	writeHelp(builder, "kcsp_process_uptime_seconds", "Process uptime in seconds.", "gauge")

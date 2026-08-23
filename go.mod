@@ -7,6 +7,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/minio/minio-go/v7 v7.3.0
+	github.com/redis/go-redis/v9 v9.22.0
 	github.com/twmb/franz-go v1.21.6
 	github.com/twmb/franz-go/pkg/kadm v1.18.0
 	golang.org/x/sys v0.47.0
@@ -42,6 +43,7 @@ require (
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/net v0.58.0 // indirect

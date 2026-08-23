@@ -28,6 +28,10 @@ grep -q '^kind: NetworkPolicy$' "$rendered"
 grep -q '^kind: PodDisruptionBudget$' "$rendered"
 grep -q 'proxy_pass http://kcsp-api:8080;' "$rendered"
 grep -q 'window.__KCSP_CONFIG__ = Object.freeze' "$rendered"
+grep -q 'name: KCSP_VALKEY_URL' "$rendered"
+grep -q 'key: valkey-url' "$rendered"
+grep -q 'name: KCSP_VALKEY_PASSWORD' "$rendered"
+grep -q 'key: valkey-password' "$rendered"
 
 helm template kcsp "$chart" \
     --namespace kcsp \

@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,21 +14,45 @@ func TestIPRateLimiterResetsAndIsolatesAddresses(t *testing.T) {
 	limiter := newIPRateLimiter(2, time.Minute)
 	limiter.now = func() time.Time { return now }
 
-	if allowed, _ := limiter.Allow("192.0.2.10"); !allowed {
+	if allowed, _, _ := limiter.Allow(context.Background(), "192.0.2.10"); !allowed {
 		t.Fatal("first request was rejected")
 	}
-	if allowed, _ := limiter.Allow("192.0.2.10"); !allowed {
+	if allowed, _, _ := limiter.Allow(context.Background(), "192.0.2.10"); !allowed {
 		t.Fatal("second request was rejected")
 	}
-	if allowed, retryAfter := limiter.Allow("192.0.2.10"); allowed || retryAfter != time.Minute {
+	if allowed, retryAfter, _ := limiter.Allow(context.Background(), "192.0.2.10"); allowed || retryAfter != time.Minute {
 		t.Fatalf("third request was not limited: allowed=%v retry_after=%s", allowed, retryAfter)
 	}
-	if allowed, _ := limiter.Allow("192.0.2.11"); !allowed {
+	if allowed, _, _ := limiter.Allow(context.Background(), "192.0.2.11"); !allowed {
 		t.Fatal("an independent address shared the exhausted budget")
 	}
 	now = now.Add(time.Minute)
-	if allowed, _ := limiter.Allow("192.0.2.10"); !allowed {
+	if allowed, _, _ := limiter.Allow(context.Background(), "192.0.2.10"); !allowed {
 		t.Fatal("address budget did not reset after the window")
+	}
+}
+
+type unavailableEnrollmentLimiter struct{}
+
+func (unavailableEnrollmentLimiter) Allow(context.Context, string) (bool, time.Duration, error) {
+	return false, 0, errors.New("Valkey unavailable")
+}
+
+func (unavailableEnrollmentLimiter) Health(context.Context) error {
+	return errors.New("Valkey unavailable")
+}
+
+func TestAgentEnrollmentFailsClosedWhenSharedLimiterIsUnavailable(t *testing.T) {
+	server := &Server{enrollmentLimiter: unavailableEnrollmentLimiter{}}
+	handler := server.limitAgentEnrollment(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("enrollment handler ran without shared rate-limit state")
+	}))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/agent-enrollment", nil)
+	request.RemoteAddr = "192.0.2.30:42000"
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("shared limiter outage status=%d, want 503", response.Code)
 	}
 }
 

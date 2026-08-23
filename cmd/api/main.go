@@ -20,6 +20,7 @@ import (
 	"github.com/kcsp/platform/internal/detection"
 	"github.com/kcsp/platform/internal/enrollment"
 	"github.com/kcsp/platform/internal/entitygraph"
+	"github.com/kcsp/platform/internal/ephemeral"
 	"github.com/kcsp/platform/internal/evidence"
 	"github.com/kcsp/platform/internal/httpapi"
 	"github.com/kcsp/platform/internal/ingest"
@@ -138,6 +139,21 @@ func run(logger *slog.Logger) error {
 	if err != nil || enrollmentRatePerMinute < 1 || enrollmentRatePerMinute > 100000 {
 		return errors.New("KCSP_AGENT_ENROLLMENT_RATE_PER_MINUTE must be between 1 and 100000")
 	}
+	secureValkey := profile != "development" && profile != "test"
+	valkeyClient, err := ephemeral.OpenValkey(startupContext, ephemeral.ValkeyConfig{
+		URL: os.Getenv("KCSP_VALKEY_URL"), Password: os.Getenv("KCSP_VALKEY_PASSWORD"),
+		Namespace: envOr("KCSP_VALKEY_NAMESPACE", "kcsp"), RequireTLS: secureValkey, RequireAuthentication: secureValkey,
+	})
+	if err != nil {
+		return err
+	}
+	defer valkeyClient.Close()
+	enrollmentLimiter, err := ephemeral.NewFixedWindowLimiter(valkeyClient, ephemeral.FixedWindowConfig{
+		Scope: "agent-enrollment", Limit: enrollmentRatePerMinute, Window: time.Minute,
+	})
+	if err != nil {
+		return err
+	}
 	enrollmentService := enrollment.NewService(repository, enrollment.Config{
 		CredentialTTL: credentialTTL, MaximumEnrollmentTTL: maximumEnrollmentTTL,
 	})
@@ -179,6 +195,7 @@ func run(logger *slog.Logger) error {
 			LicenseService:               licenseService,
 			AgentEnrollmentService:       enrollmentService,
 			AgentEnrollmentRatePerMinute: enrollmentRatePerMinute,
+			AgentEnrollmentRateLimiter:   enrollmentLimiter,
 			RequireRegisteredCollectors: strings.EqualFold(
 				envOr("KCSP_REQUIRE_REGISTERED_COLLECTORS", strconv.FormatBool(authMode == "oidc")), "true",
 			),

@@ -60,10 +60,20 @@ jobs:
           --health-timeout 5s
           --health-retries 20
           --health-start-period 20s
+      valkey:
+        image: valkey/valkey:8.1.3-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
     env:
       KCSP_TEST_DATABASE_URL: postgres://kcsp:kcsp-ci-only@127.0.0.1:5432/kcsp_test?sslmode=disable
       KCSP_TEST_CLICKHOUSE_URL: clickhouse://kcsp:kcsp-ci-only@127.0.0.1:9000/kcsp_test
       KCSP_TEST_KAFKA_BROKERS: 127.0.0.1:9092
+      KCSP_TEST_VALKEY_URL: redis://127.0.0.1:6379/0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v6
@@ -124,6 +134,7 @@ jobs:
           KCSP_MINIO_ROOT_USER: kcsp-ci-only
           KCSP_MINIO_ROOT_PASSWORD: kcsp-ci-only-secret
           KCSP_GRAFANA_ADMIN_PASSWORD: kcsp-ci-only
+          KCSP_VALKEY_PASSWORD: kcsp-valkey-ci-only
           KCSP_DR_TARGET_ACCESS_KEY: kcsp-dr-ci-only
           KCSP_DR_TARGET_SECRET_KEY: kcsp-dr-ci-only-secret
           KCSP_DR_TARGET_ALLOW_INSECURE: "true"

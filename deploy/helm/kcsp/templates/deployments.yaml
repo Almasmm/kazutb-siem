@@ -157,6 +157,16 @@ spec:
                 secretKeyRef:
                   name: {{ $root.Values.secrets.existingSecret }}
                   key: {{ $root.Values.secrets.keys.minioSecretKey }}
+            - name: KCSP_VALKEY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.secrets.existingSecret }}
+                  key: {{ $root.Values.secrets.keys.valkeyURL }}
+            - name: KCSP_VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.secrets.existingSecret }}
+                  key: {{ $root.Values.secrets.keys.valkeyPassword }}
             {{- end }}
             {{- if eq $name "collector" }}
             - name: KCSP_COLLECTOR_OAUTH_CLIENT_ID

@@ -26,7 +26,7 @@ func TestKafkaClickHousePostgresDetectionFlow(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	tenantID := "data-plane-" + core.NewID("tenant")
+	tenantID := strings.ReplaceAll("data-plane-"+core.NewID("tenant"), "_", "-")
 	eventID := "sysmon-" + core.NewID("event")
 
 	repository, err := store.OpenHybrid(ctx, databaseURL, clickhouseURL)

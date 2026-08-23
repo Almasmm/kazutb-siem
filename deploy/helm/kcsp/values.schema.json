@@ -47,6 +47,8 @@
           "required": [
             "databaseURL",
             "clickhouseURL",
+            "valkeyURL",
+            "valkeyPassword",
             "kafkaEnvelopeHMACKey",
             "collectorOAuthClientID",
             "collectorOAuthClientSecret",

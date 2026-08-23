@@ -56,6 +56,7 @@ jobs:
       KCSP_MINIO_ROOT_USER: kcsp-ci-minio
       KCSP_MINIO_ROOT_PASSWORD: kcsp-ci-minio-password
       KCSP_GRAFANA_ADMIN_PASSWORD: kcsp-ci-grafana-password
+      KCSP_VALKEY_PASSWORD: kcsp-ci-valkey-password
       KCSP_DR_ACCESS_KEY: kcsp-ci-dr
       KCSP_DR_SECRET_KEY: kcsp-ci-dr-secret-key
       KCSP_DR_MANIFEST_HMAC_KEY: kcsp-ci-dr-manifest-hmac-key
@@ -74,7 +75,7 @@ jobs:
       - name: Start data path
         run: |
           docker compose up -d --build --wait \
-            postgres clickhouse kafka minio api processor
+            postgres clickhouse kafka minio valkey api processor
 
       - name: Run end-to-end smoke SLO
         run: bash ops/load/run.sh
