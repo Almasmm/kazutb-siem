@@ -542,6 +542,39 @@ export interface SOARConnectorTestDto {
   completed_at?: string;
 }
 
+export interface ServiceAccountDto {
+  service_account_id: string;
+  tenant_id: string;
+  name: string;
+  description?: string;
+  scopes: string[];
+  state: "ACTIVE" | "EXPIRED" | "REVOKED";
+  token_version: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  expires_at: string;
+  last_used_at?: string;
+  revoked_at?: string;
+}
+
+export interface ServiceAccountIssueDto {
+  access_token: string;
+  token_type: "Bearer";
+  service_account: ServiceAccountDto;
+}
+
+export interface ServiceAccountCreateDto {
+  name: string;
+  description?: string;
+  scopes: string[];
+  expires_in_seconds?: number;
+}
+
+export interface ServiceAccountRotateDto {
+  expires_in_seconds?: number;
+}
+
 export interface SessionDto {
   principal: { id: string; display_name: string; role: string };
   tenant: { id: string; name: string };

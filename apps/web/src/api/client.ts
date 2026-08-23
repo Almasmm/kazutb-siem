@@ -36,6 +36,10 @@ import type {
   SOARConnectorDraftDto,
   SOARConnectorDto,
   SOARConnectorTestDto,
+  ServiceAccountCreateDto,
+  ServiceAccountDto,
+  ServiceAccountIssueDto,
+  ServiceAccountRotateDto,
   SOARExecutionDto,
   SOARPlaybookDto,
   ThreatIndicatorDto,
@@ -345,6 +349,13 @@ export const api = {
     }),
   soarConnectorTests: (id: string, signal?: AbortSignal) =>
     getList<SOARConnectorTestDto>(`/soar/connectors/${encodeURIComponent(id)}/tests`, { limit: 50 }, signal),
+  serviceAccounts: (signal?: AbortSignal) => getList<ServiceAccountDto>("/service-accounts", undefined, signal),
+  createServiceAccount: (payload: ServiceAccountCreateDto) =>
+    request<ServiceAccountIssueDto>("/service-accounts", { method: "POST", body: JSON.stringify(payload) }),
+  rotateServiceAccount: (id: string, payload: ServiceAccountRotateDto) =>
+    request<ServiceAccountIssueDto>(`/service-accounts/${encodeURIComponent(id)}/rotate`, { method: "POST", body: JSON.stringify(payload) }),
+  revokeServiceAccount: (id: string) =>
+    request<ServiceAccountDto>(`/service-accounts/${encodeURIComponent(id)}/revoke`, { method: "POST" }),
   aiSOCPolicy: (signal?: AbortSignal) => request<AISOCPolicyDto>("/ai-soc/policy", { signal }),
   aiSOCRequests: (params?: Record<string, QueryValue>, signal?: AbortSignal) =>
     getList<AISOCRequestDto>("/ai-soc/requests", params, signal),

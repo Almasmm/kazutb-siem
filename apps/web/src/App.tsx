@@ -22,6 +22,7 @@ const ParserStudioPage = lazy(() => import("./pages/ParserStudioPage"));
 const MitreCoveragePage = lazy(() => import("./pages/MitreCoveragePage"));
 const ReportsPage = lazy(() => import("./pages/ReportsPage"));
 const AdministrationPage = lazy(() => import("./pages/AdministrationPage"));
+const ServiceAccountsPage = lazy(() => import("./pages/ServiceAccountsPage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 
 export default function App() {
@@ -49,6 +50,7 @@ export default function App() {
           <Route path="/mitre" element={<MitreCoveragePage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/administration" element={<AdministrationPage />} />
+          <Route path="/service-accounts" element={<ServiceAccountsPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>

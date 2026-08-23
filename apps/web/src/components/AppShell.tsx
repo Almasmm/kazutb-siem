@@ -12,6 +12,7 @@ import {
   Crosshair,
   Globe2,
   LayoutDashboard,
+  KeyRound,
   LogOut,
   Menu,
   Radar,
@@ -63,6 +64,7 @@ const navGroups = [
       { to: "/evidence", label: "nav.evidence", icon: Archive },
       { to: "/reports", label: "nav.reports", icon: BarChart3 },
       { to: "/administration", label: "nav.administration", icon: Building2 },
+      { to: "/service-accounts", label: "nav.serviceAccounts", icon: KeyRound },
       { to: "/collectors", label: "nav.collectors", icon: RadioTower },
       { to: "/system", label: "nav.system", icon: Settings2 },
       { to: "/audit", label: "nav.audit", icon: ClipboardList },
@@ -90,6 +92,7 @@ const pageKeys: Record<string, string> = {
   "/mitre": "nav.mitre",
   "/reports": "nav.reports",
   "/administration": "nav.administration",
+  "/service-accounts": "nav.serviceAccounts",
 };
 
 export function AppShell() {
