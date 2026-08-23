@@ -17,30 +17,32 @@ import (
 )
 
 type OIDCConfig struct {
-	IssuerURL           string
-	ClientID            string
-	TenantClaim         string
-	RolesClaim          string
-	PermissionClaim     string
-	AllowInsecureIssuer bool
-	RequireMFA          bool
-	MFAAMRValues        []string
-	MFAACRValues        []string
-	MaximumAuthAge      time.Duration
-	Now                 func() time.Time
+	IssuerURL              string
+	ClientID               string
+	TenantClaim            string
+	RolesClaim             string
+	PermissionClaim        string
+	AllowDirectPermissions bool
+	AllowInsecureIssuer    bool
+	RequireMFA             bool
+	MFAAMRValues           []string
+	MFAACRValues           []string
+	MaximumAuthAge         time.Duration
+	Now                    func() time.Time
 }
 
 type OIDCAuthenticator struct {
-	verifier        *oidc.IDTokenVerifier
-	clientID        string
-	tenantClaim     string
-	rolesClaim      string
-	permissionClaim string
-	requireMFA      bool
-	mfaAMRValues    map[string]bool
-	mfaACRValues    map[string]bool
-	maximumAuthAge  time.Duration
-	now             func() time.Time
+	verifier               *oidc.IDTokenVerifier
+	clientID               string
+	tenantClaim            string
+	rolesClaim             string
+	permissionClaim        string
+	allowDirectPermissions bool
+	requireMFA             bool
+	mfaAMRValues           map[string]bool
+	mfaACRValues           map[string]bool
+	maximumAuthAge         time.Duration
+	now                    func() time.Time
 }
 
 func NewOIDCAuthenticator(ctx context.Context, config OIDCConfig) (*OIDCAuthenticator, error) {
@@ -73,16 +75,17 @@ func NewOIDCAuthenticator(ctx context.Context, config OIDCConfig) (*OIDCAuthenti
 		config.MFAAMRValues = []string{"mfa", "otp", "hwk", "webauthn", "fido", "fido2"}
 	}
 	return &OIDCAuthenticator{
-		verifier:        provider.Verifier(&oidc.Config{ClientID: config.ClientID}),
-		clientID:        config.ClientID,
-		tenantClaim:     defaultClaim(config.TenantClaim, "kcsp_tenants"),
-		rolesClaim:      defaultClaim(config.RolesClaim, "kcsp_roles"),
-		permissionClaim: defaultClaim(config.PermissionClaim, "kcsp_permissions"),
-		requireMFA:      config.RequireMFA,
-		mfaAMRValues:    normalizedAssuranceValues(config.MFAAMRValues, true),
-		mfaACRValues:    normalizedAssuranceValues(config.MFAACRValues, false),
-		maximumAuthAge:  config.MaximumAuthAge,
-		now:             config.Now,
+		verifier:               provider.Verifier(&oidc.Config{ClientID: config.ClientID}),
+		clientID:               config.ClientID,
+		tenantClaim:            defaultClaim(config.TenantClaim, "kcsp_tenants"),
+		rolesClaim:             defaultClaim(config.RolesClaim, "kcsp_roles"),
+		permissionClaim:        defaultClaim(config.PermissionClaim, "kcsp_permissions"),
+		allowDirectPermissions: config.AllowDirectPermissions,
+		requireMFA:             config.RequireMFA,
+		mfaAMRValues:           normalizedAssuranceValues(config.MFAAMRValues, true),
+		mfaACRValues:           normalizedAssuranceValues(config.MFAACRValues, false),
+		maximumAuthAge:         config.MaximumAuthAge,
+		now:                    config.Now,
 	}, nil
 }
 
@@ -109,14 +112,16 @@ func (a *OIDCAuthenticator) Authenticate(r *http.Request) (Principal, error) {
 
 	roles := collectRoles(claims, a.clientID, a.rolesClaim)
 	permissions, roleNames, platformScope := permissionsForRoles(roles)
-	for _, permission := range stringSliceClaim(claims, a.permissionClaim) {
-		if knownPermissions[permission] {
-			grantPermission(permissions, permission)
+	if a.allowDirectPermissions {
+		for _, permission := range stringSliceClaim(claims, a.permissionClaim) {
+			if knownPermissions[permission] {
+				grantPermission(permissions, permission)
+			}
 		}
-	}
-	for _, permission := range strings.Fields(stringClaim(claims, "scope")) {
-		if knownPermissions[permission] {
-			grantPermission(permissions, permission)
+		for _, permission := range strings.Fields(stringClaim(claims, "scope")) {
+			if knownPermissions[permission] {
+				grantPermission(permissions, permission)
+			}
 		}
 	}
 	tenants := map[string]bool{}

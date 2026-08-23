@@ -55,6 +55,50 @@ func TestOIDCRejectsPlaintextIssuerByDefault(t *testing.T) {
 	}
 }
 
+func TestOIDCDirectPermissionGrantsRequireExplicitOptIn(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := newTestOIDCProvider(t, &privateKey.PublicKey)
+	defer provider.Close()
+	claims := mfaTestClaims(provider.URL)
+	claims["kcsp_permissions"] = []string{"platform.collectors.manage"}
+	claims["scope"] = "openid siem.rules.publish"
+
+	roleOnly, err := NewOIDCAuthenticator(context.Background(), OIDCConfig{
+		IssuerURL: provider.URL, ClientID: "kcsp-web", AllowInsecureIssuer: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, err := authenticateMFAClaims(t, roleOnly, privateKey, claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, permission := range []string{"platform.collectors.manage", "siem.rules.publish"} {
+		if principal.Can(permission) {
+			t.Fatalf("direct permission %q bypassed the role matrix", permission)
+		}
+	}
+
+	directGrants, err := NewOIDCAuthenticator(context.Background(), OIDCConfig{
+		IssuerURL: provider.URL, ClientID: "kcsp-web", AllowInsecureIssuer: true, AllowDirectPermissions: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, err = authenticateMFAClaims(t, directGrants, privateKey, claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, permission := range []string{"platform.collectors.manage", "platform.collectors.read", "siem.rules.publish", "siem.rules.write", "siem.rules.read"} {
+		if !principal.Can(permission) {
+			t.Fatalf("explicit direct permission mode did not grant %q with closure", permission)
+		}
+	}
+}
+
 func TestCanonicalRolePermissionsAndClosure(t *testing.T) {
 	tests := []struct {
 		role    string

@@ -80,6 +80,7 @@
                 "clientID": {"type": "string", "minLength": 1},
                 "rolesClaim": {"type": "string", "minLength": 1},
                 "permissionClaim": {"type": "string", "minLength": 1},
+                "allowDirectPermissions": {"type": "boolean"},
                 "tenantClaim": {"type": "string", "minLength": 1},
                 "scope": {"type": "string", "minLength": 1}
               }

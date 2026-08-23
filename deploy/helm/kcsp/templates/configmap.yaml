@@ -16,6 +16,7 @@ data:
   KCSP_OIDC_CLIENT_ID: {{ .Values.config.auth.oidc.clientID | quote }}
   KCSP_OIDC_ROLES_CLAIM: {{ .Values.config.auth.oidc.rolesClaim | quote }}
   KCSP_OIDC_PERMISSION_CLAIM: {{ .Values.config.auth.oidc.permissionClaim | quote }}
+  KCSP_OIDC_ALLOW_DIRECT_PERMISSIONS: {{ ternary "true" "false" .Values.config.auth.oidc.allowDirectPermissions | quote }}
   KCSP_OIDC_TENANT_CLAIM: {{ .Values.config.auth.oidc.tenantClaim | quote }}
   KCSP_OIDC_REQUIRE_MFA: {{ ternary "true" "false" .Values.config.auth.oidc.requireMFA | quote }}
   KCSP_OIDC_MFA_AMR_VALUES: {{ .Values.config.auth.oidc.mfaAMRValues | quote }}

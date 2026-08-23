@@ -80,6 +80,7 @@ config:
       clientID: kcsp
       rolesClaim: roles
       permissionClaim: permissions
+      allowDirectPermissions: false
       tenantClaim: tenant_id
       scope: openid profile email offline_access
       requireMFA: true
