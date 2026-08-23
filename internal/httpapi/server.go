@@ -349,7 +349,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		if origin == "http://localhost:5173" || origin == "http://127.0.0.1:5173" || origin == "http://localhost:3000" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-KCSP-Tenant-ID, X-KCSP-Event-Format, X-KCSP-Event-ID, X-KCSP-Event-Timestamp, X-KCSP-Access-Reason, X-Request-ID, Idempotency-Key, If-Match")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-KCSP-Tenant-ID, X-KCSP-Event-Format, X-KCSP-Event-ID, X-KCSP-Event-Timestamp, X-KCSP-Source-ID, X-KCSP-Source-Address, X-KCSP-Access-Reason, X-Request-ID, Idempotency-Key, If-Match")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
 		}
 		if r.Method == http.MethodOptions {
@@ -496,7 +496,8 @@ func (s *Server) queueEvent(w http.ResponseWriter, r *http.Request) {
 		}
 		receipt, err = s.gateway.SubmitRaw(r.Context(), tenantFrom(r.Context()), collectorID, ingest.RawSubmission{
 			Format: format, ContentType: r.Header.Get("Content-Type"), EventID: r.Header.Get("X-KCSP-Event-ID"),
-			EventTimestamp: eventTimestamp, Payload: payload,
+			EventTimestamp: eventTimestamp, SourceID: strings.TrimSpace(r.Header.Get("X-KCSP-Source-ID")),
+			SourceAddress: strings.TrimSpace(r.Header.Get("X-KCSP-Source-Address")), Payload: payload,
 		})
 	}
 	if err != nil {

@@ -77,7 +77,7 @@ func (r *Registry) Parse(ctx context.Context, envelope ingest.RawEnvelope) (core
 	}
 	eventParser, ok := r.parsers[format]
 	if ok {
-		return eventParser.Parse(ctx, envelope)
+		return parseWithEnvelopeIdentity(ctx, eventParser, envelope)
 	}
 	if r.provider == nil {
 		return core.CanonicalEvent{}, fmt.Errorf("%w: no published parser for format %q", ErrParse, format)
@@ -86,7 +86,7 @@ func (r *Registry) Parse(ctx context.Context, envelope ingest.RawEnvelope) (core
 	r.cacheMu.Lock()
 	if snapshot, found := r.cache[cacheKey]; found && time.Since(snapshot.loadedAt) < 5*time.Second {
 		r.cacheMu.Unlock()
-		return snapshot.parser.Parse(ctx, envelope)
+		return parseWithEnvelopeIdentity(ctx, snapshot.parser, envelope)
 	}
 	r.cacheMu.Unlock()
 	content, found, err := r.provider.PublishedParserByFormat(ctx, envelope.TenantID, format)
@@ -103,7 +103,17 @@ func (r *Registry) Parse(ctx context.Context, envelope ingest.RawEnvelope) (core
 	r.cacheMu.Lock()
 	r.cache[cacheKey] = dynamicParserSnapshot{parser: compiled, loadedAt: time.Now()}
 	r.cacheMu.Unlock()
-	return compiled.Parse(ctx, envelope)
+	return parseWithEnvelopeIdentity(ctx, compiled, envelope)
+}
+
+func parseWithEnvelopeIdentity(ctx context.Context, eventParser ingest.EnvelopeParser, envelope ingest.RawEnvelope) (core.CanonicalEvent, error) {
+	event, err := eventParser.Parse(ctx, envelope)
+	if err != nil {
+		return core.CanonicalEvent{}, err
+	}
+	event.SourceID = envelope.SourceID
+	event.SourceAddress = envelope.SourceAddress
+	return event, nil
 }
 
 func IsBuiltInFormat(format string) bool {

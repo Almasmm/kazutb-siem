@@ -20,7 +20,7 @@ import (
 	"github.com/kcsp/platform/internal/collector"
 )
 
-const collectorVersion = "0.1.0"
+const collectorVersion = "0.2.0"
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))

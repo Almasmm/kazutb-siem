@@ -35,6 +35,8 @@ type RawEnvelope struct {
 	EventID        string          `json:"event_id"`
 	TenantID       string          `json:"tenant_id"`
 	CollectorID    string          `json:"collector_id"`
+	SourceID       string          `json:"source_id,omitempty"`
+	SourceAddress  string          `json:"source_address,omitempty"`
 	EventTimestamp time.Time       `json:"event_timestamp"`
 	ReceivedAt     time.Time       `json:"received_at"`
 	Format         string          `json:"format"`
@@ -58,6 +60,8 @@ type RawSubmission struct {
 	ContentType    string
 	EventID        string
 	EventTimestamp time.Time
+	SourceID       string
+	SourceAddress  string
 	Payload        []byte
 }
 
@@ -145,11 +149,20 @@ func (g *Gateway) submit(ctx context.Context, tenantID, collectorID string, subm
 	if len(contentType) > 128 || strings.ContainsAny(contentType, "\r\n") {
 		return Receipt{}, fmt.Errorf("%w: invalid content type", ErrInvalidEnvelope)
 	}
+	sourceID := strings.TrimSpace(submission.SourceID)
+	sourceAddress := strings.TrimSpace(submission.SourceAddress)
+	if len(sourceID) > 256 || len(sourceAddress) > 256 || strings.ContainsAny(sourceID+sourceAddress, "\r\n") {
+		return Receipt{}, fmt.Errorf("%w: invalid source identity", ErrInvalidEnvelope)
+	}
 	now := g.now()
 	hash := sha256.Sum256(submission.Payload)
 	eventID := strings.TrimSpace(submission.EventID)
 	if eventID == "" {
-		identityInput := append([]byte(tenantID+"|"+collectorID+"|"+format+"|"), submission.Payload...)
+		identityPrefix := tenantID + "|" + collectorID + "|" + format + "|"
+		if sourceID != "" {
+			identityPrefix = tenantID + "|" + collectorID + "|" + sourceID + "|" + format + "|"
+		}
+		identityInput := append([]byte(identityPrefix), submission.Payload...)
 		identityHash := sha256.Sum256(identityInput)
 		eventID = "evt_" + hex.EncodeToString(identityHash[:12])
 	}
@@ -164,8 +177,9 @@ func (g *Gateway) submit(ctx context.Context, tenantID, collectorID string, subm
 	}
 	envelope := RawEnvelope{
 		MessageID: core.NewID("msg"), EventID: eventID, TenantID: tenantID, CollectorID: collectorID,
+		SourceID: sourceID, SourceAddress: sourceAddress,
 		EventTimestamp: eventTimestamp, ReceivedAt: now, Format: format, ContentType: contentType,
-		SchemaVersion: "2", RawHash: "sha256:" + hex.EncodeToString(hash[:]),
+		SchemaVersion: "3", RawHash: "sha256:" + hex.EncodeToString(hash[:]),
 	}
 	if canonical {
 		envelope.Payload = append(json.RawMessage(nil), submission.Payload...)

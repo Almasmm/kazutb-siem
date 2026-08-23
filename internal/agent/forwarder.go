@@ -142,6 +142,12 @@ func (f *Forwarder) Send(ctx context.Context, event Event) (ingest.Receipt, erro
 	if !event.EventTimestamp.IsZero() {
 		request.Header.Set("X-KCSP-Event-Timestamp", event.EventTimestamp.UTC().Format(time.RFC3339Nano))
 	}
+	if event.SourceID != "" {
+		request.Header.Set("X-KCSP-Source-ID", event.SourceID)
+	}
+	if event.SourceAddress != "" {
+		request.Header.Set("X-KCSP-Source-Address", event.SourceAddress)
+	}
 	if event.ContentType == "" {
 		event.ContentType = "application/octet-stream"
 	}

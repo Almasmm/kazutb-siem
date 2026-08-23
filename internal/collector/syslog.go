@@ -5,6 +5,7 @@ package collector
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -16,6 +17,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -149,7 +151,8 @@ func (r *SyslogReceiver) receiveDatagrams(ctx context.Context, connection net.Pa
 		if count == 0 || count > r.config.MaximumBytes {
 			continue
 		}
-		if err := r.emit(ctx, remote.String(), buffer[:count]); err != nil {
+		sourceID, sourceAddress := networkSourceIdentity(remote.String())
+		if err := r.emit(ctx, sourceID, sourceAddress, buffer[:count]); err != nil {
 			return err
 		}
 	}
@@ -176,17 +179,30 @@ func (r *SyslogReceiver) receiveStream(ctx context.Context, connection net.Conn)
 		}
 	}()
 	defer close(done)
-	scanner := bufio.NewScanner(connection)
-	scanner.Buffer(make([]byte, 4096), r.config.MaximumBytes)
-	for scanner.Scan() {
-		if err := r.emit(ctx, connection.RemoteAddr().String(), scanner.Bytes()); err != nil {
+	sourceID, sourceAddress := networkSourceIdentity(connection.RemoteAddr().String())
+	if secure, ok := connection.(*tls.Conn); ok {
+		if err := secure.HandshakeContext(ctx); err != nil {
+			return
+		}
+		state := secure.ConnectionState()
+		if len(state.PeerCertificates) > 0 {
+			sourceID = certificateSourceIdentity(state.PeerCertificates[0])
+		}
+	}
+	reader := bufio.NewReaderSize(connection, r.config.MaximumBytes+2)
+	for {
+		payload, err := readSyslogFrame(reader, r.config.MaximumBytes)
+		if err != nil {
+			return
+		}
+		if err := r.emit(ctx, sourceID, sourceAddress, payload); err != nil {
 			return
 		}
 	}
 }
 
-func (r *SyslogReceiver) emit(ctx context.Context, remote string, payload []byte) error {
-	event, err := networkEvent(remote, payload, time.Now().UTC())
+func (r *SyslogReceiver) emit(ctx context.Context, sourceID, sourceAddress string, payload []byte) error {
+	event, err := networkEvent(sourceID, sourceAddress, payload, time.Now().UTC())
 	if err != nil {
 		return nil
 	}
@@ -198,30 +214,32 @@ func (r *SyslogReceiver) emit(ctx context.Context, remote string, payload []byte
 	}
 }
 
-func networkEvent(remote string, payload []byte, receivedAt time.Time) (agent.Event, error) {
-	payload = []byte(strings.TrimSpace(strings.TrimRight(string(payload), "\x00")))
-	if len(payload) == 0 || len(payload) > ingest.MaxEventBytes {
+func networkEvent(sourceID, sourceAddress string, payload []byte, receivedAt time.Time) (agent.Event, error) {
+	payload = bytes.TrimRight(payload, "\r\n\x00")
+	if len(bytes.TrimSpace(payload)) == 0 || len(payload) > ingest.MaxEventBytes {
 		return agent.Event{}, errors.New("network event payload size is invalid")
 	}
 	format, contentType := detectFormat(payload)
+	eventTimestamp := originalEventTimestamp(payload, receivedAt)
 	identity := sha256.New()
-	_, _ = identity.Write([]byte(remote))
+	_, _ = identity.Write([]byte(sourceID))
 	_, _ = identity.Write([]byte{0})
-	_, _ = identity.Write([]byte(receivedAt.UTC().Format(time.RFC3339Nano)))
+	_, _ = identity.Write([]byte(eventTimestamp.UTC().Format(time.RFC3339Nano)))
 	_, _ = identity.Write([]byte{0})
 	_, _ = identity.Write(payload)
 	return agent.Event{
 		Format: format, ContentType: contentType, EventID: "net_" + hex.EncodeToString(identity.Sum(nil)[:12]),
-		EventTimestamp: receivedAt.UTC(), Payload: append([]byte(nil), payload...),
+		EventTimestamp: eventTimestamp.UTC(), SourceID: sourceID, SourceAddress: sourceAddress,
+		Payload: append([]byte(nil), payload...),
 	}, nil
 }
 
 func detectFormat(payload []byte) (string, string) {
 	trimmed := strings.TrimSpace(string(payload))
 	switch {
-	case strings.HasPrefix(trimmed, "CEF:"):
+	case strings.HasPrefix(trimmed, "CEF:") || strings.Index(trimmed, "CEF:") > 0 && strings.Index(trimmed, "CEF:") < 128:
 		return ingest.FormatCEF, "text/plain"
-	case strings.HasPrefix(trimmed, "LEEF:"):
+	case strings.HasPrefix(trimmed, "LEEF:") || strings.Index(trimmed, "LEEF:") > 0 && strings.Index(trimmed, "LEEF:") < 128:
 		return ingest.FormatLEEF, "text/plain"
 	case json.Valid(payload):
 		var fields map[string]json.RawMessage
@@ -237,6 +255,144 @@ func detectFormat(payload []byte) (string, string) {
 		}
 	}
 	return ingest.FormatSyslog, "text/plain"
+}
+
+func readSyslogFrame(reader *bufio.Reader, maximumBytes int) ([]byte, error) {
+	first, err := reader.Peek(1)
+	if err != nil {
+		return nil, err
+	}
+	if first[0] >= '0' && first[0] <= '9' {
+		var length strings.Builder
+		for index := 0; index < 10; index++ {
+			character, readErr := reader.ReadByte()
+			if readErr != nil {
+				return nil, readErr
+			}
+			if character == ' ' {
+				if length.Len() == 0 {
+					return nil, errors.New("empty RFC 6587 frame length")
+				}
+				count, parseErr := strconv.Atoi(length.String())
+				if parseErr != nil || count <= 0 || count > maximumBytes {
+					return nil, errors.New("invalid RFC 6587 frame length")
+				}
+				payload := make([]byte, count)
+				if _, readErr = io.ReadFull(reader, payload); readErr != nil {
+					return nil, readErr
+				}
+				return payload, nil
+			}
+			if character < '0' || character > '9' {
+				return nil, errors.New("invalid RFC 6587 frame prefix")
+			}
+			length.WriteByte(character)
+		}
+		return nil, errors.New("RFC 6587 frame length is too long")
+	}
+	line, err := reader.ReadSlice('\n')
+	if errors.Is(err, bufio.ErrBufferFull) || len(line) > maximumBytes+2 {
+		return nil, errors.New("non-transparent syslog frame is too large")
+	}
+	if err != nil && !(errors.Is(err, io.EOF) && len(line) > 0) {
+		return nil, err
+	}
+	return bytes.TrimRight(line, "\r\n"), nil
+}
+
+func networkSourceIdentity(remote string) (string, string) {
+	address := strings.TrimSpace(remote)
+	if host, _, err := net.SplitHostPort(address); err == nil {
+		address = strings.Trim(host, "[]")
+	}
+	return "ip:" + address, address
+}
+
+func certificateSourceIdentity(certificate *x509.Certificate) string {
+	identity := ""
+	if len(certificate.URIs) > 0 {
+		identity = certificate.URIs[0].String()
+	} else if len(certificate.DNSNames) > 0 {
+		identity = certificate.DNSNames[0]
+	} else {
+		identity = certificate.Subject.CommonName
+	}
+	identity = strings.TrimSpace(identity)
+	if identity == "" || len(identity) > 220 || strings.ContainsAny(identity, "\r\n") {
+		fingerprint := sha256.Sum256(certificate.Raw)
+		identity = "sha256:" + hex.EncodeToString(fingerprint[:])
+	}
+	return "mtls:" + identity
+}
+
+func originalEventTimestamp(payload []byte, receivedAt time.Time) time.Time {
+	receivedAt = receivedAt.UTC()
+	trimmed := strings.TrimSpace(string(payload))
+	if strings.HasPrefix(trimmed, "{") && json.Valid(payload) {
+		decoder := json.NewDecoder(bytes.NewReader(payload))
+		decoder.UseNumber()
+		var fields map[string]interface{}
+		if decoder.Decode(&fields) == nil {
+			for _, key := range []string{"event_time", "timestamp", "time", "ts", "@timestamp"} {
+				if parsed, ok := timestampValue(fields[key], receivedAt); ok {
+					return parsed
+				}
+			}
+		}
+	}
+	if marker := strings.IndexByte(trimmed, '>'); marker >= 0 && marker+1 < len(trimmed) {
+		body := trimmed[marker+1:]
+		fields := strings.Fields(body)
+		if len(fields) >= 2 {
+			if _, err := strconv.Atoi(fields[0]); err == nil {
+				if parsed, ok := timestampValue(fields[1], receivedAt); ok {
+					return parsed
+				}
+			}
+		}
+		if len(body) >= 15 {
+			if parsed, err := time.ParseInLocation("Jan _2 15:04:05", body[:15], time.UTC); err == nil {
+				parsed = time.Date(receivedAt.Year(), parsed.Month(), parsed.Day(), parsed.Hour(), parsed.Minute(), parsed.Second(), 0, time.UTC)
+				if parsed.After(receivedAt.Add(24 * time.Hour)) {
+					parsed = parsed.AddDate(-1, 0, 0)
+				}
+				return parsed
+			}
+		}
+	}
+	return receivedAt
+}
+
+func timestampValue(value interface{}, fallback time.Time) (time.Time, bool) {
+	switch typed := value.(type) {
+	case string:
+		for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+			if parsed, err := time.Parse(layout, strings.TrimSpace(typed)); err == nil {
+				return parsed.UTC(), true
+			}
+		}
+		if numeric, err := strconv.ParseFloat(strings.TrimSpace(typed), 64); err == nil && numeric > 0 {
+			return unixTelemetryTime(numeric), true
+		}
+	case json.Number:
+		if numeric, err := typed.Float64(); err == nil && numeric > 0 {
+			return unixTelemetryTime(numeric), true
+		}
+	case float64:
+		if typed > 0 {
+			return unixTelemetryTime(typed), true
+		}
+	}
+	return fallback, false
+}
+
+func unixTelemetryTime(value float64) time.Time {
+	if value > 10_000_000_000 {
+		value /= 1000
+	}
+	seconds := int64(value)
+	nanoseconds := int64((value - float64(seconds)) * float64(time.Second))
+	return time.Unix(seconds, nanoseconds).UTC()
 }
 
 func (r *SyslogReceiver) serverTLSConfig() (*tls.Config, error) {

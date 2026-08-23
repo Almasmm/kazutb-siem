@@ -20,6 +20,8 @@ type Event struct {
 	ContentType    string    `json:"content_type"`
 	EventID        string    `json:"event_id"`
 	EventTimestamp time.Time `json:"event_timestamp"`
+	SourceID       string    `json:"source_id,omitempty"`
+	SourceAddress  string    `json:"source_address,omitempty"`
 	Payload        []byte    `json:"payload"`
 	Cursor         uint64    `json:"cursor,omitempty"`
 }

@@ -97,7 +97,7 @@ func TestGatewayPreservesBinarySafeRawSubmission(t *testing.T) {
 	eventTime := time.Date(2026, 8, 23, 8, 9, 10, 0, time.UTC)
 	receipt, err := NewGateway(publisher, testEnvelopeAuthenticator(t)).SubmitRaw(context.Background(), "tenant", "agent-01", RawSubmission{
 		Format: FormatSysmonXML, ContentType: "application/xml", EventID: "sysmon-1",
-		EventTimestamp: eventTime, Payload: payload,
+		EventTimestamp: eventTime, SourceID: "host:dc-01", SourceAddress: "10.20.30.40", Payload: payload,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -106,8 +106,11 @@ func TestGatewayPreservesBinarySafeRawSubmission(t *testing.T) {
 		t.Fatalf("unexpected receipt/publication: receipt=%+v records=%d", receipt, len(publisher.records))
 	}
 	envelope := publisher.records[0]
-	if envelope.Format != FormatSysmonXML || envelope.SchemaVersion != "2" || string(envelope.PayloadBytes()) != string(payload) {
+	if envelope.Format != FormatSysmonXML || envelope.SchemaVersion != "3" || string(envelope.PayloadBytes()) != string(payload) {
 		t.Fatalf("raw envelope changed: %+v", envelope)
+	}
+	if envelope.SourceID != "host:dc-01" || envelope.SourceAddress != "10.20.30.40" {
+		t.Fatalf("source identity was not preserved: %+v", envelope)
 	}
 	if len(envelope.Payload) != 0 || len(envelope.RawPayload) == 0 || !envelope.EventTimestamp.Equal(eventTime) {
 		t.Fatalf("raw payload encoding/timestamp invalid: %+v", envelope)

@@ -80,6 +80,8 @@ type CanonicalEvent struct {
 	EventTime      time.Time              `json:"event_time"`
 	IngestTime     time.Time              `json:"ingest_time"`
 	CollectorID    string                 `json:"collector_id"`
+	SourceID       string                 `json:"source_id,omitempty"`
+	SourceAddress  string                 `json:"source_address,omitempty"`
 	Category       string                 `json:"category"`
 	ActivityName   string                 `json:"activity_name"`
 	Source         EventSource            `json:"source"`

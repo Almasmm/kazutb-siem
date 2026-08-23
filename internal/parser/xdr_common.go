@@ -26,6 +26,7 @@ func xdrEvent(envelope ingest.RawEnvelope, parserID, vendor, product, sourceType
 	}
 	return core.CanonicalEvent{
 		ID: envelope.EventID, TenantID: envelope.TenantID, CollectorID: envelope.CollectorID,
+		SourceID: envelope.SourceID, SourceAddress: envelope.SourceAddress,
 		EventTime: eventTime, IngestTime: ingestTime, Category: category, ActivityName: activity,
 		Source: core.EventSource{Vendor: vendor, Product: product, Type: sourceType},
 		Schema: core.SchemaRef{OCSFVersion: "1.4.0", ClassUID: classUID}, Confidence: 75,

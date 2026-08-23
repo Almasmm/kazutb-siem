@@ -23,6 +23,9 @@ func TestForwarderSendsBoundRawEventAndRequiresQueueReceipt(t *testing.T) {
 		if r.Header.Get("X-KCSP-Event-Timestamp") != eventTime.Format(time.RFC3339Nano) {
 			t.Fatalf("source timestamp missing: %v", r.Header)
 		}
+		if r.Header.Get("X-KCSP-Source-ID") != "host:dc-01" || r.Header.Get("X-KCSP-Source-Address") != "10.20.30.40" {
+			t.Fatalf("source identity missing: %v", r.Header)
+		}
 		w.WriteHeader(http.StatusAccepted)
 		_ = json.NewEncoder(w).Encode(ingest.Receipt{EventID: "event-1", Status: "QUEUED"})
 	}))
@@ -36,7 +39,7 @@ func TestForwarderSendsBoundRawEventAndRequiresQueueReceipt(t *testing.T) {
 	defer forwarder.Close()
 	if _, err := forwarder.Send(t.Context(), Event{
 		Format: ingest.FormatSysmonXML, ContentType: "application/xml", EventID: "event-1",
-		EventTimestamp: eventTime, Payload: []byte("<Event />"),
+		EventTimestamp: eventTime, SourceID: "host:dc-01", SourceAddress: "10.20.30.40", Payload: []byte("<Event />"),
 	}); err != nil {
 		t.Fatal(err)
 	}

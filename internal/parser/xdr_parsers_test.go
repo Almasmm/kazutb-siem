@@ -35,6 +35,7 @@ func TestXDRParsersNormalizeTrustedIdentity(t *testing.T) {
 			receivedAt := time.Date(2026, 8, 23, 1, 3, 0, 0, time.UTC)
 			event, err := registry.Parse(context.Background(), ingest.RawEnvelope{
 				EventID: "trusted-event", TenantID: "tenant-a", CollectorID: "collector-a",
+				SourceID: "device:firewall-01", SourceAddress: "10.0.0.1",
 				Format: fixture.format, EventTimestamp: receivedAt.Add(-time.Minute), ReceivedAt: receivedAt,
 				RawHash: "sha256:evidence", RawPayload: []byte(fixture.payload),
 			})
@@ -43,6 +44,9 @@ func TestXDRParsersNormalizeTrustedIdentity(t *testing.T) {
 			}
 			if event.ID != "trusted-event" || event.TenantID != "tenant-a" || event.CollectorID != "collector-a" {
 				t.Fatalf("trusted envelope identity was not preserved: %+v", event)
+			}
+			if event.SourceID != "device:firewall-01" || event.SourceAddress != "10.0.0.1" {
+				t.Fatalf("collector source identity was not preserved: %+v", event)
 			}
 			if event.Category != fixture.category || event.Parser.ID != fixture.parserID || event.Schema.OCSFVersion != "1.4.0" {
 				t.Fatalf("unexpected normalization: category=%s parser=%+v schema=%+v", event.Category, event.Parser, event.Schema)
