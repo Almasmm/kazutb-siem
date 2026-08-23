@@ -1,0 +1,437 @@
+nameOverride: ""
+fullnameOverride: ""
+
+global:
+  version: "0.1.0"
+  profile: production
+  tenant:
+    id: "00000000-0000-0000-0000-000000000001"
+    name: "KCSP"
+
+imagePullSecrets: []
+images:
+  api:
+    repository: ghcr.io/almasmm/kcsp-api
+    tag: "0.1.0"
+    digest: ""
+    pullPolicy: IfNotPresent
+  processor:
+    repository: ghcr.io/almasmm/kcsp-processor
+    tag: "0.1.0"
+    digest: ""
+    pullPolicy: IfNotPresent
+  soar-worker:
+    repository: ghcr.io/almasmm/kcsp-soar-worker
+    tag: "0.1.0"
+    digest: ""
+    pullPolicy: IfNotPresent
+  ai-worker:
+    repository: ghcr.io/almasmm/kcsp-ai-worker
+    tag: "0.1.0"
+    digest: ""
+    pullPolicy: IfNotPresent
+  web:
+    repository: ghcr.io/almasmm/kcsp-web
+    tag: "0.1.0"
+    digest: ""
+    pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+secrets:
+  existingSecret: kcsp-runtime
+  connectorExistingSecret: ""
+  keys:
+    databaseURL: database-url
+    clickhouseURL: clickhouse-url
+    minioAccessKey: minio-access-key
+    minioSecretKey: minio-secret-key
+    aiLocalAPIKey: ai-local-api-key
+    aiCloudAPIKey: ai-cloud-api-key
+
+trustBundle:
+  existingConfigMap: ""
+  key: ca-certificates.crt
+
+config:
+  auth:
+    mode: oidc
+    oidc:
+      issuerURL: https://identity.example.edu/realms/kcsp
+      clientID: kcsp
+      rolesClaim: roles
+      permissionClaim: permissions
+      tenantClaim: tenant_id
+  collectors:
+    requireRegistered: true
+  evidence:
+    maxBytes: 26214400
+  kafka:
+    brokers:
+      - kafka.example.internal:9092
+    rawTopic: kcsp.events.raw
+    dlqTopic: kcsp.events.dlq
+    consumerGroup: kcsp-processor
+    partitions: 12
+    replicationFactor: 3
+  minio:
+    endpoint: minio.example.internal:9000
+    secure: true
+    region: us-east-1
+    evidenceBucket: kcsp-evidence
+  soar:
+    pollInterval: 2s
+    leaseDuration: 30s
+  ai:
+    pollInterval: 2s
+    leaseDuration: 45s
+    local:
+      endpoint: ""
+      model: ""
+    cloud:
+      endpoint: ""
+      model: ""
+  web:
+    clientMaxBodySize: 32m
+
+workloads:
+  api:
+    enabled: true
+    replicas: 2
+    command:
+      - /usr/local/bin/kcsp-api
+    containerPort: 8080
+    portName: http
+    terminationGracePeriodSeconds: 30
+    service:
+      enabled: true
+      port: 8080
+      monitor: true
+    pdb:
+      enabled: true
+      minAvailable: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+    probes:
+      startup:
+        httpGet:
+          path: /health/live
+          port: http
+        failureThreshold: 30
+        periodSeconds: 2
+      liveness:
+        httpGet:
+          path: /health/live
+          port: http
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        timeoutSeconds: 3
+        failureThreshold: 3
+      readiness:
+        httpGet:
+          path: /health/ready
+          port: http
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 3
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+        ephemeral-storage: 64Mi
+      limits:
+        cpu: "2"
+        memory: 1Gi
+        ephemeral-storage: 256Mi
+  processor:
+    enabled: true
+    replicas: 2
+    command:
+      - /usr/local/bin/kcsp-processor
+    containerPort: 9090
+    portName: metrics
+    terminationGracePeriodSeconds: 60
+    service:
+      enabled: true
+      port: 9090
+      monitor: true
+    pdb:
+      enabled: true
+      minAvailable: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 2
+      maxReplicas: 12
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 0
+    probes:
+      startup:
+        httpGet:
+          path: /health/live
+          port: metrics
+        failureThreshold: 30
+        periodSeconds: 2
+      liveness:
+        httpGet:
+          path: /health/live
+          port: metrics
+        periodSeconds: 10
+        timeoutSeconds: 3
+        failureThreshold: 3
+      readiness:
+        httpGet:
+          path: /health/live
+          port: metrics
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 3
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: "4"
+        memory: 2Gi
+        ephemeral-storage: 512Mi
+  soar-worker:
+    enabled: true
+    replicas: 2
+    command:
+      - /usr/local/bin/kcsp-soar-worker
+    containerPort: 9090
+    portName: metrics
+    terminationGracePeriodSeconds: 60
+    service:
+      enabled: true
+      port: 9090
+      monitor: true
+    pdb:
+      enabled: true
+      minAvailable: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 0
+    probes:
+      startup:
+        httpGet:
+          path: /health/live
+          port: metrics
+        failureThreshold: 30
+        periodSeconds: 2
+      liveness:
+        httpGet:
+          path: /health/live
+          port: metrics
+        periodSeconds: 10
+        timeoutSeconds: 3
+        failureThreshold: 3
+      readiness:
+        httpGet:
+          path: /health/live
+          port: metrics
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 3
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+        ephemeral-storage: 64Mi
+      limits:
+        cpu: "2"
+        memory: 1Gi
+        ephemeral-storage: 256Mi
+  ai-worker:
+    enabled: true
+    replicas: 1
+    command:
+      - /usr/local/bin/kcsp-ai-worker
+    containerPort: 9090
+    portName: metrics
+    terminationGracePeriodSeconds: 90
+    service:
+      enabled: true
+      port: 9090
+      monitor: true
+    pdb:
+      enabled: false
+      minAvailable: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 4
+      targetCPUUtilizationPercentage: 75
+      targetMemoryUtilizationPercentage: 0
+    probes:
+      startup:
+        httpGet:
+          path: /health/live
+          port: metrics
+        failureThreshold: 30
+        periodSeconds: 2
+      liveness:
+        httpGet:
+          path: /health/live
+          port: metrics
+        periodSeconds: 10
+        timeoutSeconds: 3
+        failureThreshold: 3
+      readiness:
+        httpGet:
+          path: /health/live
+          port: metrics
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 3
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: "4"
+        memory: 4Gi
+        ephemeral-storage: 512Mi
+  web:
+    enabled: true
+    replicas: 2
+    command: []
+    containerPort: 8080
+    portName: http
+    terminationGracePeriodSeconds: 30
+    service:
+      enabled: true
+      port: 8080
+      monitor: false
+    pdb:
+      enabled: true
+      minAvailable: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+    probes:
+      startup:
+        httpGet:
+          path: /healthz
+          port: http
+        failureThreshold: 30
+        periodSeconds: 2
+      liveness:
+        httpGet:
+          path: /healthz
+          port: http
+        periodSeconds: 10
+        timeoutSeconds: 3
+        failureThreshold: 3
+      readiness:
+        httpGet:
+          path: /healthz
+          port: http
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 3
+    resources:
+      requests:
+        cpu: 100m
+        memory: 64Mi
+        ephemeral-storage: 32Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+        ephemeral-storage: 128Mi
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: soc.example.edu
+      path: /
+      pathType: Prefix
+  tls: []
+
+observability:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
+networkPolicy:
+  enabled: true
+  dns:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+    podSelector:
+      matchLabels:
+        k8s-app: kube-dns
+  ingressController:
+    enabled: true
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: ingress-nginx
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: ingress-nginx
+  monitoring:
+    enabled: false
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: monitoring
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: prometheus
+  externalEgressCidrs: []
+  dataPlanePeers: []
+  externalEgressPorts:
+    - port: 443
+      protocol: TCP
+    - port: 5432
+      protocol: TCP
+    - port: 9000
+      protocol: TCP
+    - port: 9092
+      protocol: TCP
+    - port: 11434
+      protocol: TCP
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+priorityClassName: ""
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpread:
+  enabled: true
+  maxSkew: 1
+  topologyKey: topology.kubernetes.io/zone
+  whenUnsatisfiable: ScheduleAnyway
+ephemeralStorage:
+  tmpSizeLimit: 128Mi
+  nginxCacheSizeLimit: 128Mi

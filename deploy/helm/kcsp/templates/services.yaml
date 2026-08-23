@@ -1,0 +1,23 @@
+{{- $root := . -}}
+{{- range $name, $workload := .Values.workloads }}
+{{- if and $workload.enabled $workload.service.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kcsp.fullname" $root }}-{{ $name }}
+  labels:
+    {{- include "kcsp.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "kcsp.componentLabels" (dict "root" $root "component" $name) | nindent 4 }}
+  ports:
+    - name: {{ $workload.portName }}
+      port: {{ $workload.service.port }}
+      targetPort: {{ $workload.portName }}
+      protocol: TCP
+  sessionAffinity: None
+{{- end }}
+{{- end }}

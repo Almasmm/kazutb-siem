@@ -1,0 +1,18 @@
+{{- $root := . -}}
+{{- range $name, $workload := .Values.workloads }}
+{{- if and $workload.enabled $workload.pdb.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "kcsp.fullname" $root }}-{{ $name }}
+  labels:
+    {{- include "kcsp.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  minAvailable: {{ $workload.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "kcsp.componentLabels" (dict "root" $root "component" $name) | nindent 6 }}
+{{- end }}
+{{- end }}

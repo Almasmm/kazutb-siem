@@ -1,0 +1,203 @@
+{{- $root := . -}}
+{{- range $name, $workload := .Values.workloads }}
+{{- if $workload.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kcsp.fullname" $root }}-{{ $name }}
+  labels:
+    {{- include "kcsp.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  {{- if not $workload.autoscaling.enabled }}
+  replicas: {{ $workload.replicas }}
+  {{- end }}
+  revisionHistoryLimit: 3
+  minReadySeconds: 10
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "kcsp.componentLabels" (dict "root" $root "component" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kcsp.componentLabels" (dict "root" $root "component" $name) | nindent 8 }}
+        {{- with $root.Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmap.yaml") $root | sha256sum }}
+        {{- with $root.Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "kcsp.serviceAccountName" $root }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: {{ $workload.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml $root.Values.podSecurityContext | nindent 8 }}
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $root.Values.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      {{- with $root.Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $root.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $root.Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if $root.Values.topologySpread.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: {{ $root.Values.topologySpread.maxSkew }}
+          topologyKey: {{ $root.Values.topologySpread.topologyKey }}
+          whenUnsatisfiable: {{ $root.Values.topologySpread.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "kcsp.componentLabels" (dict "root" $root "component" $name) | nindent 14 }}
+      {{- end }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "kcsp.image" (dict "root" $root "component" $name) | quote }}
+          imagePullPolicy: {{ (index $root.Values.images $name).pullPolicy }}
+          {{- with $workload.command }}
+          command: {{ toJson . }}
+          {{- end }}
+          securityContext:
+            {{- toYaml $root.Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: {{ $workload.portName }}
+              containerPort: {{ $workload.containerPort }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "kcsp.fullname" $root }}-config
+            {{- if and (eq $name "soar-worker") $root.Values.secrets.connectorExistingSecret }}
+            - secretRef:
+                name: {{ $root.Values.secrets.connectorExistingSecret }}
+            {{- end }}
+          env:
+            {{- if ne $name "web" }}
+            - name: KCSP_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "secrets.existingSecret is required" $root.Values.secrets.existingSecret }}
+                  key: {{ $root.Values.secrets.keys.databaseURL }}
+            {{- end }}
+            {{- if or (eq $name "api") (eq $name "processor") (eq $name "ai-worker") }}
+            - name: KCSP_CLICKHOUSE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.secrets.existingSecret }}
+                  key: {{ $root.Values.secrets.keys.clickhouseURL }}
+            {{- end }}
+            {{- if eq $name "api" }}
+            - name: KCSP_LISTEN_ADDR
+              value: ":8080"
+            - name: KCSP_MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.secrets.existingSecret }}
+                  key: {{ $root.Values.secrets.keys.minioAccessKey }}
+            - name: KCSP_MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.secrets.existingSecret }}
+                  key: {{ $root.Values.secrets.keys.minioSecretKey }}
+            {{- end }}
+            {{- if or (eq $name "processor") (eq $name "soar-worker") (eq $name "ai-worker") }}
+            - name: KCSP_METRICS_ADDR
+              value: ":9090"
+            {{- end }}
+            {{- if eq $name "soar-worker" }}
+            - name: KCSP_SOAR_WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- end }}
+            {{- if eq $name "ai-worker" }}
+            - name: KCSP_AI_WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KCSP_AI_LOCAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.secrets.existingSecret }}
+                  key: {{ $root.Values.secrets.keys.aiLocalAPIKey }}
+                  optional: true
+            - name: KCSP_AI_CLOUD_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.secrets.existingSecret }}
+                  key: {{ $root.Values.secrets.keys.aiCloudAPIKey }}
+                  optional: true
+            {{- end }}
+          {{- with $workload.probes.startup }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $workload.probes.liveness }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $workload.probes.readiness }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml $workload.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if eq $name "web" }}
+            - name: web-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+              readOnly: true
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            {{- end }}
+            {{- if and (ne $name "web") $root.Values.trustBundle.existingConfigMap }}
+            - name: trust-bundle
+              mountPath: /etc/ssl/certs/ca-certificates.crt
+              subPath: {{ $root.Values.trustBundle.key }}
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ $root.Values.ephemeralStorage.tmpSizeLimit }}
+        {{- if eq $name "web" }}
+        - name: web-config
+          configMap:
+            name: {{ include "kcsp.fullname" $root }}-web
+        - name: nginx-cache
+          emptyDir:
+            sizeLimit: {{ $root.Values.ephemeralStorage.nginxCacheSizeLimit }}
+        {{- end }}
+        {{- if and (ne $name "web") $root.Values.trustBundle.existingConfigMap }}
+        - name: trust-bundle
+          configMap:
+            name: {{ $root.Values.trustBundle.existingConfigMap }}
+            items:
+              - key: {{ $root.Values.trustBundle.key }}
+                path: {{ $root.Values.trustBundle.key }}
+        {{- end }}
+{{- end }}
+{{- end }}

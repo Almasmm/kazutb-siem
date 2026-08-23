@@ -1,0 +1,34 @@
+KCSP release {{ .Release.Name }} was rendered for namespace {{ .Release.Namespace }}.
+
+Required runtime Secret:
+  {{ .Values.secrets.existingSecret }}
+
+Required keys:
+  {{ .Values.secrets.keys.databaseURL }}
+  {{ .Values.secrets.keys.clickhouseURL }}
+  {{ .Values.secrets.keys.minioAccessKey }}
+  {{ .Values.secrets.keys.minioSecretKey }}
+
+Optional AI keys:
+  {{ .Values.secrets.keys.aiLocalAPIKey }}
+  {{ .Values.secrets.keys.aiCloudAPIKey }}
+
+{{- if not .Values.networkPolicy.externalEgressCidrs }}
+
+WARNING: networkPolicy.externalEgressCidrs is empty. Application pods are
+fail-closed and can only resolve DNS plus communicate on explicitly allowed
+in-cluster paths. Add the exact data-plane and identity-provider CIDRs before
+installing this release.
+{{- end }}
+
+{{- if .Values.ingress.enabled }}
+
+SOC console:
+{{- range .Values.ingress.hosts }}
+  https://{{ .host }}{{ .path }}
+{{- end }}
+{{- else }}
+
+Ingress is disabled. Use a controlled port-forward for initial validation:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kcsp.fullname" . }}-web 8080:8080
+{{- end }}

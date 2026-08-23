@@ -1,0 +1,177 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kcsp.fullname" . }}-default-deny
+  labels:
+    {{- include "kcsp.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kcsp.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kcsp.fullname" . }}-dns
+  labels:
+    {{- include "kcsp.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kcsp.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.dns.namespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml .Values.networkPolicy.dns.podSelector | nindent 12 }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kcsp.fullname" . }}-web
+  labels:
+    {{- include "kcsp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kcsp.componentLabels" (dict "root" . "component" "web") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  {{- if .Values.networkPolicy.ingressController.enabled }}
+  ingress:
+    - from:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.ingressController.namespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml .Values.networkPolicy.ingressController.podSelector | nindent 12 }}
+      ports:
+        - port: 8080
+          protocol: TCP
+  {{- end }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "kcsp.componentLabels" (dict "root" . "component" "api") | nindent 14 }}
+      ports:
+        - port: 8080
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kcsp.fullname" . }}-api
+  labels:
+    {{- include "kcsp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kcsp.componentLabels" (dict "root" . "component" "api") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "kcsp.componentLabels" (dict "root" . "component" "web") | nindent 14 }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- if .Values.networkPolicy.monitoring.enabled }}
+    - from:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.monitoring.namespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml .Values.networkPolicy.monitoring.podSelector | nindent 12 }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- end }}
+  {{- if or .Values.networkPolicy.externalEgressCidrs .Values.networkPolicy.dataPlanePeers }}
+  egress:
+    - to:
+        {{- range .Values.networkPolicy.externalEgressCidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+        {{- range .Values.networkPolicy.dataPlanePeers }}
+        -
+          {{- with .namespaceSelector }}
+          namespaceSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .podSelector }}
+          podSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- end }}
+      ports:
+        {{- toYaml .Values.networkPolicy.externalEgressPorts | nindent 8 }}
+  {{- end }}
+{{- $root := . }}
+{{- range $component := list "processor" "soar-worker" "ai-worker" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kcsp.fullname" $root }}-{{ $component }}
+  labels:
+    {{- include "kcsp.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kcsp.componentLabels" (dict "root" $root "component" $component) | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  {{- if $root.Values.networkPolicy.monitoring.enabled }}
+  ingress:
+    - from:
+        - namespaceSelector:
+            {{- toYaml $root.Values.networkPolicy.monitoring.namespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml $root.Values.networkPolicy.monitoring.podSelector | nindent 12 }}
+      ports:
+        - port: 9090
+          protocol: TCP
+  {{- end }}
+  {{- if or $root.Values.networkPolicy.externalEgressCidrs $root.Values.networkPolicy.dataPlanePeers }}
+  egress:
+    - to:
+        {{- range $root.Values.networkPolicy.externalEgressCidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+        {{- range $root.Values.networkPolicy.dataPlanePeers }}
+        -
+          {{- with .namespaceSelector }}
+          namespaceSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .podSelector }}
+          podSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- end }}
+      ports:
+        {{- toYaml $root.Values.networkPolicy.externalEgressPorts | nindent 8 }}
+  {{- end }}
+{{- end }}
+{{- end }}

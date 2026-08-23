@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kcsp.fullname" . }}-config
+  labels:
+    {{- include "kcsp.labels" . | nindent 4 }}
+data:
+  KCSP_VERSION: {{ .Values.global.version | quote }}
+  KCSP_PROFILE: {{ .Values.global.profile | quote }}
+  KCSP_DEFAULT_TENANT_ID: {{ .Values.global.tenant.id | quote }}
+  KCSP_DEFAULT_TENANT_NAME: {{ .Values.global.tenant.name | quote }}
+  KCSP_DEMO_SEED: "false"
+  KCSP_AUTH_MODE: {{ .Values.config.auth.mode | quote }}
+  KCSP_OIDC_ISSUER_URL: {{ .Values.config.auth.oidc.issuerURL | quote }}
+  KCSP_OIDC_CLIENT_ID: {{ .Values.config.auth.oidc.clientID | quote }}
+  KCSP_OIDC_ROLES_CLAIM: {{ .Values.config.auth.oidc.rolesClaim | quote }}
+  KCSP_OIDC_PERMISSION_CLAIM: {{ .Values.config.auth.oidc.permissionClaim | quote }}
+  KCSP_OIDC_TENANT_CLAIM: {{ .Values.config.auth.oidc.tenantClaim | quote }}
+  KCSP_REQUIRE_REGISTERED_COLLECTORS: {{ ternary "true" "false" .Values.config.collectors.requireRegistered | quote }}
+  KCSP_EVIDENCE_MAX_BYTES: {{ .Values.config.evidence.maxBytes | quote }}
+  KCSP_KAFKA_BROKERS: {{ join "," .Values.config.kafka.brokers | quote }}
+  KCSP_KAFKA_RAW_TOPIC: {{ .Values.config.kafka.rawTopic | quote }}
+  KCSP_KAFKA_DLQ_TOPIC: {{ .Values.config.kafka.dlqTopic | quote }}
+  KCSP_KAFKA_CONSUMER_GROUP: {{ .Values.config.kafka.consumerGroup | quote }}
+  KCSP_KAFKA_PARTITIONS: {{ .Values.config.kafka.partitions | quote }}
+  KCSP_KAFKA_REPLICATION_FACTOR: {{ .Values.config.kafka.replicationFactor | quote }}
+  KCSP_MINIO_ENDPOINT: {{ .Values.config.minio.endpoint | quote }}
+  KCSP_MINIO_SECURE: {{ ternary "true" "false" .Values.config.minio.secure | quote }}
+  KCSP_MINIO_REGION: {{ .Values.config.minio.region | quote }}
+  KCSP_MINIO_EVIDENCE_BUCKET: {{ .Values.config.minio.evidenceBucket | quote }}
+  KCSP_SOAR_POLL_INTERVAL: {{ .Values.config.soar.pollInterval | quote }}
+  KCSP_SOAR_LEASE_DURATION: {{ .Values.config.soar.leaseDuration | quote }}
+  KCSP_SOAR_TENANT_ID: {{ .Values.global.tenant.id | quote }}
+  KCSP_AI_POLL_INTERVAL: {{ .Values.config.ai.pollInterval | quote }}
+  KCSP_AI_LEASE_DURATION: {{ .Values.config.ai.leaseDuration | quote }}
+  KCSP_AI_TENANT_ID: {{ .Values.global.tenant.id | quote }}
+  KCSP_AI_LOCAL_ENDPOINT: {{ .Values.config.ai.local.endpoint | quote }}
+  KCSP_AI_LOCAL_MODEL: {{ .Values.config.ai.local.model | quote }}
+  KCSP_AI_CLOUD_ENDPOINT: {{ .Values.config.ai.cloud.endpoint | quote }}
+  KCSP_AI_CLOUD_MODEL: {{ .Values.config.ai.cloud.model | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kcsp.fullname" . }}-web
+  labels:
+    {{- include "kcsp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+data:
+  default.conf: |
+    server {
+        listen 8080;
+        server_name _;
+        root /usr/share/nginx/html;
+        index index.html;
+        server_tokens off;
+        charset utf-8;
+        client_max_body_size {{ .Values.config.web.clientMaxBodySize }};
+
+        location = /healthz {
+            access_log off;
+            default_type text/plain;
+            return 200 "ok\n";
+        }
+
+        location /api/ {
+            proxy_pass http://{{ include "kcsp.fullname" . }}-api:8080;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_connect_timeout 5s;
+            proxy_read_timeout 60s;
+            proxy_next_upstream error timeout http_502 http_503 http_504;
+        }
+
+        location /assets/ {
+            try_files $uri =404;
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+
+        location / {
+            try_files $uri $uri/ /index.html;
+            add_header Cache-Control "no-store";
+        }
+
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
+        add_header Cross-Origin-Resource-Policy "same-origin" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+    }

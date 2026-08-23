@@ -1,0 +1,10 @@
+apiVersion: v2
+name: kcsp
+description: KCSP stateless SOC/SIEM application workloads for Kubernetes
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.29.0-0"
+home: https://github.com/Almasmm/kazutb-siem
+sources:
+  - https://github.com/Almasmm/kazutb-siem

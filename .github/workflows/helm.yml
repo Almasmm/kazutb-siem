@@ -1,0 +1,50 @@
+name: Helm
+
+on:
+  push:
+    paths:
+      - "deploy/helm/**"
+      - "ops/helm/**"
+      - ".github/workflows/helm.yml"
+  pull_request:
+    paths:
+      - "deploy/helm/**"
+      - "ops/helm/**"
+      - ".github/workflows/helm.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  chart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lint and render security contracts
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" \
+            -w /src \
+            --entrypoint /bin/sh \
+            alpine/helm:3.17.3@sha256:d899e6316789fec04ee95300a18e454b7942539cbb3d89bde3e0655d6ca2e895 \
+            ops/helm/self-test.sh
+
+      - name: Validate Kubernetes OpenAPI schemas
+        run: |
+          set -o pipefail
+          docker run --rm \
+            -v "$PWD:/src" \
+            -w /src \
+            alpine/helm:3.17.3@sha256:d899e6316789fec04ee95300a18e454b7942539cbb3d89bde3e0655d6ca2e895 \
+            template kcsp deploy/helm/kcsp \
+            --namespace kcsp \
+            --set-string secrets.existingSecret=kcsp-ci-runtime \
+            --set ingress.enabled=true \
+            --set workloads.api.autoscaling.enabled=true \
+            --set-string networkPolicy.externalEgressCidrs[0]=10.20.30.10/32 | \
+          docker run --rm -i \
+            ghcr.io/yannh/kubeconform:v0.6.7@sha256:0925177fb05b44ce18574076141b5c3d83235e1904d3f952182ac99ddc45762c \
+            -strict -summary -kubernetes-version 1.29.0 -
