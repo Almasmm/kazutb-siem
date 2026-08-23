@@ -21,6 +21,7 @@ import {
   ShieldCheck,
   UsersRound,
   Network,
+  Braces,
   Workflow,
   X,
 } from "lucide-react";
@@ -50,6 +51,7 @@ const navGroups = [
       { to: "/ueba", label: "nav.ueba", icon: UsersRound },
       { to: "/ai-soc", label: "nav.aiSoc", icon: BrainCircuit },
       { to: "/rules", label: "nav.rules", icon: Radar },
+      { to: "/parsers", label: "nav.parsers", icon: Braces },
     ],
   },
   {
@@ -79,6 +81,7 @@ const pageKeys: Record<string, string> = {
   "/system": "nav.system",
   "/cases": "nav.cases",
   "/assets": "nav.assets",
+  "/parsers": "nav.parsers",
 };
 
 export function AppShell() {

@@ -16,6 +16,7 @@ export const kk = {
     operations: "Операциялар", intelligence: "Талдау", governance: "Басқару", soc: "SOC панелі",
     alerts: "Ескертулер кезегі", hunt: "Іздеу / Hunt", incidents: "Инциденттер", cases: "Кейстер", rules: "Анықтау ережелері", collectors: "Коллекторлар",
     assets: "Активтер мен нысандар",
+    parsers: "Parser Studio",
     threatIntel: "Threat Intelligence", ueba: "UEBA", evidence: "Дәлелдер", soar: "SOAR", aiSoc: "AI SOC", system: "Жүйе", audit: "Аудит",
   },
   common: {
@@ -170,6 +171,14 @@ export const kk = {
     searchPlaceholder: "Hostname, пайдаланушы, IP, процесс немесе natural key", entityType: "Нысан түрі", minimumRisk: "Ең төмен тәуекел", noEntities: "Бұл көрініске сәйкес нысандар жоқ",
     entity: "Нысан", firstSeen: "Алғаш байқалды", lastSeen: "Соңғы белсенділік", naturalKey: "Табиғи кілт", riskContext: "Ағымдағы контекст",
     relationshipGraph: "Байланыстар графы", nodes: "түйін", relations: "байланыс", attributes: "Бақыланған атрибуттар", eventPivots: "Бастапқы оқиғаларға өту",
+  },
+  parserPage: {
+    eyebrow: "Телеметрия инженериясы", title: "Parser Studio", subtitle: "Пайдаланушы кодын орындамай, қауіпсіз tenant-парсерлерін OCSF pipeline ішінде құру, тексеру және жариялау.",
+    newParser: "Жаңа парсер", builtIn: "Кіріктірілген парсерлер", customParsers: "Пайдаланушы парсерлері", published: "Жарияланған", validatedVersions: "Тексерілген нұсқалар",
+    tenantCatalog: "Tenant контенті", versionedContent: "Парсер нұсқалары", protectedRuntime: "Қорғалған runtime", builtInParsers: "Кіріктірілген production-парсерлер", noCustom: "Пайдаланушы парсерлері жоқ",
+    parser: "Парсер", format: "Envelope форматы", tests: "Тесттер", newVersion: "Жаңа нұсқа", validate: "Тексеру", publish: "Жариялау", compiler: "Компилятор", mappedFields: "Сәйкестенген өрістер",
+    validation: "Тексеру есебі", validationPassed: "Жариялауға дайын", validationRequired: "Тексеру қажет", testsPassed: "тест өтті", mapping: "OCSF сәйкестігі", simulator: "Үлгі симуляторы", runSample: "Үлгіні іске қосу",
+    createTitle: "Парсер жобасын құру", inputKind: "Кіріс түрі", mappingJson: "Source-to-OCSF сәйкестігі (JSON)", defaultsJson: "OCSF әдепкі мәндері (JSON)", regressionSample: "Регрессиялық үлгі", expectedFields: "Күтілетін OCSF өрістері (JSON)",
   },
   severity: { critical: "Сындарлы", high: "Жоғары", medium: "Орташа", low: "Төмен", informational: "Ақпараттық", unknown: "Берілмеген" },
   status: {

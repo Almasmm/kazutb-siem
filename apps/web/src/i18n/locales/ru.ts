@@ -22,6 +22,7 @@ export const ru = {
     incidents: "Инциденты",
     cases: "Кейсы",
     assets: "Активы и сущности",
+    parsers: "Parser Studio",
     rules: "Детектирование",
     collectors: "Коллекторы",
     threatIntel: "Threat Intelligence",
@@ -296,6 +297,14 @@ export const ru = {
     searchPlaceholder: "Hostname, пользователь, IP, процесс или natural key", entityType: "Тип сущности", minimumRisk: "Минимальный риск", noEntities: "Сущности для этого представления не найдены",
     entity: "Сущность", firstSeen: "Впервые замечено", lastSeen: "Последняя активность", naturalKey: "Естественный ключ", riskContext: "Текущий контекст",
     relationshipGraph: "Граф связей", nodes: "узлов", relations: "связей", attributes: "Наблюдаемые атрибуты", eventPivots: "Переходы к исходным событиям",
+  },
+  parserPage: {
+    eyebrow: "Инженерия телеметрии", title: "Parser Studio", subtitle: "Создание, регрессионная проверка и публикация безопасных tenant-парсеров в рабочий OCSF pipeline без выполнения пользовательского кода.",
+    newParser: "Новый парсер", builtIn: "Встроенные парсеры", customParsers: "Пользовательские", published: "Опубликовано", validatedVersions: "Проверенные версии",
+    tenantCatalog: "Контент tenant", versionedContent: "Версионный каталог парсеров", protectedRuntime: "Защищённый runtime", builtInParsers: "Встроенные production-парсеры", noCustom: "Пользовательских парсеров пока нет",
+    parser: "Парсер", format: "Формат envelope", tests: "Тесты", newVersion: "Новая версия", validate: "Проверить", publish: "Опубликовать", compiler: "Компилятор", mappedFields: "Полей сопоставлено",
+    validation: "Отчёт валидации", validationPassed: "Готов к публикации", validationRequired: "Требуется проверка", testsPassed: "тестов пройдено", mapping: "Сопоставление OCSF", simulator: "Симулятор образца", runSample: "Запустить образец",
+    createTitle: "Создать черновик парсера", inputKind: "Тип входных данных", mappingJson: "Сопоставления source-to-OCSF (JSON)", defaultsJson: "Значения OCSF по умолчанию (JSON)", regressionSample: "Регрессионный образец", expectedFields: "Ожидаемые поля OCSF (JSON)",
   },
   severity: {
     critical: "Критический",

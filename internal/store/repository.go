@@ -27,6 +27,13 @@ type Repository interface {
 	ListEntities(context.Context, string, core.EntityFilter) ([]core.SecurityEntity, error)
 	GetEntity(context.Context, string, string) (core.SecurityEntity, error)
 	GetEntityGraph(context.Context, string, string, int, int) (core.EntityGraph, error)
+	CreateParserDraft(context.Context, core.ParserContent) (core.ParserContent, error)
+	ParserContent(context.Context, string, string, int) (core.ParserContent, error)
+	ListParserContent(context.Context, string) ([]core.ParserContent, error)
+	SaveParserValidation(context.Context, core.ParserContent) (core.ParserContent, error)
+	PublishParserContent(context.Context, string, string, int) (core.ParserContent, error)
+	DisableParserContent(context.Context, string, string) (core.ParserContent, error)
+	PublishedParserByFormat(context.Context, string, string) (core.ParserContent, bool, error)
 	PutFinding(context.Context, core.Finding) error
 	ListFindings(context.Context, string, string, int) ([]core.Finding, error)
 
@@ -56,12 +63,16 @@ type MemoryRepository struct {
 	entityRelations        map[string]map[string]core.EntityRelation
 	seenEntityObservations map[string]struct{}
 	seenRelationEvents     map[string]struct{}
+	parserMu               sync.RWMutex
+	parserContents         map[string]map[string]map[int]core.ParserContent
+	parserRequests         map[string]core.ParserContent
 }
 
 func WrapMemory(memory *Memory) *MemoryRepository {
 	return &MemoryRepository{
 		memory: memory, entities: map[string]map[string]core.SecurityEntity{}, entityRelations: map[string]map[string]core.EntityRelation{},
 		seenEntityObservations: map[string]struct{}{}, seenRelationEvents: map[string]struct{}{},
+		parserContents: map[string]map[string]map[int]core.ParserContent{}, parserRequests: map[string]core.ParserContent{},
 	}
 }
 
@@ -82,6 +93,7 @@ func (m *MemoryRepository) ResetTenant(ctx context.Context, tenantID string) err
 	}
 	m.memory.ResetTenant(tenantID)
 	m.resetEntities(tenantID)
+	m.resetParsers(tenantID)
 	return nil
 }
 func (m *MemoryRepository) SetRules(ctx context.Context, rules []core.DetectionRule) error {

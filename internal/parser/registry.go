@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/ingest"
@@ -22,10 +24,22 @@ type Descriptor struct {
 type Registry struct {
 	parsers     map[string]ingest.EnvelopeParser
 	descriptors []Descriptor
+	provider    PublishedParserProvider
+	cacheMu     sync.Mutex
+	cache       map[string]dynamicParserSnapshot
 }
 
-func NewRegistry() *Registry {
-	return &Registry{
+type PublishedParserProvider interface {
+	PublishedParserByFormat(context.Context, string, string) (core.ParserContent, bool, error)
+}
+
+type dynamicParserSnapshot struct {
+	parser   *CompiledParser
+	loadedAt time.Time
+}
+
+func NewRegistry(providers ...PublishedParserProvider) *Registry {
+	registry := &Registry{
 		parsers: map[string]ingest.EnvelopeParser{
 			ingest.FormatCanonicalJSON:   CanonicalJSON{},
 			ingest.FormatSysmonXML:       SysmonXML{},
@@ -48,7 +62,12 @@ func NewRegistry() *Registry {
 			{ID: "oisf-suricata-eve", Vendor: "OISF", Product: "Suricata", Version: "1.0.0", SchemaCompatibility: []string{"OCSF 1.4.0"}, Formats: []string{ingest.FormatSuricataEVE}, ReleaseState: "published"},
 			{ID: "zeek-json", Vendor: "Zeek", Product: "Zeek", Version: "1.0.0", SchemaCompatibility: []string{"OCSF 1.4.0"}, Formats: []string{ingest.FormatZeekJSON}, ReleaseState: "published"},
 		},
+		cache: map[string]dynamicParserSnapshot{},
 	}
+	if len(providers) > 0 {
+		registry.provider = providers[0]
+	}
+	return registry
 }
 
 func (r *Registry) Parse(ctx context.Context, envelope ingest.RawEnvelope) (core.CanonicalEvent, error) {
@@ -57,10 +76,39 @@ func (r *Registry) Parse(ctx context.Context, envelope ingest.RawEnvelope) (core
 		format = ingest.FormatCanonicalJSON
 	}
 	eventParser, ok := r.parsers[format]
-	if !ok {
+	if ok {
+		return eventParser.Parse(ctx, envelope)
+	}
+	if r.provider == nil {
 		return core.CanonicalEvent{}, fmt.Errorf("%w: no published parser for format %q", ErrParse, format)
 	}
-	return eventParser.Parse(ctx, envelope)
+	cacheKey := envelope.TenantID + "\x00" + format
+	r.cacheMu.Lock()
+	if snapshot, found := r.cache[cacheKey]; found && time.Since(snapshot.loadedAt) < 5*time.Second {
+		r.cacheMu.Unlock()
+		return snapshot.parser.Parse(ctx, envelope)
+	}
+	r.cacheMu.Unlock()
+	content, found, err := r.provider.PublishedParserByFormat(ctx, envelope.TenantID, format)
+	if err != nil {
+		return core.CanonicalEvent{}, fmt.Errorf("%w: load parser for %q: %v", ErrParse, format, err)
+	}
+	if !found {
+		return core.CanonicalEvent{}, fmt.Errorf("%w: no published parser for format %q", ErrParse, format)
+	}
+	compiled, err := Compile(content)
+	if err != nil {
+		return core.CanonicalEvent{}, err
+	}
+	r.cacheMu.Lock()
+	r.cache[cacheKey] = dynamicParserSnapshot{parser: compiled, loadedAt: time.Now()}
+	r.cacheMu.Unlock()
+	return compiled.Parse(ctx, envelope)
+}
+
+func IsBuiltInFormat(format string) bool {
+	_, found := NewRegistry().parsers[strings.ToLower(strings.TrimSpace(format))]
+	return found
 }
 
 func (r *Registry) Descriptors() []Descriptor {

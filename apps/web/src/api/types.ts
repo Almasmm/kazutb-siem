@@ -708,3 +708,63 @@ export interface EntityGraphDto {
   depth: number;
   total_observations: number;
 }
+
+export interface ParserTestCaseDto {
+  name: string;
+  payload: string;
+  expected: Record<string, string>;
+}
+
+export interface ParserSpecDto {
+  format: string;
+  input_kind: "JSON" | "KV";
+  mappings: Record<string, string>;
+  defaults: Record<string, string>;
+  tests: ParserTestCaseDto[];
+}
+
+export interface ParserValidationDto {
+  valid: boolean;
+  spec_hash?: string;
+  mapped_fields?: number;
+  tests_passed?: number;
+  tests_total?: number;
+  errors?: string[];
+  warnings?: string[];
+  test_results?: Array<{ name: string; passed: boolean; errors?: string[]; event_id?: string }>;
+  validated_at?: string;
+  compiler?: string;
+  ocsf_compatible?: string;
+}
+
+export interface ParserContentDto {
+  parser_id: string;
+  tenant_id?: string;
+  version: number;
+  name: string;
+  state: string;
+  spec: ParserSpecDto;
+  validation: ParserValidationDto;
+  created_by: string;
+  request_id?: string;
+  created_at: string;
+  updated_at: string;
+  published_at?: string;
+}
+
+export interface ParserDescriptorDto {
+  parser_id: string;
+  vendor: string;
+  product: string;
+  version: string;
+  schema_compatibility: string[];
+  formats: string[];
+  release_state: string;
+}
+
+export interface ParserSimulationDto {
+  parser_id: string;
+  version: number;
+  event: EventDto;
+  fields: Record<string, string>;
+}

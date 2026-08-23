@@ -1,6 +1,9 @@
 import type {
 	EntityDto,
 	EntityGraphDto,
+	ParserContentDto,
+	ParserDescriptorDto,
+	ParserSimulationDto,
   AlertDto,
   AISOCDecisionDto,
   AISOCPolicyDto,
@@ -282,6 +285,15 @@ export const api = {
   entity: (id: string, signal?: AbortSignal) => request<EntityDto>(`/entities/${encodeURIComponent(id)}`, { signal }),
   entityGraph: (id: string, depth = 2, signal?: AbortSignal) => request<EntityGraphDto>(`/entities/${encodeURIComponent(id)}/graph?depth=${depth}&limit=500`, { signal }),
   assets: (params?: Record<string, QueryValue>, signal?: AbortSignal) => getList<EntityDto>("/assets", params, signal),
+  parsers: (signal?: AbortSignal) => getList<ParserContentDto>("/parsers", undefined, signal),
+  builtInParsers: (signal?: AbortSignal) => getList<ParserDescriptorDto>("/parsers/built-in", undefined, signal),
+  parser: (id: string, version: number, signal?: AbortSignal) => request<ParserContentDto>(`/parsers/${encodeURIComponent(id)}/versions/${version}`, { signal }),
+  createParser: (payload: Record<string, unknown>) => request<ParserContentDto>("/parsers", { method: "POST", body: JSON.stringify(payload), headers: { "Idempotency-Key": crypto.randomUUID() } }),
+  createParserVersion: (id: string, payload: Record<string, unknown>) => request<ParserContentDto>(`/parsers/${encodeURIComponent(id)}/versions`, { method: "POST", body: JSON.stringify(payload), headers: { "Idempotency-Key": crypto.randomUUID() } }),
+  validateParser: (id: string, version: number) => request<ParserContentDto>(`/parsers/${encodeURIComponent(id)}/versions/${version}/validate`, { method: "POST" }),
+  publishParser: (id: string, version: number) => request<ParserContentDto>(`/parsers/${encodeURIComponent(id)}/versions/${version}/publish`, { method: "POST" }),
+  disableParser: (id: string) => request<ParserContentDto>(`/parsers/${encodeURIComponent(id)}/disable`, { method: "POST" }),
+  simulateParser: (id: string, version: number, payload: string) => request<ParserSimulationDto>(`/parsers/${encodeURIComponent(id)}/versions/${version}/simulate`, { method: "POST", body: JSON.stringify({ payload }) }),
   updateUEBAFeedback: (id: string, payload: { status: string; reason: string; version: number }) =>
     request<UEBAAnomalyDto>(`/ueba/anomalies/${encodeURIComponent(id)}/feedback`, {
       method: "POST",

@@ -22,6 +22,7 @@ import (
 	"github.com/kcsp/platform/internal/hunt"
 	"github.com/kcsp/platform/internal/ingest"
 	"github.com/kcsp/platform/internal/observability"
+	"github.com/kcsp/platform/internal/parser"
 	"github.com/kcsp/platform/internal/pipeline"
 	"github.com/kcsp/platform/internal/platform/auth"
 	"github.com/kcsp/platform/internal/soar"
@@ -64,6 +65,7 @@ type Server struct {
 	aiSOC             *aisoc.Service
 	cases             *cases.Service
 	entities          *entitygraph.Service
+	parsers           *parser.StudioService
 }
 
 type Authenticator interface {
@@ -87,6 +89,7 @@ type Config struct {
 	AISOCService                *aisoc.Service
 	CasesService                *cases.Service
 	EntityService               *entitygraph.Service
+	ParserService               *parser.StudioService
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -102,7 +105,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		collectors: config.CollectorRegistry, requireCollectors: config.RequireRegisteredCollectors,
 		detections: config.DetectionService, hunts: config.HuntStore, retention: config.RetentionStore,
 		evidence: config.EvidenceService, threatIntel: config.ThreatIntelService, soar: config.SOARService,
-		ueba: config.UEBAService, aiSOC: config.AISOCService, cases: config.CasesService, entities: config.EntityService,
+		ueba: config.UEBAService, aiSOC: config.AISOCService, cases: config.CasesService, entities: config.EntityService, parsers: config.ParserService,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -181,6 +184,17 @@ func (s *Server) routes() {
 		s.mux.Handle("GET /api/v1/entities/{entityID}/graph", s.protect("soc.entities.read", http.HandlerFunc(s.getEntityGraph)))
 		s.mux.Handle("GET /api/v1/assets", s.protect("soc.entities.read", http.HandlerFunc(s.listAssets)))
 		s.mux.Handle("GET /api/v1/assets/{assetID}", s.protect("soc.entities.read", http.HandlerFunc(s.getAsset)))
+	}
+	if s.parsers != nil {
+		s.mux.Handle("GET /api/v1/parsers", s.protect("siem.parsers.read", http.HandlerFunc(s.listParsers)))
+		s.mux.Handle("GET /api/v1/parsers/built-in", s.protect("siem.parsers.read", http.HandlerFunc(s.listBuiltInParsers)))
+		s.mux.Handle("POST /api/v1/parsers", s.protect("siem.parsers.write", http.HandlerFunc(s.createParserDraft)))
+		s.mux.Handle("GET /api/v1/parsers/{parserID}/versions/{version}", s.protect("siem.parsers.read", http.HandlerFunc(s.getParserContent)))
+		s.mux.Handle("POST /api/v1/parsers/{parserID}/versions", s.protect("siem.parsers.write", http.HandlerFunc(s.createParserVersion)))
+		s.mux.Handle("POST /api/v1/parsers/{parserID}/versions/{version}/validate", s.protect("siem.parsers.write", http.HandlerFunc(s.validateParser)))
+		s.mux.Handle("POST /api/v1/parsers/{parserID}/versions/{version}/simulate", s.protect("siem.parsers.write", http.HandlerFunc(s.simulateParser)))
+		s.mux.Handle("POST /api/v1/parsers/{parserID}/versions/{version}/publish", s.protect("siem.parsers.publish", http.HandlerFunc(s.publishParser)))
+		s.mux.Handle("POST /api/v1/parsers/{parserID}/disable", s.protect("siem.parsers.publish", http.HandlerFunc(s.disableParser)))
 	}
 	if s.threatIntel != nil {
 		s.mux.Handle("GET /api/v1/threat-intel/feeds", s.protect("ti.indicators.read", http.HandlerFunc(s.listThreatIntelFeeds)))

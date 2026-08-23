@@ -22,6 +22,7 @@ export const en = {
     incidents: "Incidents",
     cases: "Cases",
     assets: "Assets & entities",
+    parsers: "Parser Studio",
     rules: "Detections",
     collectors: "Collectors",
     threatIntel: "Threat Intelligence",
@@ -180,6 +181,14 @@ export const en = {
     searchPlaceholder: "Hostname, user, IP, process or natural key", entityType: "Entity type", minimumRisk: "Minimum risk", noEntities: "No entities match this view",
     entity: "Entity", firstSeen: "First seen", lastSeen: "Last seen", naturalKey: "Natural key", riskContext: "Current context",
     relationshipGraph: "Relationship graph", nodes: "nodes", relations: "relations", attributes: "Observed attributes", eventPivots: "Source event pivots",
+  },
+  parserPage: {
+    eyebrow: "Telemetry engineering", title: "Parser Studio", subtitle: "Build, regression-test and publish safe tenant parsers into the live OCSF processing path without executing custom code.",
+    newParser: "New parser", builtIn: "Built-in parsers", customParsers: "Custom parsers", published: "Published", validatedVersions: "Validated versions",
+    tenantCatalog: "Tenant content", versionedContent: "Versioned parser catalog", protectedRuntime: "Protected runtime", builtInParsers: "Built-in production parsers", noCustom: "No custom parsers yet",
+    parser: "Parser", format: "Envelope format", tests: "Tests", newVersion: "New version", validate: "Validate", publish: "Publish", compiler: "Compiler", mappedFields: "Mapped fields",
+    validation: "Validation report", validationPassed: "Ready to publish", validationRequired: "Validation required", testsPassed: "tests passed", mapping: "OCSF mapping", simulator: "Sample simulator", runSample: "Run sample",
+    createTitle: "Create parser draft", inputKind: "Input kind", mappingJson: "Source-to-OCSF mappings (JSON)", defaultsJson: "OCSF defaults (JSON)", regressionSample: "Regression sample payload", expectedFields: "Expected OCSF fields (JSON)",
   },
   severity: { critical: "Critical", high: "High", medium: "Medium", low: "Low", informational: "Informational", unknown: "Not set" },
   status: {

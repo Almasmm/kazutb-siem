@@ -39,6 +39,7 @@ func NewDemoAuthenticator() *DemoAuthenticator {
 		"platform.overview.read", "siem.events.read", "siem.findings.read",
 		"soc.alerts.read", "soc.incidents.read", "detection.rules.read", "platform.collectors.read", "siem.rules.read",
 		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage",
+		"siem.parsers.read",
 		"platform.retention.read",
 		"soc.evidence.read",
 		"soc.cases.read",
@@ -48,13 +49,13 @@ func NewDemoAuthenticator() *DemoAuthenticator {
 		"ueba.read",
 		"ai.read", "ai.request",
 	}
-	l2 := append(append([]string{}, read...), "soc.alerts.manage", "soc.incidents.create", "soc.incidents.manage", "soc.cases.manage", "platform.audit.read", "soc.evidence.write", "soar.playbooks.execute", "soar.actions.approve", "ueba.feedback", "ai.decide")
+	l2 := append(append([]string{}, read...), "soc.alerts.manage", "soc.incidents.create", "soc.incidents.manage", "soc.cases.manage", "platform.audit.read", "soc.evidence.write", "soar.playbooks.execute", "soar.actions.approve", "ueba.feedback", "ai.decide", "siem.parsers.write", "siem.parsers.publish")
 	return &DemoAuthenticator{tokens: map[string]Principal{
 		"kcsp-demo-l1":                 principal("user-soc-l1", "Айдана Сәрсен", "SOC L1", append(read, "soc.alerts.manage", "soc.incidents.create")),
 		"kcsp-demo-l2":                 principal("user-soc-l2", "Данияр Нұрлан", "SOC L2", l2),
 		"kcsp-demo-auditor":            principal("user-auditor", "Internal Auditor", "Auditor", []string{"platform.overview.read", "platform.audit.read", "soc.alerts.read", "soc.incidents.read", "soc.entities.read"}),
 		"kcsp-demo-collector":          principal("svc-http-collector", "HTTP Collector", "Service Account", []string{"siem.events.ingest", "platform.collectors.heartbeat"}),
-		"kcsp-demo-detection-engineer": principal("user-detection-engineer", "Detection Engineer", "Detection Engineer", []string{"platform.overview.read", "siem.events.read", "siem.rules.read", "siem.rules.write", "siem.rules.publish", "siem.hunt.read", "siem.hunt.execute"}),
+		"kcsp-demo-detection-engineer": principal("user-detection-engineer", "Detection Engineer", "Detection Engineer", []string{"platform.overview.read", "siem.events.read", "siem.rules.read", "siem.rules.write", "siem.rules.publish", "siem.hunt.read", "siem.hunt.execute", "siem.parsers.read", "siem.parsers.write", "siem.parsers.publish"}),
 		"kcsp-demo-threat-intel":       principal("user-threat-intel", "Threat Intelligence Analyst", "Threat Intelligence Analyst", []string{"platform.overview.read", "siem.events.read", "soc.alerts.read", "soc.incidents.read", "ti.indicators.read", "ti.indicators.manage"}),
 		"kcsp-demo-soar-engineer":      principal("user-soar-engineer", "SOAR Engineer", "SOAR Engineer", []string{"platform.overview.read", "soc.alerts.read", "soc.incidents.read", "soar.playbooks.read", "soar.playbooks.write", "soar.playbooks.execute", "soar.actions.approve", "soar.connectors.read", "soar.connectors.manage", "soar.connectors.test"}),
 		"kcsp-demo-admin": {
