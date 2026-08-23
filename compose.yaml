@@ -98,15 +98,20 @@ services:
 
   valkey:
     image: valkey/valkey:8.1.3-alpine
+    user: "999:1000"
     environment:
       KCSP_VALKEY_PASSWORD: ${KCSP_VALKEY_PASSWORD:?Set KCSP_VALKEY_PASSWORD in .env}
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
         umask 077
-        printf 'user default off\nuser kcsp on >%s ~kcsp:* +ping +eval +evalsha +incr +incrby +pexpire +pttl\n' "$$KCSP_VALKEY_PASSWORD" >/tmp/users.acl
+        replay_password="$$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+        printf 'user default on >%s ~kcsp:* +ping +eval +evalsha +multi +exec +select +incr +incrby +pexpire +pexpireat +pttl\nuser kcsp on >%s ~kcsp:* +ping +eval +evalsha +multi +exec +select +incr +incrby +pexpire +pexpireat +pttl\n' "$$replay_password" "$$KCSP_VALKEY_PASSWORD" >/tmp/users.acl
+        unset replay_password
         unset KCSP_VALKEY_PASSWORD
-        exec valkey-server --save '' --appendonly no --aclfile /tmp/users.acl --protected-mode yes
+        exec valkey-server --dir /data --databases 1 --save '' --appendonly yes --appendfsync everysec --aof-use-rdb-preamble yes --aclfile /tmp/users.acl --protected-mode yes
+    volumes:
+      - kcsp-valkey-data:/data
     ports:
       - "127.0.0.1:6379:6379"
     healthcheck:
@@ -117,7 +122,7 @@ services:
     restart: unless-stopped
     read_only: true
     tmpfs:
-      - /tmp:mode=0700
+      - /tmp:uid=999,gid=1000,mode=0700
     cap_drop:
       - ALL
     security_opt:
@@ -837,6 +842,7 @@ services:
       - no-new-privileges:true
 
 volumes:
+  kcsp-valkey-data:
   kcsp-postgres-data:
   kcsp-pgbackrest-state:
   kcsp-pitr-drill-data:

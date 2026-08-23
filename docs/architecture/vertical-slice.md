@@ -204,15 +204,16 @@ forensic evidence.
 List responses contain `items` and `total`; limits default to 100 and cap at 500. The
 embedded search parameters are bounded substring/equality filters, not CQL.
 
-## Current ports and production intent
+## Current adapters and production status
 
-| Boundary | Executable `embedded-dev` | Intended production adapter/status |
+| Boundary | Explicit development/test adapter | Production adapter/status |
 |---|---|---|
-| Identity and tenant | demo Bearer Principal + tenant membership/header | OIDC claims and trusted source binding; not implemented |
-| Pipeline repository | Go interfaces implemented by Memory | split ClickHouse telemetry and PostgreSQL control adapters; not implemented |
-| Event stream | direct synchronous calls; no port implementation | Kafka contract in AsyncAPI; not implemented |
-| Raw event | inline message/hash/reference in Memory | protected S3-compatible archive; not implemented |
-| Audit | volatile per-tenant unkeyed SHA-256 chain | transactional durable append/WORM or signed anchor; undecided |
+| Identity and tenant | demo Bearer principal and in-memory tenant membership | OIDC claim validation, exact tenant binding, scoped service accounts, and one-time agent enrollment are implemented |
+| Pipeline repository | Go interfaces backed by deterministic Memory | PostgreSQL control plane plus ClickHouse telemetry plane are implemented without silent production fallback |
+| Event stream | direct synchronous in-memory calls | tenant-bound HMAC envelopes, Kafka partitions, consumer checkpoints, and source-aware partition keys are implemented |
+| Raw event and evidence | inline payload and hash in Memory | retained raw telemetry in ClickHouse and immutable evidence objects in MinIO/S3 are implemented |
+| Shared state | process-local test limiters | authenticated/TLS-capable Valkey with hashed keys, atomic Lua reservations, minimal ACLs, and AOF persistence is implemented |
+| Audit | volatile per-tenant hash chain | transactional PostgreSQL hash chain with verification is implemented; storage-level WORM remains a deployment control |
 
 Domain/application code must not import Kafka, ClickHouse, PostgreSQL, or OIDC SDK
 types. Adding a named interface does not prove its security, delivery, transaction, or
