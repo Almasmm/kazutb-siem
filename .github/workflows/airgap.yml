@@ -48,30 +48,37 @@ jobs:
 
       - name: Download signed release evidence
         run: |
-          mkdir -p /tmp/kcsp-release
+          mkdir -p /tmp/kcsp-release /tmp/kcsp-agent-release
           gh release download "${{ inputs.release_tag }}" \
             --dir /tmp/kcsp-release \
             --pattern 'kcsp-release-manifest*'
+          gh release download "${{ inputs.release_tag }}" \
+            --dir /tmp/kcsp-agent-release \
+            --pattern 'kcsp-agent*'
 
       - name: Materialize protected transfer key
         env:
           SIGNING_KEY_B64: ${{ secrets.KCSP_AIRGAP_SIGNING_KEY_B64 }}
           PUBLIC_KEY_B64: ${{ secrets.KCSP_AIRGAP_PUBLIC_KEY_B64 }}
+          AGENT_PUBLIC_KEY_B64: ${{ secrets.KCSP_AGENT_SIGNING_PUBLIC_KEY_B64 }}
         run: |
-          [[ -n "$SIGNING_KEY_B64" && -n "$PUBLIC_KEY_B64" ]]
+          [[ -n "$SIGNING_KEY_B64" && -n "$PUBLIC_KEY_B64" && -n "$AGENT_PUBLIC_KEY_B64" ]]
           umask 077
           printf '%s' "$SIGNING_KEY_B64" | base64 --decode >"$RUNNER_TEMP/kcsp-airgap.key"
           printf '%s' "$PUBLIC_KEY_B64" | base64 --decode >"$RUNNER_TEMP/kcsp-airgap.pub"
+          printf '%s' "$AGENT_PUBLIC_KEY_B64" | base64 --decode >"$RUNNER_TEMP/kcsp-agent-release.pub"
 
       - name: Build signed air-gap bundle
         env:
           KCSP_AIRGAP_SIGNING_KEY_FILE: ${{ runner.temp }}/kcsp-airgap.key
           KCSP_AIRGAP_PUBLIC_KEY_FILE: ${{ runner.temp }}/kcsp-airgap.pub
+          KCSP_AGENT_TRUSTED_PUBLIC_KEY_FILE: ${{ runner.temp }}/kcsp-agent-release.pub
         run: |
           bash ops/supply-chain/build-airgap.sh \
             /tmp/kcsp-release/kcsp-release-manifest.json \
             /tmp/kcsp-release/kcsp-release-manifest.sigstore.json \
-            /tmp/kcsp-release/kcsp-release-manifest.sha256
+            /tmp/kcsp-release/kcsp-release-manifest.sha256 \
+            /tmp/kcsp-agent-release
 
       - name: Publish air-gap assets
         run: |
@@ -83,4 +90,7 @@ jobs:
       - name: Remove transfer key material
         if: always()
         run: |
-          rm -f "$RUNNER_TEMP/kcsp-airgap.key" "$RUNNER_TEMP/kcsp-airgap.pub"
+          rm -f \
+            "$RUNNER_TEMP/kcsp-airgap.key" \
+            "$RUNNER_TEMP/kcsp-airgap.pub" \
+            "$RUNNER_TEMP/kcsp-agent-release.pub"

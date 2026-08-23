@@ -1,1 +1,2 @@
+ops/agent/*.sh text eol=lf
 ops/agent/linux/** text eol=lf

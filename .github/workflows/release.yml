@@ -62,3 +62,53 @@ jobs:
               --title "KCSP $GITHUB_REF_NAME" \
               --generate-notes
           fi
+
+  agents:
+    needs: images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      KCSP_AGENT_RELEASE_VERSION: ${{ github.ref_name }}
+      KCSP_AGENT_RELEASE_OUTPUT_DIR: /tmp/kcsp-agent-release
+    steps:
+      - name: Checkout release revision
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache: true
+
+      - name: Materialize protected agent signing key
+        env:
+          SIGNING_KEY_B64: ${{ secrets.KCSP_AGENT_SIGNING_KEY_B64 }}
+          PUBLIC_KEY_B64: ${{ secrets.KCSP_AGENT_SIGNING_PUBLIC_KEY_B64 }}
+        run: |
+          [[ -n "$SIGNING_KEY_B64" && -n "$PUBLIC_KEY_B64" ]]
+          umask 077
+          printf '%s' "$SIGNING_KEY_B64" | base64 --decode >"$RUNNER_TEMP/kcsp-agent-release.key"
+          printf '%s' "$PUBLIC_KEY_B64" | base64 --decode >"$RUNNER_TEMP/kcsp-agent-release.pub"
+
+      - name: Build and verify signed endpoint packages
+        env:
+          KCSP_AGENT_SIGNING_KEY_FILE: ${{ runner.temp }}/kcsp-agent-release.key
+          KCSP_AGENT_SIGNING_PUBLIC_KEY_FILE: ${{ runner.temp }}/kcsp-agent-release.pub
+        run: bash ops/agent/build-release.sh
+
+      - name: Publish endpoint release assets
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            /tmp/kcsp-agent-release/* \
+            --clobber
+
+      - name: Remove agent signing key material
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/kcsp-agent-release.key" "$RUNNER_TEMP/kcsp-agent-release.pub"

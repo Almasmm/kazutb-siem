@@ -8,12 +8,16 @@ trusted_public_key="$(cd "$(dirname "$trusted_public_key")" && pwd)/$(basename "
 manifest="$bundle_root/kcsp-airgap-manifest.json"
 signature_bundle="$bundle_root/kcsp-airgap-manifest.sigstore.json"
 
-for command in docker jq sha256sum tar; do
+for command in docker jq sha256sum tar openssl find grep; do
   command -v "$command" >/dev/null || { echo "$command is required" >&2; exit 1; }
 done
 for file in "$manifest" "$signature_bundle" "$trusted_public_key"; do
   [[ -f "$file" ]] || { echo "required air-gap verification file is missing" >&2; exit 1; }
 done
+if find "$bundle_root" -type l -print -quit | grep -q .; then
+  echo "symbolic links are not permitted in an air-gap bundle" >&2
+  exit 1
+fi
 
 jq -e '
   .schema == "kcsp.airgap/v1" and
@@ -54,6 +58,41 @@ while IFS=$'\t' read -r relative_path expected_sha expected_size; do
     exit 1
   }
 done < <(jq -r '.artifacts[] | [.path,.sha256,(.size_bytes|tostring)] | @tsv' "$manifest")
+
+agent_dir="$bundle_root/agents"
+if [[ -d "$agent_dir" ]]; then
+  version="$(jq -er '.version' "$manifest")"
+  expected_agent_manifest="$(printf '%s\n' \
+    "kcsp-agent-${version}-windows-amd64.zip" \
+    "kcsp-agent_${version}_linux_amd64.tar.gz" \
+    "kcsp-agent_${version}_linux_arm64.tar.gz" | LC_ALL=C sort)"
+  actual_agent_manifest="$(awk 'NF == 2 { name=$2; sub(/^\\*/, "", name); print name }' \
+    "$agent_dir/kcsp-agent-release-manifest.sha256" | LC_ALL=C sort)"
+  [[ "$actual_agent_manifest" == "$expected_agent_manifest" ]] || { echo "embedded agent manifest has an unexpected package set" >&2; exit 1; }
+  expected_agent_files="$(printf '%s\n' \
+    "kcsp-agent-${version}-windows-amd64.zip" \
+    "kcsp-agent_${version}_linux_amd64.tar.gz" \
+    "kcsp-agent_${version}_linux_amd64.tar.gz.sha256" \
+    "kcsp-agent_${version}_linux_arm64.tar.gz" \
+    "kcsp-agent_${version}_linux_arm64.tar.gz.sha256" \
+    kcsp-agent-release-manifest.sha256 \
+    kcsp-agent-release-manifest.sig \
+    kcsp-agent-release.pub \
+    kcsp-agent-release.pub.sha256 | LC_ALL=C sort)"
+  actual_agent_files="$(find "$agent_dir" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)"
+  [[ "$actual_agent_files" == "$expected_agent_files" ]] || { echo "air-gap agent directory contains unexpected files" >&2; exit 1; }
+  (
+    cd "$agent_dir"
+    sha256sum --check --strict --quiet kcsp-agent-release-manifest.sha256
+    sha256sum --check --strict --quiet kcsp-agent-release.pub.sha256
+    sha256sum --check --strict --quiet "kcsp-agent_${version}_linux_amd64.tar.gz.sha256"
+    sha256sum --check --strict --quiet "kcsp-agent_${version}_linux_arm64.tar.gz.sha256"
+  ) || { echo "embedded agent checksum verification failed" >&2; exit 1; }
+  openssl dgst -sha256 -verify "$agent_dir/kcsp-agent-release.pub" \
+    -signature "$agent_dir/kcsp-agent-release-manifest.sig" \
+    "$agent_dir/kcsp-agent-release-manifest.sha256" >/dev/null \
+    || { echo "embedded agent release signature is invalid" >&2; exit 1; }
+fi
 
 while IFS= read -r archive; do
   while IFS= read -r entry; do

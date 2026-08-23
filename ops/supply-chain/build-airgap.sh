@@ -7,6 +7,7 @@ manifest_dir="$(cd "$(dirname "$manifest")" && pwd)"
 manifest="${manifest_dir}/$(basename "$manifest")"
 sigstore_bundle="${2:-$manifest_dir/kcsp-release-manifest.sigstore.json}"
 release_checksum="${3:-$manifest_dir/kcsp-release-manifest.sha256}"
+agent_release_dir="${4:-${KCSP_AGENT_RELEASE_DIR:-}}"
 
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
 
@@ -52,7 +53,7 @@ if [[ "${KCSP_AIRGAP_DRY_RUN:-false}" == "true" ]]; then
   exit 0
 fi
 
-for command in docker sha256sum tar gzip date wc; do
+for command in docker sha256sum tar gzip date wc openssl find grep; do
   command -v "$command" >/dev/null || { echo "$command is required" >&2; exit 1; }
 done
 for file in "$sigstore_bundle" "$release_checksum"; do
@@ -70,6 +71,48 @@ helm_image="${KCSP_HELM_IMAGE:-alpine/helm:3.17.3@sha256:d899e6316789fec04ee9530
 
 bash "$root/ops/supply-chain/verify-release.sh" "$manifest" "$sigstore_bundle" "$release_checksum"
 
+agent_assets=()
+if [[ -n "$agent_release_dir" ]]; then
+  agent_release_dir="$(cd "$agent_release_dir" && pwd)"
+  agent_trusted_public_key="${KCSP_AGENT_TRUSTED_PUBLIC_KEY_FILE:?KCSP_AGENT_TRUSTED_PUBLIC_KEY_FILE is required when agent assets are included}"
+  [[ -f "$agent_trusted_public_key" && ! -L "$agent_trusted_public_key" ]] || { echo "trusted agent public key is missing or unsafe" >&2; exit 1; }
+  expected_agent_manifest="$(printf '%s\n' \
+    "kcsp-agent-${version}-windows-amd64.zip" \
+    "kcsp-agent_${version}_linux_amd64.tar.gz" \
+    "kcsp-agent_${version}_linux_arm64.tar.gz" | LC_ALL=C sort)"
+  actual_agent_manifest="$(awk 'NF == 2 { name=$2; sub(/^\\*/, "", name); print name }' \
+    "$agent_release_dir/kcsp-agent-release-manifest.sha256" | LC_ALL=C sort)"
+  [[ "$actual_agent_manifest" == "$expected_agent_manifest" ]] || { echo "agent release manifest has an unexpected package set" >&2; exit 1; }
+  agent_assets=(
+    "kcsp-agent-${version}-windows-amd64.zip"
+    "kcsp-agent_${version}_linux_amd64.tar.gz"
+    "kcsp-agent_${version}_linux_amd64.tar.gz.sha256"
+    "kcsp-agent_${version}_linux_arm64.tar.gz"
+    "kcsp-agent_${version}_linux_arm64.tar.gz.sha256"
+    "kcsp-agent-release-manifest.sha256"
+    "kcsp-agent-release-manifest.sig"
+    "kcsp-agent-release.pub"
+    "kcsp-agent-release.pub.sha256"
+  )
+  for asset in "${agent_assets[@]}"; do
+    [[ -f "$agent_release_dir/$asset" && ! -L "$agent_release_dir/$asset" ]] || { echo "agent release asset is missing or unsafe: $asset" >&2; exit 1; }
+  done
+  (
+    cd "$agent_release_dir"
+    sha256sum --check --strict --quiet kcsp-agent-release-manifest.sha256
+    sha256sum --check --strict --quiet kcsp-agent-release.pub.sha256
+    sha256sum --check --strict --quiet "kcsp-agent_${version}_linux_amd64.tar.gz.sha256"
+    sha256sum --check --strict --quiet "kcsp-agent_${version}_linux_arm64.tar.gz.sha256"
+  )
+  trusted_agent_fingerprint="$(openssl pkey -pubin -in "$agent_trusted_public_key" -outform DER | sha256sum | awk '{print $1}')"
+  release_agent_fingerprint="$(openssl pkey -pubin -in "$agent_release_dir/kcsp-agent-release.pub" -outform DER | sha256sum | awk '{print $1}')"
+  [[ "$trusted_agent_fingerprint" == "$release_agent_fingerprint" ]] || { echo "agent release public key does not match the offline trust anchor" >&2; exit 1; }
+  openssl dgst -sha256 -verify "$agent_trusted_public_key" \
+    -signature "$agent_release_dir/kcsp-agent-release-manifest.sig" \
+    "$agent_release_dir/kcsp-agent-release-manifest.sha256" >/dev/null \
+    || { echo "agent release manifest signature is invalid" >&2; exit 1; }
+fi
+
 mkdir -p "$output_dir"
 temporary="$(mktemp -d "$output_dir/.kcsp-airgap-build.XXXXXX")"
 cleanup() {
@@ -82,6 +125,9 @@ trap cleanup EXIT
 bundle_name="kcsp-airgap-${version}-${platform_slug}"
 bundle_root="$temporary/$bundle_name"
 mkdir -p "$bundle_root/images" "$bundle_root/chart" "$bundle_root/release" "$bundle_root/bin" "$bundle_root/docs"
+if ((${#agent_assets[@]} > 0)); then
+  mkdir -p "$bundle_root/agents"
+fi
 cp "$manifest" "$bundle_root/release/kcsp-release-manifest.json"
 cp "$sigstore_bundle" "$bundle_root/release/kcsp-release-manifest.sigstore.json"
 cp "$release_checksum" "$bundle_root/release/kcsp-release-manifest.sha256"
@@ -163,6 +209,17 @@ for item in \
   "bin/import-airgap.sh:import-tool" \
   "docs/airgap-installation.md:runbook"; do
   add_artifact "${item%%:*}" "${item##*:}"
+done
+
+for asset in "${agent_assets[@]}"; do
+  cp "$agent_release_dir/$asset" "$bundle_root/agents/$asset"
+  case "$asset" in
+    *.tar.gz|*.zip) artifact_kind=agent-package ;;
+    *.sig) artifact_kind=agent-release-signature ;;
+    *.pub|*.pub.sha256) artifact_kind=agent-trust-evidence ;;
+    *) artifact_kind=agent-release-evidence ;;
+  esac
+  add_artifact "agents/$asset" "$artifact_kind"
 done
 
 public_key_sha256="$(sha256sum "$trusted_public_key" | awk '{print $1}')"

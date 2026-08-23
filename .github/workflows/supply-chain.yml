@@ -6,7 +6,11 @@ on:
       - "Dockerfile.api"
       - "Dockerfile.dr"
       - "apps/web/**"
+      - "cmd/agent/**"
+      - "internal/agent/**"
+      - "ops/agent/**"
       - "ops/supply-chain/**"
+      - ".gitattributes"
       - ".github/workflows/release.yml"
       - ".github/workflows/airgap.yml"
       - ".github/workflows/supply-chain.yml"
@@ -15,7 +19,11 @@ on:
       - "Dockerfile.api"
       - "Dockerfile.dr"
       - "apps/web/**"
+      - "cmd/agent/**"
+      - "internal/agent/**"
+      - "ops/agent/**"
       - "ops/supply-chain/**"
+      - ".gitattributes"
       - ".github/workflows/release.yml"
       - ".github/workflows/airgap.yml"
       - ".github/workflows/supply-chain.yml"
@@ -49,4 +57,10 @@ jobs:
             ops/supply-chain/verify-airgap.sh \
             ops/supply-chain/import-airgap.sh \
             ops/supply-chain/airgap-self-test.sh \
-            ops/supply-chain/self-test.sh
+            ops/supply-chain/self-test.sh \
+            ops/agent/build-release.sh \
+            ops/agent/release-self-test.sh \
+            ops/agent/linux/build-package.sh \
+            ops/agent/linux/install.sh \
+            ops/agent/linux/uninstall.sh \
+            ops/agent/linux/self-test.sh

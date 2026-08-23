@@ -91,6 +91,8 @@ jobs:
       - name: Validate Windows deployment and 2000-host rollout contracts
         shell: pwsh
         run: ./ops/agent/windows/Self-Test.ps1 -PrebuiltBinary /tmp/kcsp-agent.exe
+      - name: Validate signed multi-platform agent release
+        run: bash ops/agent/release-self-test.sh
 
   web:
     runs-on: ubuntu-latest

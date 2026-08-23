@@ -4,7 +4,7 @@ set -Eeuo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cosign_image="${KCSP_COSIGN_IMAGE:-ghcr.io/sigstore/cosign/cosign:v3.1.3@sha256:9e5c2f2edc34351160407ca3416c61855bdf9403c3c5936e0f0be7fc261611b8}"
 [[ "$cosign_image" == *@sha256:* ]] || { echo "KCSP_COSIGN_IMAGE must be digest pinned" >&2; exit 1; }
-for command in docker jq sha256sum tar wc; do
+for command in docker jq sha256sum tar wc openssl; do
   command -v "$command" >/dev/null || { echo "$command is required" >&2; exit 1; }
 done
 
@@ -16,7 +16,7 @@ cleanup() {
 }
 trap cleanup EXIT
 bundle="$temporary/kcsp-airgap-test"
-mkdir -p "$bundle/images" "$bundle/chart" "$bundle/release" "$bundle/bin" "$bundle/docs" "$temporary/tar-input"
+mkdir -p "$bundle/images" "$bundle/chart" "$bundle/release" "$bundle/bin" "$bundle/docs" "$bundle/agents" "$temporary/tar-input"
 printf 'image payload\n' >"$temporary/tar-input/manifest.json"
 for group in platform web dr; do
   tar -C "$temporary/tar-input" -cf "$bundle/images/$group.tar" manifest.json
@@ -31,6 +31,31 @@ cp "$root/ops/supply-chain/verify-airgap.sh" "$bundle/bin/verify-airgap.sh"
 cp "$root/ops/supply-chain/import-airgap.sh" "$bundle/bin/import-airgap.sh"
 printf '%s\n' 'test runbook' >"$bundle/docs/airgap-installation.md"
 
+for package in \
+  kcsp-agent-1.2.3-windows-amd64.zip \
+  kcsp-agent_1.2.3_linux_amd64.tar.gz \
+  kcsp-agent_1.2.3_linux_arm64.tar.gz; do
+  printf 'test agent package %s\n' "$package" >"$bundle/agents/$package"
+done
+(
+  cd "$bundle/agents"
+  sha256sum \
+    kcsp-agent-1.2.3-windows-amd64.zip \
+    kcsp-agent_1.2.3_linux_amd64.tar.gz \
+    kcsp-agent_1.2.3_linux_arm64.tar.gz | LC_ALL=C sort >kcsp-agent-release-manifest.sha256
+  sha256sum kcsp-agent_1.2.3_linux_amd64.tar.gz >kcsp-agent_1.2.3_linux_amd64.tar.gz.sha256
+  sha256sum kcsp-agent_1.2.3_linux_arm64.tar.gz >kcsp-agent_1.2.3_linux_arm64.tar.gz.sha256
+)
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$temporary/kcsp-agent.key" >/dev/null 2>&1
+openssl pkey -in "$temporary/kcsp-agent.key" -pubout -out "$bundle/agents/kcsp-agent-release.pub" >/dev/null 2>&1
+openssl dgst -sha256 -sign "$temporary/kcsp-agent.key" \
+  -out "$bundle/agents/kcsp-agent-release-manifest.sig" \
+  "$bundle/agents/kcsp-agent-release-manifest.sha256"
+(
+  cd "$bundle/agents"
+  sha256sum kcsp-agent-release.pub >kcsp-agent-release.pub.sha256
+)
+
 artifacts="$temporary/artifacts.json"
 printf '[]\n' >"$artifacts"
 for relative_path in \
@@ -38,7 +63,16 @@ for relative_path in \
   release/kcsp-release-manifest.json release/kcsp-release-manifest.sigstore.json release/kcsp-release-manifest.sha256 \
   release/offline-signing-config.json \
   release/offline-trusted-root.json \
-  chart/kcsp-1.2.3.tgz bin/verify-airgap.sh bin/import-airgap.sh docs/airgap-installation.md; do
+  chart/kcsp-1.2.3.tgz bin/verify-airgap.sh bin/import-airgap.sh docs/airgap-installation.md \
+  agents/kcsp-agent-1.2.3-windows-amd64.zip \
+  agents/kcsp-agent_1.2.3_linux_amd64.tar.gz \
+  agents/kcsp-agent_1.2.3_linux_amd64.tar.gz.sha256 \
+  agents/kcsp-agent_1.2.3_linux_arm64.tar.gz \
+  agents/kcsp-agent_1.2.3_linux_arm64.tar.gz.sha256 \
+  agents/kcsp-agent-release-manifest.sha256 \
+  agents/kcsp-agent-release-manifest.sig \
+  agents/kcsp-agent-release.pub \
+  agents/kcsp-agent-release.pub.sha256; do
   digest="$(sha256sum "$bundle/$relative_path" | awk '{print $1}')"
   size="$(wc -c <"$bundle/$relative_path" | tr -d '[:space:]')"
   next="${artifacts}.next"
