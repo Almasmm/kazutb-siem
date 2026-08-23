@@ -31,8 +31,11 @@ import type {
   OverviewDto,
   RetentionPolicyDto,
   RuleDto,
+  SessionDto,
   SOARApprovalDto,
+  SOARConnectorDraftDto,
   SOARConnectorDto,
+  SOARConnectorTestDto,
   SOARExecutionDto,
   SOARPlaybookDto,
   ThreatIndicatorDto,
@@ -235,6 +238,7 @@ function normalizeAudit(value: AuditDto): AuditDto {
 }
 
 export const api = {
+	  session: (signal?: AbortSignal) => request<SessionDto>("/session", { signal }),
   overview: (signal?: AbortSignal) => request<OverviewDto>("/overview", { signal }).then(normalizeOverview),
   events: (params?: Record<string, QueryValue>, signal?: AbortSignal) =>
     getList<EventDto>("/events", params, signal).then((page) => ({ ...page, items: page.items.map(normalizeEvent) })),
@@ -328,6 +332,19 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   soarConnectors: (signal?: AbortSignal) => getList<SOARConnectorDto>("/soar/connectors", undefined, signal),
+  createSOARConnector: (payload: SOARConnectorDraftDto) =>
+    request<SOARConnectorDto>("/soar/connectors", { method: "POST", body: JSON.stringify(payload) }),
+  updateSOARConnector: (id: string, payload: Omit<SOARConnectorDraftDto, "kind"> & { version: number }) =>
+    request<SOARConnectorDto>(`/soar/connectors/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  disableSOARConnector: (id: string, version: number) =>
+    request<SOARConnectorDto>(`/soar/connectors/${encodeURIComponent(id)}/disable?version=${version}`, { method: "POST" }),
+  testSOARConnector: (id: string) =>
+    request<SOARConnectorTestDto>(`/soar/connectors/${encodeURIComponent(id)}/tests`, {
+      method: "POST",
+      body: JSON.stringify({ request_id: crypto.randomUUID() }),
+    }),
+  soarConnectorTests: (id: string, signal?: AbortSignal) =>
+    getList<SOARConnectorTestDto>(`/soar/connectors/${encodeURIComponent(id)}/tests`, { limit: 50 }, signal),
   aiSOCPolicy: (signal?: AbortSignal) => request<AISOCPolicyDto>("/ai-soc/policy", { signal }),
   aiSOCRequests: (params?: Record<string, QueryValue>, signal?: AbortSignal) =>
     getList<AISOCRequestDto>("/ai-soc/requests", params, signal),

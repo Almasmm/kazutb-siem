@@ -503,7 +503,9 @@ export interface SOARConnectorDto {
   state: string;
   endpoint: string;
   auth_type: string;
+  secret_ref?: string;
   allowed_actions?: string[];
+  settings?: Record<string, string | number | boolean>;
   timeout_seconds?: number;
   rate_limit_per_minute?: number;
   version: number;
@@ -512,6 +514,41 @@ export interface SOARConnectorDto {
   health_detail?: string;
   last_tested_at?: string;
   updated_at?: string;
+}
+
+export interface SOARConnectorDraftDto {
+  name: string;
+  kind: string;
+  endpoint: string;
+  auth_type: string;
+  secret_ref?: string;
+  allowed_actions: string[];
+  settings?: Record<string, string | number | boolean>;
+  timeout_seconds?: number;
+  rate_limit_per_minute?: number;
+}
+
+export interface SOARConnectorTestDto {
+  test_id: string;
+  connector_id: string;
+  request_id: string;
+  status: string;
+  error_class?: string;
+  detail?: string;
+  http_status?: number;
+  latency_ms?: number;
+  tested_by: string;
+  created_at: string;
+  completed_at?: string;
+}
+
+export interface SessionDto {
+  principal: { id: string; display_name: string; role: string };
+  tenant: { id: string; name: string };
+  permissions: string[];
+  locale: string;
+  timezone: string;
+  auth_mode: string;
 }
 
 export interface AISOCPolicyDto {
