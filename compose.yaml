@@ -511,6 +511,7 @@ services:
   etcd-1:
     image: gcr.io/etcd-development/etcd:v3.5.21
     profiles: ["ha"]
+    restart: unless-stopped
     entrypoint: ["/usr/local/bin/etcd"]
     command:
       - --name=etcd-1
@@ -547,6 +548,7 @@ services:
   etcd-2:
     image: gcr.io/etcd-development/etcd:v3.5.21
     profiles: ["ha"]
+    restart: unless-stopped
     entrypoint: ["/usr/local/bin/etcd"]
     command:
       - --name=etcd-2
@@ -583,6 +585,7 @@ services:
   etcd-3:
     image: gcr.io/etcd-development/etcd:v3.5.21
     profiles: ["ha"]
+    restart: unless-stopped
     entrypoint: ["/usr/local/bin/etcd"]
     command:
       - --name=etcd-3
@@ -622,6 +625,7 @@ services:
       context: .
       dockerfile: Dockerfile.patroni
     profiles: ["ha"]
+    restart: unless-stopped
     environment:
       <<: *patroni-environment
       KCSP_PATRONI_NAME: patroni-1
@@ -652,6 +656,7 @@ services:
       context: .
       dockerfile: Dockerfile.patroni
     profiles: ["ha"]
+    restart: unless-stopped
     environment:
       <<: *patroni-environment
       KCSP_PATRONI_NAME: patroni-2
@@ -682,6 +687,7 @@ services:
       context: .
       dockerfile: Dockerfile.patroni
     profiles: ["ha"]
+    restart: unless-stopped
     environment:
       <<: *patroni-environment
       KCSP_PATRONI_NAME: patroni-3
