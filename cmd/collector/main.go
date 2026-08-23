@@ -20,7 +20,7 @@ import (
 	"github.com/kcsp/platform/internal/collector"
 )
 
-const collectorVersion = "0.3.0"
+const collectorVersion = "0.4.0"
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -35,6 +35,22 @@ func run(logger *slog.Logger) error {
 	queue, err := agent.OpenDiskQueue(filepath.Join(stateDirectory, "queue"), envInt64("KCSP_COLLECTOR_QUEUE_MAX_BYTES", 10<<30))
 	if err != nil {
 		return err
+	}
+	fileSources, err := collector.ParseFileSourcesJSON(os.Getenv("KCSP_COLLECTOR_FILE_SOURCES_JSON"))
+	if err != nil {
+		return err
+	}
+	var fileTailer *collector.FileTailer
+	if len(fileSources) > 0 {
+		fileTailer, err = collector.NewFileTailer(collector.FileTailConfig{
+			Sources: fileSources, CheckpointDirectory: filepath.Join(stateDirectory, "file-checkpoints"),
+			PollInterval:        envDuration("KCSP_COLLECTOR_FILE_POLL_INTERVAL", time.Second),
+			MaximumEventBytes:   int(envInt64("KCSP_COLLECTOR_MAX_EVENT_BYTES", 1<<20)),
+			MaximumLinesPerPoll: int(envInt64("KCSP_COLLECTOR_FILE_MAX_LINES_PER_POLL", 1000)), Queue: queue,
+		})
+		if err != nil {
+			return err
+		}
 	}
 	forwarder, err := agent.NewForwarder(agent.ForwarderConfig{
 		ServerURL: envOr("KCSP_COLLECTOR_SERVER_URL", "https://soc.kaztbu.kz"), TenantID: os.Getenv("KCSP_COLLECTOR_TENANT_ID"),
@@ -89,6 +105,12 @@ func run(logger *slog.Logger) error {
 		httpDone = done
 		go func() { done <- httpReceiver.Run(ctx) }()
 	}
+	var fileDone <-chan error
+	if fileTailer != nil {
+		done := make(chan error, 1)
+		fileDone = done
+		go func() { done <- fileTailer.Run(ctx) }()
+	}
 	select {
 	case <-receiver.Ready():
 		if httpReceiver != nil {
@@ -96,6 +118,15 @@ func run(logger *slog.Logger) error {
 			case <-httpReceiver.Ready():
 			case httpErr := <-httpDone:
 				return httpErr
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		if fileTailer != nil {
+			select {
+			case <-fileTailer.Ready():
+			case fileErr := <-fileDone:
+				return fileErr
 			case <-ctx.Done():
 				return ctx.Err()
 			}
@@ -142,7 +173,7 @@ func run(logger *slog.Logger) error {
 		case <-heartbeatTicker.C:
 			depth, bytes, _ := queue.Depth()
 			if _, err := forwarder.Heartbeat(ctx, collectorVersion, map[string]interface{}{
-				"os": runtime.GOOS, "arch": runtime.GOARCH, "source": "network-syslog", "queue_depth": depth, "queue_bytes": bytes,
+				"os": runtime.GOOS, "arch": runtime.GOARCH, "source": "network-syslog", "file_sources": len(fileSources), "queue_depth": depth, "queue_bytes": bytes,
 			}); err != nil {
 				logger.Warn("collector heartbeat failed", "error", err)
 			}
@@ -150,6 +181,8 @@ func run(logger *slog.Logger) error {
 			return runErr
 		case httpErr := <-httpDone:
 			return httpErr
+		case fileErr := <-fileDone:
+			return fileErr
 		case healthErr := <-healthDone:
 			return healthErr
 		case <-ctx.Done():

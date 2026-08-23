@@ -98,6 +98,12 @@ config:
       path: /v1/events
       maxRequestBytes: 16777216
       maxBatch: 500
+    fileTail:
+      sourcesJSON: "[]"
+      pollInterval: 1s
+      maxLinesPerPoll: 1000
+      volumeMounts: []
+      volumes: []
     service:
       enabled: true
       type: LoadBalancer

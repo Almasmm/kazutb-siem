@@ -227,6 +227,9 @@ spec:
               mountPath: /etc/kcsp/syslog-tls
               readOnly: true
             {{- end }}
+            {{- with $root.Values.config.networkCollector.fileTail.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
             {{- end }}
             {{- if eq $name "web" }}
             - name: web-config
@@ -265,6 +268,9 @@ spec:
                 path: tls.key
               - key: {{ $root.Values.config.networkCollector.tls.clientCAKey }}
                 path: ca.crt
+        {{- end }}
+        {{- with $root.Values.config.networkCollector.fileTail.volumes }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
         {{- end }}
         {{- if eq $name "web" }}

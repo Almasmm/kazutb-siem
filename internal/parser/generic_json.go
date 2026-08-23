@@ -25,8 +25,9 @@ func (GenericJSON) Parse(_ context.Context, envelope ingest.RawEnvelope) (core.C
 	flattenGenericJSON("", source, flat)
 	message := genericField(flat, "message", "msg", "description", "event.original")
 	explicitCategory := strings.ToLower(genericField(flat, "category", "event.category", "event_category"))
+	eventType := genericField(flat, "event_type", "event.type", "type")
 	activity := genericField(flat, "activity_name", "event.action", "action", "event_type", "event.type", "type", "name", "message")
-	category, fallbackActivity, classUID, sourceType := telemetryClass(strings.Join([]string{explicitCategory, activity, message}, " "))
+	category, fallbackActivity, classUID, sourceType := telemetryClass(strings.Join([]string{explicitCategory, eventType, activity, message}, " "))
 	if normalized := genericCategory(explicitCategory); normalized != "" {
 		category = normalized
 		_, _, classUID, sourceType = telemetryClass(category)

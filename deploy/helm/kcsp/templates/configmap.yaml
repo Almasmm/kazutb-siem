@@ -37,6 +37,9 @@ data:
   KCSP_COLLECTOR_HTTP_TLS_KEY_FILE: "/etc/kcsp/syslog-tls/tls.key"
   KCSP_COLLECTOR_HTTP_TLS_CLIENT_CA_FILE: "/etc/kcsp/syslog-tls/ca.crt"
   KCSP_COLLECTOR_HTTP_ALLOW_INSECURE: "false"
+  KCSP_COLLECTOR_FILE_SOURCES_JSON: {{ .Values.config.networkCollector.fileTail.sourcesJSON | quote }}
+  KCSP_COLLECTOR_FILE_POLL_INTERVAL: {{ .Values.config.networkCollector.fileTail.pollInterval | quote }}
+  KCSP_COLLECTOR_FILE_MAX_LINES_PER_POLL: {{ .Values.config.networkCollector.fileTail.maxLinesPerPoll | quote }}
   KCSP_COLLECTOR_HEALTH_ADDR: ":8081"
   KCSP_COLLECTOR_STATE_DIR: "/var/lib/kcsp-collector"
   KCSP_COLLECTOR_QUEUE_MAX_BYTES: {{ .Values.config.networkCollector.queueMaxBytes | quote }}
