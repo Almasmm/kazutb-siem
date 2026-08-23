@@ -1,5 +1,31 @@
 name: kcsp
 
+x-patroni-environment: &patroni-environment
+  KCSP_PATRONI_SCOPE: kcsp-ha
+  KCSP_PATRONI_ETCD3_HOSTS: etcd-1:2379,etcd-2:2379,etcd-3:2379
+  KCSP_PATRONI_TTL_SECONDS: 30
+  KCSP_PATRONI_LOOP_WAIT_SECONDS: 5
+  KCSP_PATRONI_RETRY_TIMEOUT_SECONDS: 10
+  KCSP_PATRONI_MAXIMUM_LAG_BYTES: 1048576
+  KCSP_PATRONI_SYNCHRONOUS_NODES: 1
+  KCSP_PATRONI_WATCHDOG_MODE: automatic
+  KCSP_HA_DATABASE: kcsp
+  KCSP_HA_SUPERUSER: kcsp
+  KCSP_HA_REPLICATION_USER: kcsp_replicator
+  KCSP_HA_REWIND_USER: kcsp_rewind
+  KCSP_HA_POSTGRES_PASSWORD: ${KCSP_HA_POSTGRES_PASSWORD:-}
+  KCSP_HA_REPLICATION_PASSWORD: ${KCSP_HA_REPLICATION_PASSWORD:-}
+  KCSP_HA_REWIND_PASSWORD: ${KCSP_HA_REWIND_PASSWORD:-}
+  PATRONI_CONFIG_FILE: /tmp/patroni.yml
+
+x-patroni-dependencies: &patroni-dependencies
+  etcd-1:
+    condition: service_healthy
+  etcd-2:
+    condition: service_healthy
+  etcd-3:
+    condition: service_healthy
+
 services:
   postgres:
     image: kcsp-postgres:17
@@ -390,6 +416,239 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  etcd-1:
+    image: gcr.io/etcd-development/etcd:v3.5.21
+    profiles: ["ha"]
+    entrypoint: ["/usr/local/bin/etcd"]
+    command:
+      - --name=etcd-1
+      - --data-dir=/etcd-data
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd-1:2380
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd-1:2379
+      - --initial-cluster=etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=kcsp-ha-etcd-v1
+      - --auto-compaction-retention=1h
+      - --auto-compaction-mode=periodic
+    environment:
+      ETCDCTL_API: "3"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    volumes:
+      - kcsp-etcd-1-data:/etcd-data
+    networks:
+      - kcsp-ha-dcs
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  etcd-2:
+    image: gcr.io/etcd-development/etcd:v3.5.21
+    profiles: ["ha"]
+    entrypoint: ["/usr/local/bin/etcd"]
+    command:
+      - --name=etcd-2
+      - --data-dir=/etcd-data
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd-2:2380
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd-2:2379
+      - --initial-cluster=etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=kcsp-ha-etcd-v1
+      - --auto-compaction-retention=1h
+      - --auto-compaction-mode=periodic
+    environment:
+      ETCDCTL_API: "3"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    volumes:
+      - kcsp-etcd-2-data:/etcd-data
+    networks:
+      - kcsp-ha-dcs
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  etcd-3:
+    image: gcr.io/etcd-development/etcd:v3.5.21
+    profiles: ["ha"]
+    entrypoint: ["/usr/local/bin/etcd"]
+    command:
+      - --name=etcd-3
+      - --data-dir=/etcd-data
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd-3:2380
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd-3:2379
+      - --initial-cluster=etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=kcsp-ha-etcd-v1
+      - --auto-compaction-retention=1h
+      - --auto-compaction-mode=periodic
+    environment:
+      ETCDCTL_API: "3"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    volumes:
+      - kcsp-etcd-3-data:/etcd-data
+    networks:
+      - kcsp-ha-dcs
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  patroni-1:
+    image: kcsp-patroni:4.1.5-pg17
+    build:
+      context: .
+      dockerfile: Dockerfile.patroni
+    profiles: ["ha"]
+    environment:
+      <<: *patroni-environment
+      KCSP_PATRONI_NAME: patroni-1
+    depends_on: *patroni-dependencies
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8008/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+    volumes:
+      - kcsp-patroni-1-data:/var/lib/postgresql/data
+    networks:
+      - kcsp-ha-data
+      - kcsp-ha-dcs
+    read_only: true
+    tmpfs:
+      - /tmp:uid=70,gid=70,mode=0700
+      - /var/run/postgresql:uid=70,gid=70,mode=0770
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  patroni-2:
+    image: kcsp-patroni:4.1.5-pg17
+    build:
+      context: .
+      dockerfile: Dockerfile.patroni
+    profiles: ["ha"]
+    environment:
+      <<: *patroni-environment
+      KCSP_PATRONI_NAME: patroni-2
+    depends_on: *patroni-dependencies
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8008/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+    volumes:
+      - kcsp-patroni-2-data:/var/lib/postgresql/data
+    networks:
+      - kcsp-ha-data
+      - kcsp-ha-dcs
+    read_only: true
+    tmpfs:
+      - /tmp:uid=70,gid=70,mode=0700
+      - /var/run/postgresql:uid=70,gid=70,mode=0770
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  patroni-3:
+    image: kcsp-patroni:4.1.5-pg17
+    build:
+      context: .
+      dockerfile: Dockerfile.patroni
+    profiles: ["ha"]
+    environment:
+      <<: *patroni-environment
+      KCSP_PATRONI_NAME: patroni-3
+    depends_on: *patroni-dependencies
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8008/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+    volumes:
+      - kcsp-patroni-3-data:/var/lib/postgresql/data
+    networks:
+      - kcsp-ha-data
+      - kcsp-ha-dcs
+    read_only: true
+    tmpfs:
+      - /tmp:uid=70,gid=70,mode=0700
+      - /var/run/postgresql:uid=70,gid=70,mode=0770
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  postgres-ha:
+    image: kcsp-postgres-ha-router:3.2
+    build:
+      context: .
+      dockerfile: Dockerfile.haproxy
+    profiles: ["ha"]
+    depends_on:
+      patroni-1:
+        condition: service_started
+      patroni-2:
+        condition: service_started
+      patroni-3:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:7000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    ports:
+      - "127.0.0.1:5434:5432"
+      - "127.0.0.1:5435:5433"
+      - "127.0.0.1:8404:7000"
+    networks:
+      - kcsp-ha-data
+      - kcsp-ha-ingress
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   dr:
     build:
       context: .
@@ -495,6 +754,12 @@ volumes:
   kcsp-postgres-data:
   kcsp-pgbackrest-state:
   kcsp-pitr-drill-data:
+  kcsp-etcd-1-data:
+  kcsp-etcd-2-data:
+  kcsp-etcd-3-data:
+  kcsp-patroni-1-data:
+  kcsp-patroni-2-data:
+  kcsp-patroni-3-data:
   kcsp-kafka-data:
   kcsp-clickhouse-data:
   kcsp-clickhouse-logs:
@@ -504,3 +769,13 @@ volumes:
   kcsp-grafana-data:
   kcsp-dr-target-data:
   kcsp-dr-work:
+
+networks:
+  kcsp-ha-ingress:
+    name: kcsp-ha-ingress
+  kcsp-ha-data:
+    name: kcsp-ha-data
+    internal: true
+  kcsp-ha-dcs:
+    name: kcsp-ha-dcs
+    internal: true

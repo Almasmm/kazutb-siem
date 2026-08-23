@@ -101,13 +101,19 @@ jobs:
       - name: Build version-pinned DR image
         run: docker build --file Dockerfile.dr --tag kcsp-dr:ci .
       - name: Build PostgreSQL PITR image
-        run: docker build --file Dockerfile.postgres --tag kcsp-postgres:ci .
+        run: docker build --file Dockerfile.postgres --tag kcsp-postgres:17 --tag kcsp-postgres:ci .
+      - name: Build PostgreSQL HA image
+        run: docker build --file Dockerfile.patroni --tag kcsp-patroni:ci .
+      - name: Build PostgreSQL HA router
+        run: docker build --file Dockerfile.haproxy --tag kcsp-postgres-ha-router:ci .
       - name: Build local PITR TLS proxy
         run: docker build --file Dockerfile.pitr-proxy --tag kcsp-pitr-proxy:ci .
       - name: Run DR integrity and archive self-test
         run: docker run --rm kcsp-dr:ci self-test
       - name: Run pgBackRest fail-closed configuration self-test
         run: docker run --rm --entrypoint /usr/local/bin/kcsp-pgbackrest-self-test kcsp-postgres:ci
+      - name: Run Patroni quorum configuration self-test
+        run: docker run --rm --entrypoint /usr/local/bin/kcsp-patroni-self-test kcsp-patroni:ci
       - name: Validate Compose profiles
         env:
           KCSP_POSTGRES_PASSWORD: kcsp-ci-only
@@ -125,4 +131,7 @@ jobs:
           KCSP_PITR_S3_ACCESS_KEY: kcsp-pitr-ci-only
           KCSP_PITR_S3_SECRET_KEY: kcsp-pitr-ci-only-secret
           KCSP_PITR_REPO_CIPHER_PASS: kcsp-pitr-ci-only-cipher-passphrase
-        run: docker compose --profile dr --profile dr-scheduled --profile pitr config --quiet
+          KCSP_HA_POSTGRES_PASSWORD: kcsp-ha-ci-superuser-password
+          KCSP_HA_REPLICATION_PASSWORD: kcsp-ha-ci-replication-password
+          KCSP_HA_REWIND_PASSWORD: kcsp-ha-ci-rewind-password
+        run: docker compose --profile dr --profile dr-scheduled --profile pitr --profile ha config --quiet

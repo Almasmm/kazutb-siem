@@ -1,0 +1,9 @@
+# syntax=docker/dockerfile:1.7
+FROM haproxy:3.2-alpine
+
+USER root
+RUN apk add --no-cache curl
+COPY deploy/haproxy/haproxy.cfg /usr/local/etc/haproxy/haproxy.cfg
+RUN sed '/^[[:space:]]*server /s/$/ init-addr none/' /usr/local/etc/haproxy/haproxy.cfg > /tmp/haproxy.cfg && \
+    haproxy -c -f /tmp/haproxy.cfg
+USER haproxy

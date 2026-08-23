@@ -118,3 +118,6 @@ restore drills. See the [backup and restore runbook](docs/runbooks/backup-restor
 
 Continuous PostgreSQL WAL archiving and named point-in-time recovery are
 documented in the [PostgreSQL PITR runbook](docs/runbooks/postgresql-pitr.md).
+
+The isolated Small-HA profile and its quorum/fencing drill are documented in
+the [PostgreSQL HA runbook](docs/runbooks/postgresql-ha.md).
