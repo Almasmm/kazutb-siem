@@ -20,7 +20,7 @@ import (
 	"github.com/kcsp/platform/internal/collector"
 )
 
-const collectorVersion = "0.4.0"
+const collectorVersion = "0.5.0"
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -47,6 +47,23 @@ func run(logger *slog.Logger) error {
 			PollInterval:        envDuration("KCSP_COLLECTOR_FILE_POLL_INTERVAL", time.Second),
 			MaximumEventBytes:   int(envInt64("KCSP_COLLECTOR_MAX_EVENT_BYTES", 1<<20)),
 			MaximumLinesPerPoll: int(envInt64("KCSP_COLLECTOR_FILE_MAX_LINES_PER_POLL", 1000)), Queue: queue,
+		})
+		if err != nil {
+			return err
+		}
+	}
+	apiSources, err := collector.ParseAPISourcesJSON(os.Getenv("KCSP_COLLECTOR_API_SOURCES_JSON"))
+	if err != nil {
+		return err
+	}
+	var apiPoller *collector.APIPoller
+	if len(apiSources) > 0 {
+		apiPoller, err = collector.NewAPIPoller(collector.APIPollConfig{
+			Sources: apiSources, CheckpointDirectory: filepath.Join(stateDirectory, "api-checkpoints"),
+			PollInterval: envDuration("KCSP_COLLECTOR_API_POLL_INTERVAL", 30*time.Second), MaximumBackoff: envDuration("KCSP_COLLECTOR_API_MAX_BACKOFF", 5*time.Minute),
+			RequestTimeout: envDuration("KCSP_COLLECTOR_API_REQUEST_TIMEOUT", 30*time.Second), MaximumResponse: envInt64("KCSP_COLLECTOR_API_MAX_RESPONSE_BYTES", 16<<20),
+			MaximumEventBytes: int(envInt64("KCSP_COLLECTOR_MAX_EVENT_BYTES", 1<<20)), MaximumEvents: int(envInt64("KCSP_COLLECTOR_API_MAX_EVENTS", 500)),
+			MaximumPages: int(envInt64("KCSP_COLLECTOR_API_MAX_PAGES", 10)), Queue: queue, Logger: logger,
 		})
 		if err != nil {
 			return err
@@ -111,6 +128,12 @@ func run(logger *slog.Logger) error {
 		fileDone = done
 		go func() { done <- fileTailer.Run(ctx) }()
 	}
+	var apiDone <-chan error
+	if apiPoller != nil {
+		done := make(chan error, 1)
+		apiDone = done
+		go func() { done <- apiPoller.Run(ctx) }()
+	}
 	select {
 	case <-receiver.Ready():
 		if httpReceiver != nil {
@@ -131,10 +154,19 @@ func run(logger *slog.Logger) error {
 				return ctx.Err()
 			}
 		}
+		if apiPoller != nil {
+			select {
+			case <-apiPoller.Ready():
+			case apiErr := <-apiDone:
+				return apiErr
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
 		ready.Store(true)
 		logger.Info("KCSP network collector started", "version", collectorVersion, "state_directory", stateDirectory,
 			"udp", os.Getenv("KCSP_COLLECTOR_SYSLOG_UDP_ADDR"), "tcp", os.Getenv("KCSP_COLLECTOR_SYSLOG_TCP_ADDR"),
-			"tls", os.Getenv("KCSP_COLLECTOR_SYSLOG_TLS_ADDR"), "http", os.Getenv("KCSP_COLLECTOR_HTTP_ADDR"))
+			"tls", os.Getenv("KCSP_COLLECTOR_SYSLOG_TLS_ADDR"), "http", os.Getenv("KCSP_COLLECTOR_HTTP_ADDR"), "api_sources", len(apiSources))
 	case runErr := <-receiverDone:
 		return runErr
 	case healthErr := <-healthDone:
@@ -173,7 +205,7 @@ func run(logger *slog.Logger) error {
 		case <-heartbeatTicker.C:
 			depth, bytes, _ := queue.Depth()
 			if _, err := forwarder.Heartbeat(ctx, collectorVersion, map[string]interface{}{
-				"os": runtime.GOOS, "arch": runtime.GOARCH, "source": "network-syslog", "file_sources": len(fileSources), "queue_depth": depth, "queue_bytes": bytes,
+				"os": runtime.GOOS, "arch": runtime.GOARCH, "source": "network-collector", "file_sources": len(fileSources), "api_sources": len(apiSources), "queue_depth": depth, "queue_bytes": bytes,
 			}); err != nil {
 				logger.Warn("collector heartbeat failed", "error", err)
 			}
@@ -183,6 +215,8 @@ func run(logger *slog.Logger) error {
 			return httpErr
 		case fileErr := <-fileDone:
 			return fileErr
+		case apiErr := <-apiDone:
+			return apiErr
 		case healthErr := <-healthDone:
 			return healthErr
 		case <-ctx.Done():

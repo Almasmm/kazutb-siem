@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,6 +56,37 @@ func (q *DiskQueue) Enqueue(event Event) (QueueItem, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	item := QueueItem{QueueID: core.NewID("queue"), Event: event}
+	return q.enqueueLocked(item, fmt.Sprintf("%020d-%s.event", time.Now().UTC().UnixNano(), item.QueueID))
+}
+
+// EnqueueUnique persists an event once for a stable event ID. It is used by
+// checkpointed pull sources where a crash can replay the last API page.
+func (q *DiskQueue) EnqueueUnique(event Event) (QueueItem, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if strings.TrimSpace(event.EventID) == "" {
+		return QueueItem{}, errors.New("stable event ID is required for unique enqueue")
+	}
+	digest := sha256.Sum256([]byte(event.EventID))
+	key := hex.EncodeToString(digest[:16])
+	name := "unique-" + key + ".event"
+	destination := filepath.Join(q.directory, name)
+	// #nosec G304 -- destination uses the trusted queue directory and a SHA-256-derived fixed filename.
+	if body, err := os.ReadFile(destination); err == nil {
+		var existing QueueItem
+		if err := json.Unmarshal(body, &existing); err != nil || existing.Event.EventID != event.EventID {
+			return QueueItem{}, errors.New("invalid unique queued event")
+		}
+		existing.file = name
+		return existing, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return QueueItem{}, fmt.Errorf("read unique queued event: %w", err)
+	}
+	item := QueueItem{QueueID: "queue_unique_" + key, Event: event}
+	return q.enqueueLocked(item, name)
+}
+
+func (q *DiskQueue) enqueueLocked(item QueueItem, name string) (QueueItem, error) {
 	body, err := json.Marshal(item)
 	if err != nil {
 		return QueueItem{}, fmt.Errorf("encode queued event: %w", err)
@@ -65,7 +98,6 @@ func (q *DiskQueue) Enqueue(event Event) (QueueItem, error) {
 	if used+int64(len(body)) > q.maxBytes {
 		return QueueItem{}, fmt.Errorf("%w: used=%d incoming=%d limit=%d", ErrQueueFull, used, len(body), q.maxBytes)
 	}
-	name := fmt.Sprintf("%020d-%s.event", time.Now().UTC().UnixNano(), item.QueueID)
 	temporary, err := os.CreateTemp(q.directory, ".pending-*")
 	if err != nil {
 		return QueueItem{}, fmt.Errorf("create queued event: %w", err)
