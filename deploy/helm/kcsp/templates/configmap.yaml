@@ -20,6 +20,7 @@ data:
   KCSP_REQUIRE_REGISTERED_COLLECTORS: {{ ternary "true" "false" .Values.config.collectors.requireRegistered | quote }}
   KCSP_AGENT_CREDENTIAL_TTL: {{ .Values.config.collectors.agentCredentialTTL | quote }}
   KCSP_AGENT_ENROLLMENT_MAX_TTL: {{ .Values.config.collectors.agentEnrollmentMaxTTL | quote }}
+  KCSP_AGENT_ENROLLMENT_RATE_PER_MINUTE: {{ .Values.config.collectors.agentEnrollmentRatePerMinute | quote }}
   KCSP_COLLECTOR_SERVER_URL: {{ default (printf "http://%s-api:8080" (include "kcsp.fullname" .)) .Values.config.networkCollector.serverURL | quote }}
   KCSP_COLLECTOR_TENANT_ID: {{ .Values.global.tenant.id | quote }}
   KCSP_COLLECTOR_OAUTH_TOKEN_URL: {{ .Values.config.networkCollector.oauthTokenURL | quote }}

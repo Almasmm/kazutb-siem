@@ -80,6 +80,7 @@ config:
     requireRegistered: true
     agentCredentialTTL: 720h
     agentEnrollmentMaxTTL: 168h
+    agentEnrollmentRatePerMinute: 600
   networkCollector:
     serverURL: ""
     oauthTokenURL: https://identity.example.edu/realms/kcsp/protocol/openid-connect/token

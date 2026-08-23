@@ -134,6 +134,10 @@ func run(logger *slog.Logger) error {
 	if err != nil || maximumEnrollmentTTL < time.Minute {
 		return errors.New("KCSP_AGENT_ENROLLMENT_MAX_TTL must be a duration of at least one minute")
 	}
+	enrollmentRatePerMinute, err := strconv.Atoi(envOr("KCSP_AGENT_ENROLLMENT_RATE_PER_MINUTE", "600"))
+	if err != nil || enrollmentRatePerMinute < 1 || enrollmentRatePerMinute > 100000 {
+		return errors.New("KCSP_AGENT_ENROLLMENT_RATE_PER_MINUTE must be between 1 and 100000")
+	}
 	enrollmentService := enrollment.NewService(repository, enrollment.Config{
 		CredentialTTL: credentialTTL, MaximumEnrollmentTTL: maximumEnrollmentTTL,
 	})
@@ -157,23 +161,24 @@ func run(logger *slog.Logger) error {
 		seed,
 		httpapi.Config{
 			Profile: profile + "-distributed", AuthMode: authMode, Gateway: gateway,
-			AllowDirectIngest:      profile == "development" || profile == "test",
-			CollectorRegistry:      repository,
-			DetectionService:       detectionService,
-			HuntStore:              repository,
-			RetentionStore:         repository,
-			EvidenceService:        evidenceService,
-			ThreatIntelService:     threatIntelService,
-			SOARService:            soarService,
-			UEBAService:            uebaService,
-			AISOCService:           aiSOCService,
-			CasesService:           caseService,
-			EntityService:          entityService,
-			ParserService:          parserService,
-			MITREService:           mitreService,
-			ReportService:          reportService,
-			LicenseService:         licenseService,
-			AgentEnrollmentService: enrollmentService,
+			AllowDirectIngest:            profile == "development" || profile == "test",
+			CollectorRegistry:            repository,
+			DetectionService:             detectionService,
+			HuntStore:                    repository,
+			RetentionStore:               repository,
+			EvidenceService:              evidenceService,
+			ThreatIntelService:           threatIntelService,
+			SOARService:                  soarService,
+			UEBAService:                  uebaService,
+			AISOCService:                 aiSOCService,
+			CasesService:                 caseService,
+			EntityService:                entityService,
+			ParserService:                parserService,
+			MITREService:                 mitreService,
+			ReportService:                reportService,
+			LicenseService:               licenseService,
+			AgentEnrollmentService:       enrollmentService,
+			AgentEnrollmentRatePerMinute: enrollmentRatePerMinute,
 			RequireRegisteredCollectors: strings.EqualFold(
 				envOr("KCSP_REQUIRE_REGISTERED_COLLECTORS", strconv.FormatBool(authMode == "oidc")), "true",
 			),

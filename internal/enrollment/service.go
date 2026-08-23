@@ -106,8 +106,14 @@ func (s *Service) ListTokens(ctx context.Context, tenantID string) ([]core.Agent
 	return s.store.ListAgentEnrollmentTokens(ctx, strings.TrimSpace(tenantID))
 }
 
-func (s *Service) RevokeToken(ctx context.Context, tenantID, tokenID string) (core.AgentEnrollmentToken, error) {
-	return s.store.RevokeAgentEnrollmentToken(ctx, strings.TrimSpace(tenantID), strings.TrimSpace(tokenID))
+func (s *Service) RevokeToken(ctx context.Context, tenantID, tokenID, actor string) (core.AgentEnrollmentToken, error) {
+	tenantID = strings.TrimSpace(tenantID)
+	tokenID = strings.TrimSpace(tokenID)
+	actor = strings.TrimSpace(actor)
+	if !tenant.Valid(tenantID) || tokenID == "" || actor == "" {
+		return core.AgentEnrollmentToken{}, fmt.Errorf("%w: tenant, token and actor are required", ErrInvalidRequest)
+	}
+	return s.store.RevokeAgentEnrollmentToken(ctx, tenantID, tokenID, actor)
 }
 
 func (s *Service) Enroll(ctx context.Context, request core.AgentEnrollmentRequest, observedIP string) (core.AgentEnrollmentResponse, error) {

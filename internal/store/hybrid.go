@@ -69,8 +69,8 @@ func (h *Hybrid) CreateAgentEnrollmentToken(ctx context.Context, token core.Agen
 func (h *Hybrid) ListAgentEnrollmentTokens(ctx context.Context, tenantID string) ([]core.AgentEnrollmentToken, error) {
 	return h.control.ListAgentEnrollmentTokens(ctx, tenantID)
 }
-func (h *Hybrid) RevokeAgentEnrollmentToken(ctx context.Context, tenantID, tokenID string) (core.AgentEnrollmentToken, error) {
-	return h.control.RevokeAgentEnrollmentToken(ctx, tenantID, tokenID)
+func (h *Hybrid) RevokeAgentEnrollmentToken(ctx context.Context, tenantID, tokenID, actor string) (core.AgentEnrollmentToken, error) {
+	return h.control.RevokeAgentEnrollmentToken(ctx, tenantID, tokenID, actor)
 }
 func (h *Hybrid) ConsumeAgentEnrollment(ctx context.Context, tokenHash []byte, collector core.Collector, credential core.AgentCredential, credentialHash []byte) (core.Collector, error) {
 	return h.control.ConsumeAgentEnrollment(ctx, tokenHash, collector, credential, credentialHash)

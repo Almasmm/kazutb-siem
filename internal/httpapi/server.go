@@ -74,6 +74,7 @@ type Server struct {
 	reports           *reporting.Service
 	licenses          *licensing.Service
 	enrollment        *enrollment.Service
+	enrollmentLimiter *ipRateLimiter
 }
 
 type Authenticator interface {
@@ -81,27 +82,28 @@ type Authenticator interface {
 }
 
 type Config struct {
-	Profile                     string
-	AuthMode                    string
-	Gateway                     *ingest.Gateway
-	AllowDirectIngest           bool
-	CollectorRegistry           store.CollectorRegistry
-	RequireRegisteredCollectors bool
-	DetectionService            *detection.Service
-	HuntStore                   store.HuntStore
-	RetentionStore              store.RetentionStore
-	EvidenceService             *evidence.Service
-	ThreatIntelService          *threatintel.Service
-	SOARService                 *soar.Service
-	UEBAService                 *ueba.Service
-	AISOCService                *aisoc.Service
-	CasesService                *cases.Service
-	EntityService               *entitygraph.Service
-	ParserService               *parser.StudioService
-	MITREService                *mitre.Service
-	ReportService               *reporting.Service
-	LicenseService              *licensing.Service
-	AgentEnrollmentService      *enrollment.Service
+	Profile                      string
+	AuthMode                     string
+	Gateway                      *ingest.Gateway
+	AllowDirectIngest            bool
+	CollectorRegistry            store.CollectorRegistry
+	RequireRegisteredCollectors  bool
+	DetectionService             *detection.Service
+	HuntStore                    store.HuntStore
+	RetentionStore               store.RetentionStore
+	EvidenceService              *evidence.Service
+	ThreatIntelService           *threatintel.Service
+	SOARService                  *soar.Service
+	UEBAService                  *ueba.Service
+	AISOCService                 *aisoc.Service
+	CasesService                 *cases.Service
+	EntityService                *entitygraph.Service
+	ParserService                *parser.StudioService
+	MITREService                 *mitre.Service
+	ReportService                *reporting.Service
+	LicenseService               *licensing.Service
+	AgentEnrollmentService       *enrollment.Service
+	AgentEnrollmentRatePerMinute int
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -118,6 +120,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		detections: config.DetectionService, hunts: config.HuntStore, retention: config.RetentionStore,
 		evidence: config.EvidenceService, threatIntel: config.ThreatIntelService, soar: config.SOARService,
 		ueba: config.UEBAService, aiSOC: config.AISOCService, cases: config.CasesService, entities: config.EntityService, parsers: config.ParserService, mitre: config.MITREService, reports: config.ReportService, licenses: config.LicenseService, enrollment: config.AgentEnrollmentService,
+		enrollmentLimiter: newIPRateLimiter(config.AgentEnrollmentRatePerMinute, time.Minute),
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -151,7 +154,7 @@ func (s *Server) routes() {
 		s.mux.Handle("GET /api/v1/agent-enrollment/tokens", s.protect("platform.collectors.read", http.HandlerFunc(s.listAgentEnrollmentTokens)))
 		s.mux.Handle("POST /api/v1/agent-enrollment/tokens", s.protect("platform.collectors.manage", http.HandlerFunc(s.createAgentEnrollmentToken)))
 		s.mux.Handle("POST /api/v1/agent-enrollment/tokens/{tokenID}/revoke", s.protect("platform.collectors.manage", http.HandlerFunc(s.revokeAgentEnrollmentToken)))
-		s.mux.HandleFunc("POST /api/v1/agent-enrollment", s.enrollAgent)
+		s.mux.Handle("POST /api/v1/agent-enrollment", s.limitAgentEnrollment(http.HandlerFunc(s.enrollAgent)))
 		s.mux.Handle("POST /api/v1/agent-credentials/rotate", s.protect("platform.collectors.heartbeat", http.HandlerFunc(s.rotateAgentCredential)))
 	}
 	if s.detections != nil {
@@ -693,7 +696,11 @@ func (s *Server) createAgentEnrollmentToken(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) revokeAgentEnrollmentToken(w http.ResponseWriter, r *http.Request) {
-	item, err := s.enrollment.RevokeToken(r.Context(), tenantFrom(r.Context()), r.PathValue("tokenID"))
+	item, err := s.enrollment.RevokeToken(r.Context(), tenantFrom(r.Context()), r.PathValue("tokenID"), principalFrom(r.Context()).ID)
+	if errors.Is(err, enrollment.ErrInvalidRequest) {
+		s.problem(w, r, http.StatusBadRequest, "validation_error", "Invalid agent enrollment token revocation", err.Error())
+		return
+	}
 	if err != nil {
 		s.handleDomainError(w, r, err)
 		return

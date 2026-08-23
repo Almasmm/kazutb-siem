@@ -597,6 +597,17 @@ func (p *Postgres) AppendAudit(ctx context.Context, entry core.AuditEntry) (core
 		return core.AuditEntry{}, fmt.Errorf("begin audit append: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	entry, err = appendAuditTx(ctx, tx, entry)
+	if err != nil {
+		return core.AuditEntry{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.AuditEntry{}, fmt.Errorf("commit audit append: %w", err)
+	}
+	return entry, nil
+}
+
+func appendAuditTx(ctx context.Context, tx pgx.Tx, entry core.AuditEntry) (core.AuditEntry, error) {
 	if _, err := tx.Exec(ctx, "INSERT INTO audit_heads(tenant_id) VALUES($1) ON CONFLICT DO NOTHING", entry.TenantID); err != nil {
 		return core.AuditEntry{}, fmt.Errorf("ensure audit head: %w", err)
 	}
@@ -621,9 +632,6 @@ func (p *Postgres) AppendAudit(ctx context.Context, entry core.AuditEntry) (core
 	}
 	if _, err := tx.Exec(ctx, "UPDATE audit_heads SET head_hash=$2 WHERE tenant_id=$1", entry.TenantID, entry.Hash); err != nil {
 		return core.AuditEntry{}, fmt.Errorf("advance audit head: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return core.AuditEntry{}, fmt.Errorf("commit audit append: %w", err)
 	}
 	return entry, nil
 }

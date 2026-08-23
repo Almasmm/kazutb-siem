@@ -70,6 +70,32 @@ func TestPostgresAgentEnrollmentConsumesSecretsAndRotatesCredential(t *testing.T
 	if _, err := repository.AgentCredentialByHash(ctx, replacementHash[:]); err != nil {
 		t.Fatalf("replacement credential is not active: %v", err)
 	}
+	revocable, err := service.CreateToken(ctx, tenantID, "platform-admin", enrollment.CreateTokenRequest{
+		Label: "Revocation audit", CollectorType: "linux-agent", Capabilities: []string{"journald"}, ExpiresInSeconds: 600, MaxUses: 1,
+	})
+	if err != nil {
+		t.Fatalf("issue revocable enrollment token: %v", err)
+	}
+	if _, err := service.RevokeToken(ctx, tenantID, revocable.Token.ID, "security-admin"); err != nil {
+		t.Fatalf("revoke enrollment token: %v", err)
+	}
+	auditEntries, err := repository.ListAudit(ctx, tenantID, 20)
+	if err != nil {
+		t.Fatalf("list enrollment audit entries: %v", err)
+	}
+	actions := make(map[string]int)
+	for _, entry := range auditEntries {
+		actions[entry.Action]++
+	}
+	for _, action := range []string{"agent.enrollment_token.created", "agent.enrolled", "agent.credential.rotated", "agent.enrollment_token.revoked"} {
+		if actions[action] == 0 {
+			t.Fatalf("missing enrollment audit action %q in %+v", action, actions)
+		}
+	}
+	valid, err := repository.VerifyAudit(ctx, tenantID)
+	if err != nil || !valid {
+		t.Fatalf("enrollment audit chain verification: valid=%v err=%v", valid, err)
+	}
 	if _, err := repository.SetCollectorState(ctx, tenantID, response.Collector.ID, "REVOKED"); err != nil {
 		t.Fatal(err)
 	}

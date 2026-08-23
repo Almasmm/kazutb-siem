@@ -17,7 +17,7 @@ var ErrEnrollmentRejected = errors.New("agent enrollment token rejected")
 type AgentEnrollmentStore interface {
 	CreateAgentEnrollmentToken(context.Context, core.AgentEnrollmentToken, []byte) (core.AgentEnrollmentToken, error)
 	ListAgentEnrollmentTokens(context.Context, string) ([]core.AgentEnrollmentToken, error)
-	RevokeAgentEnrollmentToken(context.Context, string, string) (core.AgentEnrollmentToken, error)
+	RevokeAgentEnrollmentToken(context.Context, string, string, string) (core.AgentEnrollmentToken, error)
 	ConsumeAgentEnrollment(context.Context, []byte, core.Collector, core.AgentCredential, []byte) (core.Collector, error)
 	AgentCredentialByHash(context.Context, []byte) (core.AgentCredential, error)
 	RotateAgentCredential(context.Context, []byte, core.AgentCredential, []byte) (core.AgentCredential, error)
@@ -30,7 +30,12 @@ func (p *Postgres) CreateAgentEnrollmentToken(ctx context.Context, token core.Ag
 	if len(tokenHash) != 32 {
 		return core.AgentEnrollmentToken{}, errors.New("agent enrollment token hash must be SHA-256")
 	}
-	created, err := scanAgentEnrollmentToken(p.pool.QueryRow(ctx, `INSERT INTO agent_enrollment_tokens
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return core.AgentEnrollmentToken{}, fmt.Errorf("begin agent enrollment token creation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	created, err := scanAgentEnrollmentToken(tx.QueryRow(ctx, `INSERT INTO agent_enrollment_tokens
 		(tenant_id,token_id,label,token_hash,collector_type,capabilities,state,expires_at,max_uses,use_count,created_by,created_at)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$11)
 		RETURNING `+agentEnrollmentTokenColumns,
@@ -42,6 +47,19 @@ func (p *Postgres) CreateAgentEnrollmentToken(ctx context.Context, token core.Ag
 			return core.AgentEnrollmentToken{}, ErrAlreadyExists
 		}
 		return core.AgentEnrollmentToken{}, fmt.Errorf("create agent enrollment token: %w", err)
+	}
+	if _, err := appendAuditTx(ctx, tx, core.AuditEntry{
+		TenantID: created.TenantID, Actor: created.CreatedBy, Action: "agent.enrollment_token.created",
+		ResourceType: "agent_enrollment_token", ResourceID: created.ID, Outcome: "success",
+		Metadata: map[string]interface{}{
+			"label": created.Label, "collector_type": created.CollectorType, "capabilities": created.Capabilities,
+			"expires_at": created.ExpiresAt, "max_uses": created.MaxUses,
+		},
+	}); err != nil {
+		return core.AgentEnrollmentToken{}, fmt.Errorf("audit agent enrollment token creation: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.AgentEnrollmentToken{}, fmt.Errorf("commit agent enrollment token creation: %w", err)
 	}
 	return created, nil
 }
@@ -64,8 +82,13 @@ func (p *Postgres) ListAgentEnrollmentTokens(ctx context.Context, tenantID strin
 	return items, rows.Err()
 }
 
-func (p *Postgres) RevokeAgentEnrollmentToken(ctx context.Context, tenantID, tokenID string) (core.AgentEnrollmentToken, error) {
-	item, err := scanAgentEnrollmentToken(p.pool.QueryRow(ctx, `UPDATE agent_enrollment_tokens SET state=$3
+func (p *Postgres) RevokeAgentEnrollmentToken(ctx context.Context, tenantID, tokenID, actor string) (core.AgentEnrollmentToken, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return core.AgentEnrollmentToken{}, fmt.Errorf("begin agent enrollment token revocation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	item, err := scanAgentEnrollmentToken(tx.QueryRow(ctx, `UPDATE agent_enrollment_tokens SET state=$3
 		WHERE tenant_id=$1 AND token_id=$2 RETURNING `+agentEnrollmentTokenColumns,
 		tenantID, tokenID, core.AgentEnrollmentStateRevoked))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -73,6 +96,18 @@ func (p *Postgres) RevokeAgentEnrollmentToken(ctx context.Context, tenantID, tok
 	}
 	if err != nil {
 		return core.AgentEnrollmentToken{}, fmt.Errorf("revoke agent enrollment token: %w", err)
+	}
+	if _, err := appendAuditTx(ctx, tx, core.AuditEntry{
+		TenantID: item.TenantID, Actor: actor, Action: "agent.enrollment_token.revoked",
+		ResourceType: "agent_enrollment_token", ResourceID: item.ID, Outcome: "success",
+		Metadata: map[string]interface{}{
+			"label": item.Label, "collector_type": item.CollectorType, "use_count": item.UseCount, "max_uses": item.MaxUses,
+		},
+	}); err != nil {
+		return core.AgentEnrollmentToken{}, fmt.Errorf("audit agent enrollment token revocation: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.AgentEnrollmentToken{}, fmt.Errorf("commit agent enrollment token revocation: %w", err)
 	}
 	return item, nil
 }
@@ -144,6 +179,16 @@ func (p *Postgres) ConsumeAgentEnrollment(ctx context.Context, tokenHash []byte,
 		WHERE tenant_id=$1 AND token_id=$2`, token.TenantID, token.ID, useCount, state, now); err != nil {
 		return core.Collector{}, fmt.Errorf("consume agent enrollment token: %w", err)
 	}
+	if _, err := appendAuditTx(ctx, tx, core.AuditEntry{
+		TenantID: created.TenantID, Actor: created.AuthSubject, Action: "agent.enrolled",
+		ResourceType: "collector", ResourceID: created.ID, Outcome: "success", CreatedAt: now,
+		Metadata: map[string]interface{}{
+			"enrollment_token_id": token.ID, "credential_id": credential.ID, "collector_type": created.Type,
+			"version": created.Version, "observed_ip": created.ObservedIP,
+		},
+	}); err != nil {
+		return core.Collector{}, fmt.Errorf("audit agent enrollment: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return core.Collector{}, fmt.Errorf("commit agent enrollment: %w", err)
 	}
@@ -208,6 +253,16 @@ func (p *Postgres) RotateAgentCredential(ctx context.Context, oldHash []byte, re
 	}
 	if _, err := tx.Exec(ctx, `UPDATE agent_credentials SET revoked_at=$2 WHERE credential_id=$1`, current.ID, now); err != nil {
 		return core.AgentCredential{}, fmt.Errorf("revoke replaced agent credential: %w", err)
+	}
+	if _, err := appendAuditTx(ctx, tx, core.AuditEntry{
+		TenantID: current.TenantID, Actor: current.AuthSubject, Action: "agent.credential.rotated",
+		ResourceType: "agent_credential", ResourceID: replacement.ID, Outcome: "success", CreatedAt: now,
+		Metadata: map[string]interface{}{
+			"collector_id": current.CollectorID, "replaced_credential_id": current.ID,
+			"replacement_credential_id": replacement.ID, "expires_at": replacement.ExpiresAt,
+		},
+	}); err != nil {
+		return core.AgentCredential{}, fmt.Errorf("audit agent credential rotation: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return core.AgentCredential{}, fmt.Errorf("commit agent credential rotation: %w", err)
