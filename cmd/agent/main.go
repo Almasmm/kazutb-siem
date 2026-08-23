@@ -18,17 +18,23 @@ import (
 	"github.com/kcsp/platform/internal/ingest"
 )
 
-const agentVersion = "0.4.0"
+const agentVersion = "0.5.0"
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	if err := run(logger); err != nil && !errors.Is(err, context.Canceled) {
+	if err := runProcess(logger); err != nil && !errors.Is(err, context.Canceled) {
 		logger.Error("KCSP agent failed", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(logger *slog.Logger) error {
+func runConsole(logger *slog.Logger) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return run(ctx, logger)
+}
+
+func run(ctx context.Context, logger *slog.Logger) error {
 	stateDirectory := envOr("KCSP_AGENT_STATE_DIR", filepath.Join(os.TempDir(), "kcsp-agent"))
 	queue, err := agent.OpenDiskQueue(filepath.Join(stateDirectory, "queue"), envInt64("KCSP_AGENT_QUEUE_MAX_BYTES", 1<<30))
 	if err != nil {
@@ -51,7 +57,7 @@ func run(logger *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		bootstrapContext, cancelBootstrap := context.WithTimeout(context.Background(), 30*time.Second)
+		bootstrapContext, cancelBootstrap := context.WithTimeout(ctx, 30*time.Second)
 		grant, ensureErr := credentialManager.Ensure(bootstrapContext)
 		cancelBootstrap()
 		if ensureErr != nil {
@@ -60,6 +66,10 @@ func run(logger *slog.Logger) error {
 		}
 		accessToken = grant.AccessToken
 		defer credentialManager.Close()
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("KCSP_AGENT_ENROLL_ONLY")), "true") {
+			logger.Info("KCSP agent credential is ready", "version", agentVersion, "expires_at", grant.ExpiresAt, "state_directory", stateDirectory)
+			return nil
+		}
 	}
 	newForwarder := func(token string) (*agent.Forwarder, error) {
 		return agent.NewForwarder(agent.ForwarderConfig{
@@ -83,8 +93,6 @@ func run(logger *slog.Logger) error {
 	for _, source := range sources {
 		sourceNames = append(sourceNames, source.Name())
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	pollInterval := envDuration("KCSP_AGENT_POLL_INTERVAL", 2*time.Second)
 	batchSize := int(envInt64("KCSP_AGENT_BATCH_SIZE", 100))
 	if batchSize > ingest.MaxBatchEvents {
