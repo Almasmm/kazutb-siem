@@ -30,7 +30,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Validate k6 and safety contracts
         run: sh ops/load/self-test.sh
@@ -70,7 +70,7 @@ jobs:
       KCSP_READ_VUS: "2"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Start data path
         run: |

@@ -32,7 +32,7 @@ jobs:
       KCSP_RELEASE_OUTPUT_DIR: /tmp/kcsp-release
     steps:
       - name: Checkout release revision
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -76,7 +76,7 @@ jobs:
       KCSP_AGENT_RELEASE_OUTPUT_DIR: /tmp/kcsp-agent-release
     steps:
       - name: Checkout release revision
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 

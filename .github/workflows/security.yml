@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 35
     steps:
       - name: Check out complete history
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Set up Go
@@ -49,7 +49,7 @@ jobs:
     timeout-minutes: 75
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Validate security policy
         run: sh ops/security/self-test.sh
       - name: Build and scan every runtime image
