@@ -11,6 +11,7 @@ data:
   KCSP_DEFAULT_TENANT_NAME: {{ .Values.global.tenant.name | quote }}
   KCSP_DEMO_SEED: "false"
   KCSP_AUTH_MODE: {{ .Values.config.auth.mode | quote }}
+  KCSP_LICENSE_TRUSTED_KEYS_JSON: {{ .Values.config.licensing.trustedKeysJSON | quote }}
   KCSP_OIDC_ISSUER_URL: {{ .Values.config.auth.oidc.issuerURL | quote }}
   KCSP_OIDC_CLIENT_ID: {{ .Values.config.auth.oidc.clientID | quote }}
   KCSP_OIDC_ROLES_CLAIM: {{ .Values.config.auth.oidc.rolesClaim | quote }}

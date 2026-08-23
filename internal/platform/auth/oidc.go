@@ -210,6 +210,7 @@ var roleDisplayNames = map[string]string{
 	"platform_super_admin":        "Platform Super Admin",
 	"platform_administrator":      "Platform Super Admin",
 	"tenant_admin":                "Tenant Admin",
+	"mssp_manager":                "MSSP Manager",
 	"soc_manager":                 "SOC Manager",
 	"soc_l1":                      "SOC L1",
 	"soc_l2":                      "SOC L2",
@@ -227,6 +228,7 @@ var rolePermissions = map[string][]string{
 	"platform_administrator": {"*"},
 	"tenant_admin": {
 		"platform.overview.read", "admin.users.manage", "admin.roles.manage", "admin.config.manage", "platform.audit.read",
+		"licenses.read", "licenses.install", "reports.read", "reports.generate",
 		"siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read", "siem.rules.read",
 		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage", "platform.retention.read", "platform.retention.manage", "ti.indicators.read", "ti.indicators.manage",
 		"soc.alerts.read", "soc.alerts.manage", "soc.alerts.triage", "soc.incidents.read", "soc.incidents.create", "soc.incidents.manage",
@@ -234,6 +236,7 @@ var rolePermissions = map[string][]string{
 	},
 	"soc_manager": {
 		"platform.overview.read", "siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read",
+		"licenses.read", "reports.read", "reports.generate",
 		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage", "platform.retention.read", "ti.indicators.read",
 		"soc.alerts.read", "soc.alerts.manage", "soc.alerts.triage", "soc.incidents.read", "soc.incidents.create", "soc.incidents.manage",
 		"soc.cases.manage", "soc.evidence.read", "soc.evidence.write", "soar.playbooks.read", "soar.playbooks.write", "soar.playbooks.execute", "soar.actions.approve", "soar.connectors.read", "soar.connectors.manage", "soar.connectors.test", "ueba.read", "ueba.feedback", "ai.read", "ai.request", "ai.decide",
@@ -245,6 +248,7 @@ var rolePermissions = map[string][]string{
 	},
 	"soc_l2": {
 		"platform.overview.read", "platform.collectors.read", "siem.events.read", "siem.events.export", "siem.findings.read", "detection.rules.read",
+		"licenses.read", "reports.read", "reports.generate",
 		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage", "platform.retention.read", "ti.indicators.read",
 		"soc.alerts.read", "soc.alerts.manage", "soc.alerts.triage", "soc.incidents.read", "soc.incidents.create", "soc.incidents.manage",
 		"soc.cases.manage", "soc.evidence.read", "soc.evidence.write", "soar.playbooks.read", "soar.playbooks.execute", "soar.connectors.read", "platform.audit.read", "ueba.read", "ueba.feedback", "ai.read", "ai.request", "ai.decide",
@@ -266,7 +270,10 @@ var rolePermissions = map[string][]string{
 		"platform.overview.read", "siem.events.read", "soc.alerts.read", "soc.incidents.read", "ti.indicators.read", "ti.indicators.manage", "ai.read", "ai.request",
 	},
 	"auditor": {
-		"platform.overview.read", "siem.events.read", "soc.alerts.read", "soc.incidents.read", "soc.evidence.read", "platform.audit.read", "audit.read", "ti.indicators.read", "ueba.read", "ai.read",
+		"platform.overview.read", "siem.events.read", "soc.alerts.read", "soc.incidents.read", "soc.evidence.read", "platform.audit.read", "audit.read", "ti.indicators.read", "ueba.read", "ai.read", "licenses.read", "reports.read",
+	},
+	"mssp_manager": {
+		"platform.overview.read", "soc.alerts.read", "soc.incidents.read", "platform.audit.read", "licenses.read", "reports.read", "mssp.tenants.read",
 	},
 	"collector":         {"siem.events.ingest", "platform.collectors.heartbeat"},
 	"service_collector": {"siem.events.ingest", "platform.collectors.heartbeat"},
@@ -285,11 +292,14 @@ var knownPermissions = func() map[string]bool {
 }()
 
 func permissionsForRoles(roles []string) (map[string]bool, []string, bool) {
-	permissions := map[string]bool{}
+	permissions := map[string]bool{"platform.session.read": true}
 	displayNames := []string{}
 	platformScope := false
 	seenNames := map[string]bool{}
 	for _, role := range roles {
+		if role == "mssp_manager" {
+			platformScope = true
+		}
 		for _, permission := range rolePermissions[role] {
 			permissions[permission] = true
 			if permission == "*" {

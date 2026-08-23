@@ -65,6 +65,8 @@ trustBundle:
   key: ca-certificates.crt
 
 config:
+  licensing:
+    trustedKeysJSON: "{}"
   auth:
     mode: oidc
     oidc:

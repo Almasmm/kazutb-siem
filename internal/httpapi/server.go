@@ -21,6 +21,7 @@ import (
 	"github.com/kcsp/platform/internal/evidence"
 	"github.com/kcsp/platform/internal/hunt"
 	"github.com/kcsp/platform/internal/ingest"
+	"github.com/kcsp/platform/internal/licensing"
 	"github.com/kcsp/platform/internal/mitre"
 	"github.com/kcsp/platform/internal/observability"
 	"github.com/kcsp/platform/internal/parser"
@@ -70,6 +71,7 @@ type Server struct {
 	parsers           *parser.StudioService
 	mitre             *mitre.Service
 	reports           *reporting.Service
+	licenses          *licensing.Service
 }
 
 type Authenticator interface {
@@ -96,6 +98,7 @@ type Config struct {
 	ParserService               *parser.StudioService
 	MITREService                *mitre.Service
 	ReportService               *reporting.Service
+	LicenseService              *licensing.Service
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -111,7 +114,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		collectors: config.CollectorRegistry, requireCollectors: config.RequireRegisteredCollectors,
 		detections: config.DetectionService, hunts: config.HuntStore, retention: config.RetentionStore,
 		evidence: config.EvidenceService, threatIntel: config.ThreatIntelService, soar: config.SOARService,
-		ueba: config.UEBAService, aiSOC: config.AISOCService, cases: config.CasesService, entities: config.EntityService, parsers: config.ParserService, mitre: config.MITREService, reports: config.ReportService,
+		ueba: config.UEBAService, aiSOC: config.AISOCService, cases: config.CasesService, entities: config.EntityService, parsers: config.ParserService, mitre: config.MITREService, reports: config.ReportService, licenses: config.LicenseService,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -124,7 +127,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /readyz", s.ready)
 	s.mux.HandleFunc("GET /metrics", s.metrics)
 
-	s.mux.Handle("GET /api/v1/session", s.protect("platform.overview.read", http.HandlerFunc(s.session)))
+	s.mux.Handle("GET /api/v1/session", s.protect("platform.session.read", http.HandlerFunc(s.session)))
 	s.mux.Handle("GET /api/v1/overview", s.protect("platform.overview.read", http.HandlerFunc(s.overview)))
 	s.mux.Handle("GET /api/v1/events", s.protect("siem.events.read", http.HandlerFunc(s.listEvents)))
 	s.mux.Handle("GET /api/v1/events/{eventID}", s.protect("siem.events.read", http.HandlerFunc(s.getEvent)))
@@ -211,6 +214,15 @@ func (s *Server) routes() {
 		s.mux.Handle("GET /api/v1/reports/{reportID}", s.protect("reports.read", http.HandlerFunc(s.getReport)))
 		s.mux.Handle("GET /api/v1/reports/{reportID}/download", s.protect("reports.read", http.HandlerFunc(s.downloadReport)))
 	}
+	if s.licenses != nil {
+		s.mux.Handle("GET /api/v1/licenses/current", s.protect("licenses.read", http.HandlerFunc(s.currentLicense)))
+		s.mux.Handle("GET /api/v1/licenses/entitlements", s.protect("licenses.read", http.HandlerFunc(s.currentLicense)))
+		s.mux.Handle("GET /api/v1/licenses", s.protect("licenses.read", http.HandlerFunc(s.listLicenses)))
+		s.mux.Handle("POST /api/v1/licenses/install", s.protect("licenses.install", http.HandlerFunc(s.installLicense)))
+		s.mux.Handle("GET /api/v1/admin/tenants", s.protect("mssp.tenants.read", http.HandlerFunc(s.listAdminTenants)))
+		s.mux.Handle("POST /api/v1/admin/tenants", s.protect("admin.tenants.manage", http.HandlerFunc(s.createAdminTenant)))
+		s.mux.Handle("PATCH /api/v1/admin/tenants/{tenantID}", s.protect("admin.tenants.manage", http.HandlerFunc(s.updateAdminTenant)))
+	}
 	if s.threatIntel != nil {
 		s.mux.Handle("GET /api/v1/threat-intel/feeds", s.protect("ti.indicators.read", http.HandlerFunc(s.listThreatIntelFeeds)))
 		s.mux.Handle("POST /api/v1/threat-intel/feeds", s.protect("ti.indicators.manage", http.HandlerFunc(s.createThreatIntelFeed)))
@@ -284,7 +296,7 @@ func (s *Server) protect(permission string, next http.Handler) http.Handler {
 			s.problem(w, r, http.StatusUnauthorized, "authentication_required", "Authentication required", "Use an authorized bearer credential.")
 			return
 		}
-		if !principal.Can(permission) {
+		if permission != "platform.session.read" && !principal.Can(permission) {
 			s.problem(w, r, http.StatusForbidden, "permission_denied", "Permission denied", "The principal does not have "+permission+".")
 			return
 		}
@@ -295,8 +307,30 @@ func (s *Server) protect(permission string, next http.Handler) http.Handler {
 		}
 		ctx := context.WithValue(r.Context(), principalKey, principal)
 		ctx = context.WithValue(ctx, tenantKey, tenantID)
+		if s.licenses != nil {
+			if err := s.licenses.Authorize(ctx, tenantID, permission, r.Method); err != nil {
+				s.handleLicenseAuthorization(w, r.WithContext(ctx), err)
+				return
+			}
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (s *Server) handleLicenseAuthorization(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, licensing.ErrQuotaExceeded):
+		w.Header().Set("Retry-After", "60")
+		s.problem(w, r, http.StatusTooManyRequests, "license_quota_exceeded", "Licensed quota exceeded", err.Error())
+	case errors.Is(err, licensing.ErrTenantSuspended):
+		s.problem(w, r, http.StatusForbidden, "tenant_suspended", "Tenant suspended", err.Error())
+	case errors.Is(err, licensing.ErrModuleNotEntitled):
+		s.problem(w, r, http.StatusForbidden, "module_not_entitled", "Module not entitled", err.Error())
+	case errors.Is(err, licensing.ErrLicenseRestricted):
+		s.problem(w, r, http.StatusForbidden, "license_restricted", "License restricted", err.Error())
+	default:
+		s.handleDomainError(w, r, err)
+	}
 }
 
 func (s *Server) middleware(next http.Handler) http.Handler {
@@ -315,7 +349,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		if origin == "http://localhost:5173" || origin == "http://127.0.0.1:5173" || origin == "http://localhost:3000" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-KCSP-Tenant-ID, X-KCSP-Event-Format, X-KCSP-Event-ID, X-KCSP-Event-Timestamp, X-Request-ID, If-Match")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-KCSP-Tenant-ID, X-KCSP-Event-Format, X-KCSP-Event-ID, X-KCSP-Event-Timestamp, X-KCSP-Access-Reason, X-Request-ID, Idempotency-Key, If-Match")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
 		}
 		if r.Method == http.MethodOptions {

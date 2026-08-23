@@ -3,6 +3,7 @@ import {
   Activity,
   Archive,
   BarChart3,
+  Building2,
   BellRing,
   Briefcase,
   BrainCircuit,
@@ -61,6 +62,7 @@ const navGroups = [
     items: [
       { to: "/evidence", label: "nav.evidence", icon: Archive },
       { to: "/reports", label: "nav.reports", icon: BarChart3 },
+      { to: "/administration", label: "nav.administration", icon: Building2 },
       { to: "/collectors", label: "nav.collectors", icon: RadioTower },
       { to: "/system", label: "nav.system", icon: Settings2 },
       { to: "/audit", label: "nav.audit", icon: ClipboardList },
@@ -87,6 +89,7 @@ const pageKeys: Record<string, string> = {
   "/parsers": "nav.parsers",
   "/mitre": "nav.mitre",
   "/reports": "nav.reports",
+  "/administration": "nav.administration",
 };
 
 export function AppShell() {

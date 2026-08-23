@@ -812,3 +812,12 @@ export interface ReportRunDto {
   created_at: string;
   completed_at?: string;
 }
+
+export interface LicenseEnvelopeDto { key_id: string; payload: string; signature: string }
+export interface LicenseLimitsDto { eps?: number; events_per_day?: number; gb_per_day?: number; retention_days?: number; assets?: number; analysts?: number; tenants?: number; ai_requests_per_day?: number; premium_connectors?: number }
+export interface LicensePayloadDto { schema_version: number; license_id: string; customer: string; tenant_ids: string[]; modules: string[]; features?: string[]; limits: LicenseLimitsDto; policy: { ingest_after_expiry: "ALLOW" | "BLOCK" | "BUFFER"; read_only_on_expiry: boolean }; issued_at: string; not_before: string; expires_at: string; grace_until: string }
+export interface LicenseRecordDto { tenant_id: string; license_id: string; key_id: string; payload: LicensePayloadDto; envelope: LicenseEnvelopeDto; fingerprint_sha256: string; installed_by: string; request_id?: string; active: boolean; installed_at: string }
+export interface LicenseLimitStatusDto { name: string; used: number; limit: number; unit: string; percent: number; exceeded: boolean }
+export interface LicenseStatusDto { tenant_id: string; state: "DEVELOPMENT" | "UNLICENSED" | "NOT_YET_VALID" | "ACTIVE" | "GRACE" | "EXPIRED"; read_only: boolean; license?: LicenseRecordDto; modules: Array<{ module: string; enabled: boolean }>; limits: LicenseLimitStatusDto[]; features: string[]; warnings: string[]; checked_at: string }
+export interface TenantDto { tenant_id: string; display_name: string; state: "ACTIVE" | "SUSPENDED"; created_at: string; updated_at: string }
+export interface TenantSummaryDto { tenant: TenantDto; license_state: LicenseStatusDto["state"]; read_only: boolean; ingestion_eps: number; events_24h: number; open_alerts: number; open_incidents: number; collectors_online: number; collectors_offline: number; warnings: string[]; checked_at: string }

@@ -73,6 +73,13 @@ export function getTenantId(): string {
   return tenantId;
 }
 
+export function setTenantId(value: string): void {
+  const normalized = value.trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(normalized)) throw new Error("Invalid KCSP tenant identifier.");
+  tenantId = normalized;
+  sessionStorage.setItem("kcsp.tenant", tenantId);
+}
+
 export function getSessionUser(): SessionUser | null {
   return currentUser;
 }

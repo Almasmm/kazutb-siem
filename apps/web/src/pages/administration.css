@@ -1,0 +1,70 @@
+.administration-page { position: relative; }
+.admin-actions, .admin-form-actions, .tenant-actions { display: flex; gap: 9px; }
+.admin-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 38px; padding: 8px 14px; border: 1px solid rgba(134, 156, 168, .34); background: rgba(17, 32, 39, .8); color: var(--text-primary, #edf5f6); font: 700 .78rem "Space Grotesk", sans-serif; cursor: pointer; }
+.admin-button.primary { border-color: #e9ad4f; background: #e9ad4f; color: #1d1304; }
+.admin-button:hover { border-color: #e9ad4f; }
+.admin-button:disabled { opacity: .55; cursor: wait; }
+.license-command { display: grid; grid-template-columns: minmax(220px, .8fr) minmax(260px, 1fr) minmax(260px, 1.3fr); gap: 1px; padding: 0; overflow: hidden; border-top: 3px solid #e9ad4f; background: rgba(143, 160, 168, .18); }
+.license-command > div { min-width: 0; padding: 22px 24px; background: linear-gradient(135deg, rgba(26, 42, 48, .97), rgba(12, 25, 31, .97)); }
+.license-state-mark { display: flex; align-items: center; gap: 15px; }
+.license-state-mark svg { color: #e9ad4f; }
+.license-state-mark div, .license-validity { display: grid; gap: 5px; }
+.license-state-mark span, .license-validity span, .admin-form > div:first-child > span, .admin-panel-head > div > span { color: #e9ad4f; font-size: .68rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+.license-state-mark strong { font: 800 1.35rem "Space Grotesk", sans-serif; letter-spacing: .05em; }
+.license-state-mark small, .license-validity small, .admin-panel-head small { color: var(--text-muted, #8da0a8); }
+.license-validity strong { font-family: "IBM Plex Mono", monospace; }
+.license-warning-stack { display: flex; flex-wrap: wrap; align-content: center; gap: 7px; }
+.license-warning-stack span { padding: 7px 9px; border: 1px solid rgba(231, 120, 80, .3); background: rgba(231, 120, 80, .08); color: #f0ad8f; font-size: .72rem; }
+.license-warning-stack span.clear { display: inline-flex; align-items: center; gap: 7px; border-color: rgba(83, 196, 154, .3); background: rgba(83, 196, 154, .08); color: #78d8b5; }
+.license-command.state-active, .license-command.state-development { border-top-color: #53c49a; }
+.license-command.state-expired, .license-command.state-unlicensed { border-top-color: #e36e56; }
+.admin-form { display: grid; grid-template-columns: minmax(240px, .7fr) minmax(360px, 1.3fr); gap: 20px; align-items: end; padding: 24px; border-left: 3px solid #e9ad4f; }
+.admin-form h2, .admin-panel-head h2 { margin: 5px 0 0; font: 700 1.25rem "Space Grotesk", sans-serif; }
+.admin-form p { max-width: 52ch; margin: 7px 0 0; color: var(--text-muted, #8da0a8); font-size: .78rem; }
+.admin-form textarea { grid-row: span 2; min-height: 190px; padding: 14px; resize: vertical; border: 1px solid rgba(134, 156, 168, .3); background: #071318; color: #c8e7df; font: .74rem/1.55 "IBM Plex Mono", monospace; }
+.admin-form label { display: grid; gap: 7px; }
+.admin-form label span { color: var(--text-muted, #8da0a8); font-size: .73rem; font-weight: 700; }
+.admin-form input { min-height: 42px; padding: 8px 11px; border: 1px solid rgba(134, 156, 168, .3); background: #0a181e; color: var(--text-primary, #edf5f6); }
+.admin-form-actions { justify-content: flex-end; grid-column: 2; }
+.tenant-form { grid-template-columns: minmax(220px, .7fr) repeat(2, minmax(180px, .65fr)); }
+.tenant-form .admin-form-actions { grid-column: 2 / -1; }
+.admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.entitlement-panel, .quota-panel, .tenant-panel, .license-history { padding: 0; overflow: hidden; }
+.admin-panel-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; padding: 20px 22px 17px; border-bottom: 1px solid rgba(134, 156, 168, .16); }
+.module-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; background: rgba(134, 156, 168, .13); }
+.module-grid > div { display: flex; gap: 11px; align-items: center; padding: 16px; background: rgba(10, 24, 30, .94); }
+.module-grid > div.enabled svg { color: #53c49a; }
+.module-grid > div.disabled { opacity: .5; }
+.module-grid > div.disabled svg { color: #e36e56; }
+.module-grid > div div { display: grid; gap: 3px; }
+.module-grid strong { font: 700 .78rem "IBM Plex Mono", monospace; }
+.module-grid small { color: var(--text-muted, #8da0a8); font-size: .7rem; }
+.quota-list { display: grid; padding: 8px 20px 18px; }
+.quota-row { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(100px, .7fr) 54px; gap: 12px; align-items: center; padding: 11px 0; border-bottom: 1px solid rgba(134, 156, 168, .1); }
+.quota-row > div:first-child { display: grid; gap: 3px; }
+.quota-row strong { font-size: .77rem; text-transform: capitalize; }
+.quota-row span, .quota-row small { color: var(--text-muted, #8da0a8); font-size: .68rem; }
+.quota-rail { height: 5px; overflow: hidden; background: rgba(134, 156, 168, .18); }
+.quota-rail i { display: block; height: 100%; background: #53c49a; }
+.quota-row.exceeded .quota-rail i { background: #e36e56; }
+.quota-row.exceeded strong { color: #ef917c; }
+.admin-icon-button, .tenant-actions button { display: inline-grid; width: 33px; height: 33px; place-items: center; border: 1px solid rgba(134, 156, 168, .25); background: rgba(11, 25, 31, .8); color: var(--text-muted, #8da0a8); cursor: pointer; }
+.admin-icon-button:hover, .tenant-actions button:hover { border-color: #e9ad4f; color: #e9ad4f; }
+.tenant-table td small { display: block; margin-top: 4px; color: var(--text-muted, #8da0a8); }
+.tenant-health { color: #53c49a; font-family: "IBM Plex Mono", monospace; }
+.tenant-health.bad { color: #e36e56; }
+.tenant-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 13px 20px; border-top: 1px solid rgba(134, 156, 168, .14); color: var(--text-muted, #8da0a8); font: .72rem "IBM Plex Mono", monospace; }
+.tenant-pagination button { min-height: 32px; padding: 5px 10px; border: 1px solid rgba(134, 156, 168, .25); background: rgba(11, 25, 31, .8); color: var(--text-primary, #edf5f6); cursor: pointer; }
+.tenant-pagination button:disabled { opacity: .35; cursor: default; }
+.permission-state { display: flex; gap: 14px; align-items: center; padding: 26px; color: #e9ad4f; }
+.permission-state strong { color: var(--text-primary, #edf5f6); }
+.permission-state p { margin: 5px 0 0; color: var(--text-muted, #8da0a8); }
+.license-timeline { display: grid; padding: 10px 22px 20px; }
+.license-timeline > div { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 0; border-bottom: 1px solid rgba(134, 156, 168, .12); }
+.license-timeline > div > span { width: 9px; height: 9px; border: 2px solid #667981; border-radius: 50%; }
+.license-timeline > div.active > span { border-color: #53c49a; background: #53c49a; box-shadow: 0 0 0 5px rgba(83, 196, 154, .1); }
+.license-timeline > div > div { display: grid; gap: 4px; min-width: 0; }
+.license-timeline code { overflow: hidden; color: #91aaa9; font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
+.license-timeline > div > div:last-child { justify-items: end; }
+@media (max-width: 1000px) { .license-command, .admin-grid { grid-template-columns: 1fr; } .admin-form, .tenant-form { grid-template-columns: 1fr 1fr; } .admin-form > div:first-child { grid-column: 1 / -1; } }
+@media (max-width: 680px) { .admin-actions { width: 100%; } .admin-actions .admin-button { flex: 1; } .admin-form, .tenant-form { grid-template-columns: 1fr; } .admin-form textarea, .admin-form-actions, .tenant-form .admin-form-actions { grid-column: 1; grid-row: auto; } .module-grid { grid-template-columns: 1fr; } .quota-row { grid-template-columns: 1fr 70px; } .quota-row > div:first-child { grid-column: 1 / -1; } .license-timeline > div { grid-template-columns: 10px minmax(0, 1fr); } .license-timeline > div > div:last-child { grid-column: 2; justify-items: start; } }

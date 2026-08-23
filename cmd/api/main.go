@@ -22,6 +22,7 @@ import (
 	"github.com/kcsp/platform/internal/evidence"
 	"github.com/kcsp/platform/internal/httpapi"
 	"github.com/kcsp/platform/internal/ingest"
+	"github.com/kcsp/platform/internal/licensing"
 	"github.com/kcsp/platform/internal/mitre"
 	"github.com/kcsp/platform/internal/observability"
 	"github.com/kcsp/platform/internal/parser"
@@ -105,6 +106,11 @@ func run(logger *slog.Logger) error {
 	parserService := parser.NewStudioService(repository)
 	mitreService := mitre.NewService(repository)
 	reportService := reporting.NewService(repository)
+	licenseKeys, err := licensing.ParseTrustedKeysJSON(os.Getenv("KCSP_LICENSE_TRUSTED_KEYS_JSON"))
+	if err != nil {
+		return err
+	}
+	licenseService := licensing.NewService(repository, licensing.Config{Profile: profile, TrustedKeys: licenseKeys})
 	publisher, err := ingest.OpenKafkaPublisher(startupContext, kafkaConfig("kcsp-api"))
 	if err != nil {
 		return err
@@ -153,6 +159,7 @@ func run(logger *slog.Logger) error {
 			ParserService:      parserService,
 			MITREService:       mitreService,
 			ReportService:      reportService,
+			LicenseService:     licenseService,
 			RequireRegisteredCollectors: strings.EqualFold(
 				envOr("KCSP_REQUIRE_REGISTERED_COLLECTORS", strconv.FormatBool(authMode == "oidc")), "true",
 			),

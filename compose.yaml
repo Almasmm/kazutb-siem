@@ -163,6 +163,7 @@ services:
       KCSP_KAFKA_RAW_TOPIC: kcsp.raw.events.v1
       KCSP_KAFKA_DLQ_TOPIC: kcsp.raw.events.dlq.v1
       KCSP_KAFKA_ENVELOPE_HMAC_KEY: ${KCSP_KAFKA_ENVELOPE_HMAC_KEY:-kcsp-development-envelope-hmac-key-only}
+      KCSP_LICENSE_TRUSTED_KEYS_JSON: ${KCSP_LICENSE_TRUSTED_KEYS_JSON:-}
       KCSP_KAFKA_PARTITIONS: 12
       KCSP_KAFKA_REPLICATION_FACTOR: 1
       KCSP_MINIO_ENDPOINT: minio:9000

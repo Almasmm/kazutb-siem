@@ -36,12 +36,13 @@ type DemoAuthenticator struct {
 
 func NewDemoAuthenticator() *DemoAuthenticator {
 	read := []string{
-		"platform.overview.read", "siem.events.read", "siem.findings.read",
+		"platform.session.read", "platform.overview.read", "siem.events.read", "siem.findings.read",
 		"soc.alerts.read", "soc.incidents.read", "detection.rules.read", "platform.collectors.read", "siem.rules.read",
 		"siem.hunt.read", "siem.hunt.execute", "siem.hunt.manage",
 		"siem.parsers.read",
 		"siem.mitre.read",
 		"reports.read",
+		"licenses.read",
 		"platform.retention.read",
 		"soc.evidence.read",
 		"soc.cases.read",
@@ -60,6 +61,12 @@ func NewDemoAuthenticator() *DemoAuthenticator {
 		"kcsp-demo-detection-engineer": principal("user-detection-engineer", "Detection Engineer", "Detection Engineer", []string{"platform.overview.read", "siem.events.read", "siem.rules.read", "siem.rules.write", "siem.rules.publish", "siem.hunt.read", "siem.hunt.execute", "siem.parsers.read", "siem.parsers.write", "siem.parsers.publish"}),
 		"kcsp-demo-threat-intel":       principal("user-threat-intel", "Threat Intelligence Analyst", "Threat Intelligence Analyst", []string{"platform.overview.read", "siem.events.read", "soc.alerts.read", "soc.incidents.read", "ti.indicators.read", "ti.indicators.manage"}),
 		"kcsp-demo-soar-engineer":      principal("user-soar-engineer", "SOAR Engineer", "SOAR Engineer", []string{"platform.overview.read", "soc.alerts.read", "soc.incidents.read", "soar.playbooks.read", "soar.playbooks.write", "soar.playbooks.execute", "soar.actions.approve", "soar.connectors.read", "soar.connectors.manage", "soar.connectors.test"}),
+		"kcsp-demo-tenant-admin":       principal("user-tenant-admin", "Tenant Administrator", "Tenant Admin", []string{"platform.overview.read", "platform.audit.read", "platform.collectors.read", "platform.retention.read", "licenses.read", "admin.users.manage"}),
+		"kcsp-demo-mssp": {
+			ID: "user-mssp-manager", DisplayName: "MSSP Operations Manager", Role: "MSSP Manager",
+			Permissions:    map[string]bool{"platform.overview.read": true, "soc.alerts.read": true, "soc.incidents.read": true, "licenses.read": true, "mssp.tenants.read": true},
+			AllowedTenants: map[string]bool{}, PlatformScope: true,
+		},
 		"kcsp-demo-admin": {
 			ID:             "user-platform-admin",
 			DisplayName:    "KCSP Administrator",
