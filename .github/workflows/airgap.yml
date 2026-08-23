@@ -1,0 +1,86 @@
+name: Air-gap bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Signed semantic release tag to package
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: read
+
+concurrency:
+  group: airgap-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: airgap-release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      KCSP_COSIGN_IMAGE: ghcr.io/sigstore/cosign/cosign:v3.1.3@sha256:9e5c2f2edc34351160407ca3416c61855bdf9403c3c5936e0f0be7fc261611b8
+      KCSP_HELM_IMAGE: alpine/helm:3.17.3@sha256:d899e6316789fec04ee95300a18e454b7942539cbb3d89bde3e0655d6ca2e895
+      KCSP_AIRGAP_OUTPUT_DIR: /tmp/kcsp-airgap
+      COSIGN_PASSWORD: ${{ secrets.KCSP_AIRGAP_COSIGN_PASSWORD }}
+    steps:
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+
+      - name: Checkout release revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+          persist-credentials: false
+
+      - name: Authenticate to GHCR
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io \
+            --username "${{ github.actor }}" \
+            --password-stdin
+
+      - name: Download signed release evidence
+        run: |
+          mkdir -p /tmp/kcsp-release
+          gh release download "${{ inputs.release_tag }}" \
+            --dir /tmp/kcsp-release \
+            --pattern 'kcsp-release-manifest*'
+
+      - name: Materialize protected transfer key
+        env:
+          SIGNING_KEY_B64: ${{ secrets.KCSP_AIRGAP_SIGNING_KEY_B64 }}
+          PUBLIC_KEY_B64: ${{ secrets.KCSP_AIRGAP_PUBLIC_KEY_B64 }}
+        run: |
+          [[ -n "$SIGNING_KEY_B64" && -n "$PUBLIC_KEY_B64" ]]
+          umask 077
+          printf '%s' "$SIGNING_KEY_B64" | base64 --decode >"$RUNNER_TEMP/kcsp-airgap.key"
+          printf '%s' "$PUBLIC_KEY_B64" | base64 --decode >"$RUNNER_TEMP/kcsp-airgap.pub"
+
+      - name: Build signed air-gap bundle
+        env:
+          KCSP_AIRGAP_SIGNING_KEY_FILE: ${{ runner.temp }}/kcsp-airgap.key
+          KCSP_AIRGAP_PUBLIC_KEY_FILE: ${{ runner.temp }}/kcsp-airgap.pub
+        run: |
+          bash ops/supply-chain/build-airgap.sh \
+            /tmp/kcsp-release/kcsp-release-manifest.json \
+            /tmp/kcsp-release/kcsp-release-manifest.sigstore.json \
+            /tmp/kcsp-release/kcsp-release-manifest.sha256
+
+      - name: Publish air-gap assets
+        run: |
+          gh release upload "${{ inputs.release_tag }}" \
+            /tmp/kcsp-airgap/kcsp-airgap-*.tar.gz \
+            /tmp/kcsp-airgap/kcsp-airgap-*.tar.gz.sha256 \
+            --clobber
+
+      - name: Remove transfer key material
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/kcsp-airgap.key" "$RUNNER_TEMP/kcsp-airgap.pub"

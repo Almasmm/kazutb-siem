@@ -8,6 +8,7 @@ on:
       - "apps/web/**"
       - "ops/supply-chain/**"
       - ".github/workflows/release.yml"
+      - ".github/workflows/airgap.yml"
       - ".github/workflows/supply-chain.yml"
   pull_request:
     paths:
@@ -16,6 +17,7 @@ on:
       - "apps/web/**"
       - "ops/supply-chain/**"
       - ".github/workflows/release.yml"
+      - ".github/workflows/airgap.yml"
       - ".github/workflows/supply-chain.yml"
 
 permissions:
@@ -32,6 +34,9 @@ jobs:
       - name: Test release policy
         run: bash ops/supply-chain/self-test.sh
 
+      - name: Test offline air-gap tamper detection
+        run: bash ops/supply-chain/airgap-self-test.sh
+
       - name: ShellCheck release tooling
         run: |
           docker run --rm \
@@ -40,4 +45,8 @@ jobs:
             koalaman/shellcheck:v0.10.0@sha256:2097951f02e735b613f4a34de20c40f937a6c8f18ecb170612c88c34517221fb \
             ops/supply-chain/release.sh \
             ops/supply-chain/verify-release.sh \
+            ops/supply-chain/build-airgap.sh \
+            ops/supply-chain/verify-airgap.sh \
+            ops/supply-chain/import-airgap.sh \
+            ops/supply-chain/airgap-self-test.sh \
             ops/supply-chain/self-test.sh

@@ -8,16 +8,17 @@ before deployment.
 
 ## Release artifacts
 
-A semantic version tag produces six image references:
+A semantic version tag produces seven image references:
 
 - `kcsp-api`
+- `kcsp-collector`
 - `kcsp-processor`
 - `kcsp-soar-worker`
 - `kcsp-ai-worker`
 - `kcsp-web`
 - `kcsp-dr`
 
-The four application server images share one intentionally identical platform
+The five application server images share one intentionally identical platform
 image and select their process through the Kubernetes command. Each repository
 is signed separately because OCI signatures are repository-scoped.
 
@@ -76,12 +77,23 @@ Cosign image and requires:
 
 - issuer `https://token.actions.githubusercontent.com`;
 - certificate identity matching this repository's `release.yml`;
-- six digest-pinned images;
+- seven digest-pinned images;
 - a valid signed manifest bundle;
 - a matching local checksum.
 
 After verification, copy the exact image digests from the manifest into the
 protected Helm values file. Do not deploy the semantic tag directly.
+
+## Air-gap promotion
+
+Use the separately protected `Air-gap bundle` workflow or an approved connected
+release station to transform a verified public release into a signed offline
+transfer bundle. This step uses a university-controlled transfer key; it does
+not treat a public key carried only inside the archive as trusted.
+
+Follow [Air-gap release transfer and installation](airgap-installation.md) for
+key custody, connected packaging, offline signature verification, private
+registry import, and generation of digest-pinned Helm values.
 
 ## Promotion
 
