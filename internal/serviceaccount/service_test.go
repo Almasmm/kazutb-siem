@@ -26,7 +26,7 @@ func TestServiceAccountLifecycleAndAuthentication(t *testing.T) {
 	if err != nil || issued.AccessToken == "" || issued.ServiceAccount.TokenVersion != 1 {
 		t.Fatalf("create service account: issue=%+v err=%v", issued, err)
 	}
-	authenticator := auth.NewServiceAccountAuthenticator(repository)
+	authenticator := auth.NewServiceAccountAuthenticatorWithClock(repository, func() time.Time { return now })
 	request, _ := http.NewRequest(http.MethodGet, "https://soc.test/api/v1/events", nil)
 	request.Header.Set("Authorization", "Bearer "+issued.AccessToken)
 	principal, err := authenticator.Authenticate(request)

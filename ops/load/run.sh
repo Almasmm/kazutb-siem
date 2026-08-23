@@ -8,9 +8,9 @@ network="${KCSP_LOAD_DOCKER_NETWORK:-kcsp_default}"
 image="${KCSP_K6_IMAGE:-grafana/k6:2.1.0@sha256:65c920dc067d5e2e00befbf982af6ad6ad0117034e8b1c65817c7975c52d4669}"
 
 case "$profile" in
-  smoke|sustained|spike|fault) ;;
+  smoke|sustained|spike|capacity10k|fault) ;;
   *)
-    echo "KCSP_LOAD_PROFILE must be smoke, sustained, spike, or fault" >&2
+    echo "KCSP_LOAD_PROFILE must be smoke, sustained, spike, capacity10k, or fault" >&2
     exit 1
     ;;
 esac
@@ -39,6 +39,7 @@ docker run --rm \
   -e KCSP_LOAD_DURATION \
   -e KCSP_INGEST_RATE \
   -e KCSP_READ_VUS \
+  -e KCSP_ASSET_CARDINALITY \
   -e KCSP_INGEST_P95_MS \
   -e KCSP_INGEST_P99_MS \
   -e KCSP_READ_P95_MS \

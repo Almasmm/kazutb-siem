@@ -63,6 +63,7 @@ data:
   KCSP_KAFKA_CONSUMER_GROUP: {{ .Values.config.kafka.consumerGroup | quote }}
   KCSP_KAFKA_PARTITIONS: {{ .Values.config.kafka.partitions | quote }}
   KCSP_KAFKA_REPLICATION_FACTOR: {{ .Values.config.kafka.replicationFactor | quote }}
+  KCSP_PROCESSOR_WORKERS: {{ .Values.config.processor.workers | quote }}
   KCSP_MINIO_ENDPOINT: {{ .Values.config.minio.endpoint | quote }}
   KCSP_MINIO_SECURE: {{ ternary "true" "false" .Values.config.minio.secure | quote }}
   KCSP_MINIO_REGION: {{ .Values.config.minio.region | quote }}

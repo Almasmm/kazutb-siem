@@ -104,7 +104,7 @@ services:
     command:
       - |
         umask 077
-        printf 'user default off\nuser kcsp on >%s ~kcsp:* +ping +eval +evalsha +incr +pexpire +pttl\n' "$$KCSP_VALKEY_PASSWORD" >/tmp/users.acl
+        printf 'user default off\nuser kcsp on >%s ~kcsp:* +ping +eval +evalsha +incr +incrby +pexpire +pttl\n' "$$KCSP_VALKEY_PASSWORD" >/tmp/users.acl
         unset KCSP_VALKEY_PASSWORD
         exec valkey-server --save '' --appendonly no --aclfile /tmp/users.acl --protected-mode yes
     ports:
@@ -250,6 +250,7 @@ services:
       KCSP_KAFKA_CONSUMER_GROUP: kcsp-canonical-processing-v1
       KCSP_KAFKA_PARTITIONS: 12
       KCSP_KAFKA_REPLICATION_FACTOR: 1
+      KCSP_PROCESSOR_WORKERS: ${KCSP_PROCESSOR_WORKERS:-96}
       KCSP_METRICS_ADDR: ":9090"
       KCSP_VERSION: ${KCSP_VERSION:-development}
     depends_on:

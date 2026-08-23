@@ -12,15 +12,23 @@ import (
 )
 
 type ServiceAccountCredentialStore interface {
-	ServiceAccountByTokenHash(context.Context, []byte) (core.ServiceAccount, error)
+	ServiceAccountByTokenHash(context.Context, []byte, time.Time) (core.ServiceAccount, error)
 }
 
 type ServiceAccountAuthenticator struct {
 	store ServiceAccountCredentialStore
+	now   func() time.Time
 }
 
 func NewServiceAccountAuthenticator(repository ServiceAccountCredentialStore) *ServiceAccountAuthenticator {
-	return &ServiceAccountAuthenticator{store: repository}
+	return NewServiceAccountAuthenticatorWithClock(repository, func() time.Time { return time.Now().UTC() })
+}
+
+func NewServiceAccountAuthenticatorWithClock(repository ServiceAccountCredentialStore, now func() time.Time) *ServiceAccountAuthenticator {
+	if now == nil {
+		now = func() time.Time { return time.Now().UTC() }
+	}
+	return &ServiceAccountAuthenticator{store: repository, now: now}
 }
 
 func (a *ServiceAccountAuthenticator) Authenticate(request *http.Request) (Principal, error) {
@@ -33,8 +41,9 @@ func (a *ServiceAccountAuthenticator) Authenticate(request *http.Request) (Princ
 		return Principal{}, ErrUnauthenticated
 	}
 	hash := sha256.Sum256([]byte(token))
-	account, err := a.store.ServiceAccountByTokenHash(request.Context(), hash[:])
-	if err != nil || account.RevokedAt != nil || !account.ExpiresAt.After(time.Now().UTC()) || !tenant.Valid(account.TenantID) || strings.TrimSpace(account.ID) == "" || len(account.Scopes) == 0 {
+	checkedAt := a.now().UTC()
+	account, err := a.store.ServiceAccountByTokenHash(request.Context(), hash[:], checkedAt)
+	if err != nil || account.RevokedAt != nil || !account.ExpiresAt.After(checkedAt) || !tenant.Valid(account.TenantID) || strings.TrimSpace(account.ID) == "" || len(account.Scopes) == 0 {
 		return Principal{}, ErrUnauthenticated
 	}
 	permissions := PermissionsForScopes(account.Scopes)

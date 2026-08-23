@@ -137,6 +137,8 @@ config:
       clientCAKey: ca.crt
   evidence:
     maxBytes: 26214400
+  processor:
+    workers: 96
   kafka:
     brokers:
       - kafka.example.internal:9092

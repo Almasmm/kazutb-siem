@@ -29,6 +29,7 @@ Direct test-only ingest is not used.
 | `smoke` | 5 EPS and 2 readers for 15 seconds | deployment preflight |
 | `sustained` | 250 EPS and 10 readers for 15 minutes | stable capacity |
 | `spike` | ramp to 4x configured EPS | burst and recovery behavior |
+| `capacity10k` | 250 EPS, 10 readers, and 10,000 deterministic hosts for 40 seconds | high-cardinality end-to-end gate |
 | `fault` | 20 EPS for 15 seconds, ingest only | processor outage harness |
 
 The sustained and spike defaults are test objectives, not certified platform
@@ -75,6 +76,27 @@ $env:KCSP_ALLOW_DEMO_CREDENTIALS = "false"
 ```
 
 Do not place tokens in command arguments, values files, Git, or result bundles.
+
+## 10,000-host high-cardinality gate
+
+The `capacity10k` profile emits exactly 10,000 deterministic hostnames and
+requires zero dropped iterations. HTTP acceptance alone is not a pass. After
+the k6 run, verify the normalized event count and exact hostname cardinality in
+ClickHouse using the same run ID:
+
+```powershell
+$env:KCSP_RUN_ID = "kcsp-capacity10k-<approved-run-id>"
+.\ops\load\run.ps1 -Profile capacity10k
+$password = Read-Host "ClickHouse password" -AsSecureString
+.\ops\load\verify-capacity10k.ps1 -RunId $env:KCSP_RUN_ID -ClickHousePassword $password
+```
+
+The verifier polls only within a bounded drain window and writes a secret-free
+acceptance report under `.artifacts/load`. PASS requires exactly 10,000
+normalized events, exactly 10,000 unique non-empty hostnames, at least 10,001
+k6 acceptances including setup, and zero dropped iterations. A longer drain
+timeout must be approved and documented rather than used to hide insufficient
+processor throughput.
 
 ## Linux runner
 

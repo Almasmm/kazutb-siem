@@ -478,6 +478,17 @@ func (s *Server) ingestEvent(w http.ResponseWriter, r *http.Request) {
 		s.handleDecodeError(w, r, "Invalid event payload", err)
 		return
 	}
+	if s.licenses != nil {
+		payload, err := json.Marshal(input)
+		if err != nil {
+			s.handleDomainError(w, r, err)
+			return
+		}
+		if err := s.licenses.ReserveIngestBatch(r.Context(), tenantFrom(r.Context()), 1, int64(len(payload))); err != nil {
+			s.handleLicenseAuthorization(w, r, err)
+			return
+		}
+	}
 	result, err := s.engine.Ingest(r.Context(), tenantFrom(r.Context()), input)
 	if err != nil {
 		s.handleDomainError(w, r, err)
@@ -500,6 +511,12 @@ func (s *Server) queueEvent(w http.ResponseWriter, r *http.Request) {
 	collectorID, ok := s.ingestCollectorID(w, r)
 	if !ok {
 		return
+	}
+	if s.licenses != nil {
+		if err := s.licenses.ReserveIngestBatch(r.Context(), tenantFrom(r.Context()), 1, int64(len(payload))); err != nil {
+			s.handleLicenseAuthorization(w, r, err)
+			return
+		}
 	}
 	format := strings.TrimSpace(r.Header.Get("X-KCSP-Event-Format"))
 	var receipt ingest.Receipt
@@ -551,7 +568,7 @@ func (s *Server) queueEventBatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if s.licenses != nil {
-		if err := s.licenses.AuthorizeIngestBatch(r.Context(), tenantFrom(r.Context()), len(request.Items), payloadBytes); err != nil {
+		if err := s.licenses.ReserveIngestBatch(r.Context(), tenantFrom(r.Context()), len(request.Items), payloadBytes); err != nil {
 			s.handleLicenseAuthorization(w, r, err)
 			return
 		}

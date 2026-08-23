@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/kcsp/platform/internal/core"
+	"github.com/kcsp/platform/internal/platform/quota"
 	"github.com/kcsp/platform/internal/platform/tenant"
 )
 
@@ -41,12 +42,14 @@ type Repository interface {
 	CreateTenant(context.Context, core.Tenant) (core.Tenant, error)
 	SetTenantState(context.Context, string, string) (core.Tenant, error)
 	Overview(context.Context, string) (map[string]interface{}, error)
+	IngestUsage(context.Context, string, time.Time) (int64, int64, error)
 }
 
 type Config struct {
 	Profile     string
 	TrustedKeys map[string]ed25519.PublicKey
 	Now         func() time.Time
+	IngestQuota quota.IngestLedger
 }
 
 type Service struct {
@@ -54,6 +57,7 @@ type Service struct {
 	profile     string
 	trustedKeys map[string]ed25519.PublicKey
 	now         func() time.Time
+	ingestQuota quota.IngestLedger
 }
 
 type InstallInput struct {
@@ -75,7 +79,7 @@ func NewService(repository Repository, config Config) *Service {
 	for id, key := range config.TrustedKeys {
 		keys[id] = append(ed25519.PublicKey(nil), key...)
 	}
-	return &Service{repository: repository, profile: strings.ToLower(strings.TrimSpace(config.Profile)), trustedKeys: keys, now: now}
+	return &Service{repository: repository, profile: strings.ToLower(strings.TrimSpace(config.Profile)), trustedKeys: keys, now: now, ingestQuota: config.IngestQuota}
 }
 
 func ParseTrustedKeysJSON(value string) (map[string]ed25519.PublicKey, error) {
@@ -222,6 +226,12 @@ func (s *Service) Authorize(ctx context.Context, tenantID, permission, method st
 			return ErrLicenseRestricted
 		}
 	}
+	if write && permission == "siem.events.ingest" {
+		// Payload-aware quota reservation is performed by ReserveIngestBatch.
+		// Keeping analytics out of middleware prevents one full telemetry scan
+		// per event while entitlement and expiry checks remain fail-closed here.
+		return nil
+	}
 	if write {
 		overview, overviewErr := s.repository.Overview(ctx, tenantID)
 		if overviewErr != nil {
@@ -239,11 +249,17 @@ func (s *Service) Authorize(ctx context.Context, tenantID, permission, method st
 }
 
 func (s *Service) AuthorizeIngestBatch(ctx context.Context, tenantID string, eventCount int, payloadBytes int64) error {
-	if eventCount < 1 || eventCount > ingestBatchMaximum || payloadBytes < 0 {
-		return fmt.Errorf("%w: invalid ingest batch dimensions", ErrQuotaExceeded)
-	}
 	if err := s.Authorize(ctx, tenantID, "siem.events.ingest", http.MethodPost); err != nil {
 		return err
+	}
+	return s.ReserveIngestBatch(ctx, tenantID, eventCount, payloadBytes)
+}
+
+// ReserveIngestBatch atomically accounts for a payload after HTTP middleware
+// has already checked the tenant, module, and license state.
+func (s *Service) ReserveIngestBatch(ctx context.Context, tenantID string, eventCount int, payloadBytes int64) error {
+	if eventCount < 1 || eventCount > ingestBatchMaximum || payloadBytes < 0 {
+		return fmt.Errorf("%w: invalid ingest batch dimensions", ErrQuotaExceeded)
 	}
 	record, found, err := s.repository.CurrentLicense(ctx, tenantID)
 	if err != nil {
@@ -256,11 +272,40 @@ func (s *Service) AuthorizeIngestBatch(ctx context.Context, tenantID string, eve
 	if !found {
 		return ErrLicenseRestricted
 	}
+	limits := record.Payload.Limits
+	if s.ingestQuota != nil {
+		now := s.now().UTC()
+		reservation := quota.IngestReservation{
+			TenantID: tenantID, Now: now, Events: int64(eventCount), Bytes: payloadBytes,
+			Limits: quota.IngestLimits{
+				EventsPerDay: int64(limits.EventsPerDay), BytesPerDay: licensedBytes(limits.GBPerDay), EventsPerSec: int64(limits.EPS),
+			},
+		}
+		result, reserveErr := s.ingestQuota.ReserveIngest(ctx, reservation)
+		if reserveErr != nil {
+			return reserveErr
+		}
+		if result.NeedsBootstrap {
+			dayStart := now.Truncate(24 * time.Hour)
+			events, bytes, usageErr := s.repository.IngestUsage(ctx, tenantID, dayStart)
+			if usageErr != nil {
+				return usageErr
+			}
+			reservation.Baseline = &quota.IngestBaseline{Events: events, Bytes: bytes}
+			result, reserveErr = s.ingestQuota.ReserveIngest(ctx, reservation)
+			if reserveErr != nil {
+				return reserveErr
+			}
+		}
+		if !result.Allowed {
+			return ingestQuotaError(result.Limit, limits)
+		}
+		return nil
+	}
 	overview, err := s.repository.Overview(ctx, tenantID)
 	if err != nil {
 		return err
 	}
-	limits := record.Payload.Limits
 	if limits.EventsPerDay > 0 && numeric(overview, "events_24h")+float64(eventCount) > float64(limits.EventsPerDay) {
 		return fmt.Errorf("%w: events_per_day maximum is %d", ErrQuotaExceeded, limits.EventsPerDay)
 	}
@@ -272,6 +317,30 @@ func (s *Service) AuthorizeIngestBatch(ctx context.Context, tenantID string, eve
 		return fmt.Errorf("%w: gb_per_day maximum is %.2f", ErrQuotaExceeded, limits.GBPerDay)
 	}
 	return nil
+}
+
+func licensedBytes(gigabytes float64) int64 {
+	if gigabytes <= 0 {
+		return 0
+	}
+	bytes := gigabytes * float64(1<<30)
+	if bytes >= float64(math.MaxInt64) {
+		return math.MaxInt64
+	}
+	return int64(math.Floor(bytes))
+}
+
+func ingestQuotaError(name string, limits core.LicenseLimits) error {
+	switch name {
+	case "events_per_day":
+		return fmt.Errorf("%w: events_per_day maximum is %d", ErrQuotaExceeded, limits.EventsPerDay)
+	case "eps":
+		return fmt.Errorf("%w: eps maximum is %d", ErrQuotaExceeded, limits.EPS)
+	case "gb_per_day":
+		return fmt.Errorf("%w: gb_per_day maximum is %.2f", ErrQuotaExceeded, limits.GBPerDay)
+	default:
+		return fmt.Errorf("%w: ingest quota reservation was denied", ErrQuotaExceeded)
+	}
 }
 
 const ingestBatchMaximum = 500

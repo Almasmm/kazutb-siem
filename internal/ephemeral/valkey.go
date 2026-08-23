@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kcsp/platform/internal/platform/quota"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -50,6 +51,10 @@ type FixedWindowLimiter struct {
 	window time.Duration
 }
 
+type IngestQuotaLedger struct {
+	valkey *Valkey
+}
+
 var fixedWindowScript = redis.NewScript(`
 local current = redis.call('INCR', KEYS[1])
 if current == 1 then
@@ -61,6 +66,53 @@ if ttl < 0 then
   ttl = tonumber(ARGV[1])
 end
 return {current, ttl}
+`)
+
+var ingestQuotaScript = redis.NewScript(`
+local events_missing = redis.call('PTTL', KEYS[1]) == -2
+local bytes_missing = redis.call('PTTL', KEYS[2]) == -2
+if (events_missing or bytes_missing) and ARGV[1] ~= '1' then
+  return {0, 'bootstrap', 0, 0}
+end
+
+if events_missing then
+  redis.call('INCRBY', KEYS[1], ARGV[2])
+  redis.call('PEXPIRE', KEYS[1], ARGV[9])
+end
+if bytes_missing then
+  redis.call('INCRBY', KEYS[2], ARGV[3])
+  redis.call('PEXPIRE', KEYS[2], ARGV[9])
+end
+
+local current_events = tonumber(redis.call('INCRBY', KEYS[1], 0))
+local current_bytes = tonumber(redis.call('INCRBY', KEYS[2], 0))
+local current_eps = tonumber(redis.call('INCRBY', KEYS[3], 0))
+if redis.call('PTTL', KEYS[3]) < 0 then
+  redis.call('PEXPIRE', KEYS[3], ARGV[10])
+end
+local next_events = current_events + tonumber(ARGV[4])
+local next_bytes = current_bytes + tonumber(ARGV[5])
+local next_eps = current_eps + tonumber(ARGV[4])
+local events_limit = tonumber(ARGV[6])
+local bytes_limit = tonumber(ARGV[7])
+local eps_limit = tonumber(ARGV[8])
+
+if events_limit > 0 and next_events > events_limit then
+  return {0, 'events_per_day', current_events, current_bytes}
+end
+if bytes_limit > 0 and next_bytes > bytes_limit then
+  return {0, 'gb_per_day', current_events, current_bytes}
+end
+if eps_limit > 0 and next_eps > eps_limit then
+  return {0, 'eps', current_events, current_bytes}
+end
+
+redis.call('INCRBY', KEYS[1], ARGV[4])
+redis.call('INCRBY', KEYS[2], ARGV[5])
+redis.call('PEXPIRE', KEYS[1], ARGV[9])
+redis.call('PEXPIRE', KEYS[2], ARGV[9])
+redis.call('INCRBY', KEYS[3], ARGV[4])
+return {1, '', next_events, next_bytes}
 `)
 
 func OpenValkey(ctx context.Context, config ValkeyConfig) (*Valkey, error) {
@@ -178,6 +230,74 @@ func NewFixedWindowLimiter(valkey *Valkey, config FixedWindowConfig) (*FixedWind
 		return nil, errors.New("rate limiter window must be between one second and 24 hours")
 	}
 	return &FixedWindowLimiter{valkey: valkey, scope: config.Scope, limit: int64(config.Limit), window: config.Window}, nil
+}
+
+func NewIngestQuotaLedger(valkey *Valkey) (*IngestQuotaLedger, error) {
+	if valkey == nil || valkey.client == nil {
+		return nil, errors.New("Valkey client is required for distributed ingest quotas")
+	}
+	return &IngestQuotaLedger{valkey: valkey}, nil
+}
+
+func (l *IngestQuotaLedger) ReserveIngest(ctx context.Context, request quota.IngestReservation) (quota.IngestResult, error) {
+	if l == nil || l.valkey == nil || l.valkey.client == nil {
+		return quota.IngestResult{}, errors.New("Valkey ingest quota ledger is not configured")
+	}
+	request.TenantID = strings.TrimSpace(request.TenantID)
+	if request.TenantID == "" || request.Events < 1 || request.Bytes < 0 || request.Limits.EventsPerDay < 0 || request.Limits.BytesPerDay < 0 || request.Limits.EventsPerSec < 0 {
+		return quota.IngestResult{}, errors.New("invalid ingest quota reservation")
+	}
+	if request.Baseline != nil && (request.Baseline.Events < 0 || request.Baseline.Bytes < 0) {
+		return quota.IngestResult{}, errors.New("invalid ingest quota baseline")
+	}
+	now := request.Now.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	dayStart := now.Truncate(24 * time.Hour)
+	dayTTL := dayStart.Add(25 * time.Hour).Sub(now)
+	if dayTTL < time.Minute {
+		dayTTL = time.Minute
+	}
+	eventsKey, bytesKey, epsKey := l.ingestStorageKeys(request.TenantID, dayStart, now)
+	baselineProvided := int64(0)
+	baselineEvents := int64(0)
+	baselineBytes := int64(0)
+	if request.Baseline != nil {
+		baselineProvided = 1
+		baselineEvents = request.Baseline.Events
+		baselineBytes = request.Baseline.Bytes
+	}
+	operationContext, cancel := context.WithTimeout(ctx, l.valkey.operationTimeout)
+	defer cancel()
+	values, err := ingestQuotaScript.Run(operationContext, l.valkey.client, []string{eventsKey, bytesKey, epsKey},
+		baselineProvided, baselineEvents, baselineBytes, request.Events, request.Bytes,
+		request.Limits.EventsPerDay, request.Limits.BytesPerDay, request.Limits.EventsPerSec,
+		dayTTL.Milliseconds(), (3 * time.Second).Milliseconds()).Slice()
+	if err != nil {
+		return quota.IngestResult{}, fmt.Errorf("reserve distributed ingest quota: %w", err)
+	}
+	if len(values) != 4 {
+		return quota.IngestResult{}, errors.New("reserve distributed ingest quota: unexpected Valkey response")
+	}
+	status, statusOK := values[0].(int64)
+	limit, limitOK := values[1].(string)
+	events, eventsOK := values[2].(int64)
+	bytes, bytesOK := values[3].(int64)
+	if !statusOK || !limitOK || !eventsOK || !bytesOK {
+		return quota.IngestResult{}, errors.New("reserve distributed ingest quota: invalid Valkey response")
+	}
+	return quota.IngestResult{
+		Allowed: status == 1, NeedsBootstrap: limit == "bootstrap", Limit: limit, Events: events, Bytes: bytes,
+	}, nil
+}
+
+func (l *IngestQuotaLedger) ingestStorageKeys(tenantID string, dayStart, now time.Time) (string, string, string) {
+	digest := sha256.Sum256([]byte(strings.TrimSpace(tenantID)))
+	tenantKey := hex.EncodeToString(digest[:])
+	prefix := l.valkey.namespace + ":quota:ingest:" + tenantKey
+	day := dayStart.Format("20060102")
+	return prefix + ":events:" + day, prefix + ":bytes:" + day, prefix + ":second:" + fmt.Sprintf("%d", now.Unix())
 }
 
 func (l *FixedWindowLimiter) Allow(ctx context.Context, key string) (bool, time.Duration, error) {

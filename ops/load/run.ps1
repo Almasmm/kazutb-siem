@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("smoke", "sustained", "spike", "fault")]
+    [ValidateSet("smoke", "sustained", "spike", "capacity10k", "fault")]
     [string]$Profile = "smoke",
     [string]$DockerNetwork = "kcsp_default",
     [string]$ResultsDirectory = ""
@@ -37,6 +37,7 @@ $environmentNames = @(
     "KCSP_LOAD_DURATION",
     "KCSP_INGEST_RATE",
     "KCSP_READ_VUS",
+    "KCSP_ASSET_CARDINALITY",
     "KCSP_INGEST_P95_MS",
     "KCSP_INGEST_P99_MS",
     "KCSP_READ_P95_MS",

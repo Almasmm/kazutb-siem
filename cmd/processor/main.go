@@ -50,10 +50,12 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer publisher.Close()
+	processorWorkers := int(positiveInt32Env("KCSP_PROCESSOR_WORKERS", 64))
 	processor, err := ingest.OpenProcessor(ingest.ProcessorConfig{
 		Brokers: strings.Split(os.Getenv("KCSP_KAFKA_BROKERS"), ","), ClientID: "kcsp-processor",
 		GroupID: envOr("KCSP_KAFKA_CONSUMER_GROUP", "kcsp-canonical-processing-v1"), Topic: publisher.RawTopic(),
 		EnvelopeHMACKey: os.Getenv("KCSP_KAFKA_ENVELOPE_HMAC_KEY"),
+		MaxWorkers:      processorWorkers,
 	}, repository, parser.NewRegistry(repository), engine, publisher)
 	if err != nil {
 		return err
@@ -67,7 +69,7 @@ func run(logger *slog.Logger) error {
 			logger.Error("processor metrics endpoint failed", "error", err)
 		}
 	}()
-	logger.Info("KCSP processor started", "group", envOr("KCSP_KAFKA_CONSUMER_GROUP", "kcsp-canonical-processing-v1"), "topic", publisher.RawTopic())
+	logger.Info("KCSP processor started", "group", envOr("KCSP_KAFKA_CONSUMER_GROUP", "kcsp-canonical-processing-v1"), "topic", publisher.RawTopic(), "workers", processorWorkers)
 	if err := processor.Run(runContext); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}

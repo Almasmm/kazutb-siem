@@ -18,10 +18,17 @@ type Hybrid struct {
 	telemetry   *ClickHouse
 	retentionMu sync.Mutex
 	retention   map[string]retentionSnapshot
+	metricsMu   sync.Mutex
+	metrics     map[string]telemetryMetricsSnapshot
 }
 
 type retentionSnapshot struct {
 	policy   core.RetentionPolicy
+	loadedAt time.Time
+}
+
+type telemetryMetricsSnapshot struct {
+	metrics  TelemetryMetrics
 	loadedAt time.Time
 }
 
@@ -35,7 +42,9 @@ func OpenHybrid(ctx context.Context, databaseURL, clickhouseURL string) (*Hybrid
 		control.Close()
 		return nil, err
 	}
-	return &Hybrid{control: control, telemetry: telemetry, retention: map[string]retentionSnapshot{}}, nil
+	return &Hybrid{
+		control: control, telemetry: telemetry, retention: map[string]retentionSnapshot{}, metrics: map[string]telemetryMetricsSnapshot{},
+	}, nil
 }
 
 func (h *Hybrid) Health(ctx context.Context) error {
@@ -118,6 +127,9 @@ func (h *Hybrid) ResetTenant(ctx context.Context, tenantID string) error {
 	h.retentionMu.Lock()
 	delete(h.retention, tenantID)
 	h.retentionMu.Unlock()
+	h.metricsMu.Lock()
+	delete(h.metrics, tenantID)
+	h.metricsMu.Unlock()
 	return nil
 }
 func (h *Hybrid) SetRules(ctx context.Context, rules []core.DetectionRule) error {
@@ -531,12 +543,17 @@ func (h *Hybrid) ListAudit(ctx context.Context, tenantID string, limit int) ([]c
 func (h *Hybrid) VerifyAudit(ctx context.Context, tenantID string) (bool, error) {
 	return h.control.VerifyAudit(ctx, tenantID)
 }
+func (h *Hybrid) IngestUsage(ctx context.Context, tenantID string, since time.Time) (int64, int64, error) {
+	started := time.Now()
+	defer func() { observability.Default.ObserveClickHouse(time.Since(started)) }()
+	return h.telemetry.IngestUsage(ctx, tenantID, since)
+}
 func (h *Hybrid) Overview(ctx context.Context, tenantID string) (map[string]interface{}, error) {
 	overview, err := h.control.Overview(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	telemetry, err := h.telemetry.Metrics(ctx, tenantID)
+	telemetry, err := h.overviewTelemetryMetrics(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -547,4 +564,18 @@ func (h *Hybrid) Overview(ctx context.Context, tenantID string) (map[string]inte
 	platform := overview["platform"].(map[string]interface{})
 	platform["profile"] = "kafka-clickhouse-postgres"
 	return overview, nil
+}
+
+func (h *Hybrid) overviewTelemetryMetrics(ctx context.Context, tenantID string) (TelemetryMetrics, error) {
+	h.metricsMu.Lock()
+	defer h.metricsMu.Unlock()
+	if snapshot, found := h.metrics[tenantID]; found && time.Since(snapshot.loadedAt) < time.Second {
+		return snapshot.metrics, nil
+	}
+	metrics, err := h.telemetry.Metrics(ctx, tenantID)
+	if err != nil {
+		return TelemetryMetrics{}, err
+	}
+	h.metrics[tenantID] = telemetryMetricsSnapshot{metrics: metrics, loadedAt: time.Now()}
+	return metrics, nil
 }

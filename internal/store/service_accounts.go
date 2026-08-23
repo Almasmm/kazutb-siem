@@ -19,7 +19,7 @@ type ServiceAccountStore interface {
 	ListServiceAccounts(context.Context, string) ([]core.ServiceAccount, error)
 	RotateServiceAccountToken(context.Context, string, string, string, []byte, time.Time) (core.ServiceAccount, error)
 	RevokeServiceAccount(context.Context, string, string, string) (core.ServiceAccount, error)
-	ServiceAccountByTokenHash(context.Context, []byte) (core.ServiceAccount, error)
+	ServiceAccountByTokenHash(context.Context, []byte, time.Time) (core.ServiceAccount, error)
 }
 
 type memoryServiceAccountReference struct {
@@ -125,12 +125,16 @@ func (p *Postgres) RevokeServiceAccount(ctx context.Context, tenantID, accountID
 	return account, nil
 }
 
-func (p *Postgres) ServiceAccountByTokenHash(ctx context.Context, tokenHash []byte) (core.ServiceAccount, error) {
+func (p *Postgres) ServiceAccountByTokenHash(ctx context.Context, tokenHash []byte, checkedAt time.Time) (core.ServiceAccount, error) {
 	if len(tokenHash) != 32 {
 		return core.ServiceAccount{}, ErrNotFound
 	}
-	account, err := scanServiceAccount(p.pool.QueryRow(ctx, `UPDATE service_accounts SET last_used_at=now()
-		WHERE token_hash=$1 AND revoked_at IS NULL AND expires_at>now() RETURNING `+serviceAccountColumns, tokenHash))
+	checkedAt = checkedAt.UTC()
+	if checkedAt.IsZero() {
+		checkedAt = time.Now().UTC()
+	}
+	account, err := scanServiceAccount(p.pool.QueryRow(ctx, `UPDATE service_accounts SET last_used_at=$2
+		WHERE token_hash=$1 AND revoked_at IS NULL AND expires_at>$2 RETURNING `+serviceAccountColumns, tokenHash, checkedAt))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.ServiceAccount{}, ErrNotFound
 	}
@@ -237,7 +241,7 @@ func (m *MemoryRepository) RevokeServiceAccount(ctx context.Context, tenantID, a
 	return cloneServiceAccount(account), nil
 }
 
-func (m *MemoryRepository) ServiceAccountByTokenHash(ctx context.Context, tokenHash []byte) (core.ServiceAccount, error) {
+func (m *MemoryRepository) ServiceAccountByTokenHash(ctx context.Context, tokenHash []byte, checkedAt time.Time) (core.ServiceAccount, error) {
 	if err := ctx.Err(); err != nil {
 		return core.ServiceAccount{}, err
 	}
@@ -250,12 +254,15 @@ func (m *MemoryRepository) ServiceAccountByTokenHash(ctx context.Context, tokenH
 	if !found {
 		return core.ServiceAccount{}, ErrNotFound
 	}
+	checkedAt = checkedAt.UTC()
+	if checkedAt.IsZero() {
+		checkedAt = time.Now().UTC()
+	}
 	account, found := m.serviceAccounts[reference.tenantID][reference.accountID]
-	if !found || account.RevokedAt != nil || !account.ExpiresAt.After(time.Now().UTC()) {
+	if !found || account.RevokedAt != nil || !account.ExpiresAt.After(checkedAt) {
 		return core.ServiceAccount{}, ErrNotFound
 	}
-	now := time.Now().UTC()
-	account.LastUsedAt = &now
+	account.LastUsedAt = &checkedAt
 	m.serviceAccounts[reference.tenantID][reference.accountID] = account
 	return cloneServiceAccount(account), nil
 }
@@ -283,8 +290,8 @@ func (h *Hybrid) RotateServiceAccountToken(ctx context.Context, tenantID, accoun
 func (h *Hybrid) RevokeServiceAccount(ctx context.Context, tenantID, accountID, actor string) (core.ServiceAccount, error) {
 	return h.control.RevokeServiceAccount(ctx, tenantID, accountID, actor)
 }
-func (h *Hybrid) ServiceAccountByTokenHash(ctx context.Context, tokenHash []byte) (core.ServiceAccount, error) {
-	return h.control.ServiceAccountByTokenHash(ctx, tokenHash)
+func (h *Hybrid) ServiceAccountByTokenHash(ctx context.Context, tokenHash []byte, checkedAt time.Time) (core.ServiceAccount, error) {
+	return h.control.ServiceAccountByTokenHash(ctx, tokenHash, checkedAt)
 }
 
 type serviceAccountScanner interface {

@@ -11,6 +11,7 @@ const PROFILE = __ENV.KCSP_LOAD_PROFILE || "smoke";
 const SKIP_VISIBILITY = (__ENV.KCSP_SKIP_VISIBILITY || "false") === "true";
 const ALLOW_DEMO_CREDENTIALS = (__ENV.KCSP_ALLOW_DEMO_CREDENTIALS || "false") === "true";
 const SUMMARY_PATH = __ENV.KCSP_SUMMARY_PATH || "/tmp/kcsp-load-summary.json";
+const ASSET_CARDINALITY = numberEnv("KCSP_ASSET_CARDINALITY", PROFILE === "capacity10k" ? 10000 : 200);
 
 const eventsAccepted = new Counter("events_accepted");
 const ingestErrors = new Rate("ingest_errors");
@@ -42,14 +43,29 @@ function constantArrival(rate, duration) {
   };
 }
 
+function includeVisibility(result) {
+  if (!SKIP_VISIBILITY) {
+    const timeoutMs = numberEnv("KCSP_PIPELINE_VISIBILITY_TIMEOUT_MS", 30000);
+    result.visibility = {
+      executor: "shared-iterations",
+      exec: "verifyVisibility",
+      vus: 1,
+      iterations: 1,
+      maxDuration: `${Math.ceil(timeoutMs / 1000) + 5}s`,
+      tags: { workload: "visibility" },
+    };
+  }
+  return result;
+}
+
 function scenarios() {
-  const rate = numberEnv("KCSP_INGEST_RATE", PROFILE === "sustained" ? 250 : PROFILE === "fault" ? 20 : 5);
+  const rate = numberEnv("KCSP_INGEST_RATE", PROFILE === "sustained" || PROFILE === "capacity10k" ? 250 : PROFILE === "fault" ? 20 : 5);
   const duration = durationEnv(
     "KCSP_LOAD_DURATION",
-    PROFILE === "sustained" ? "15m" : PROFILE === "fault" ? "15s" : "15s",
+    PROFILE === "sustained" ? "15m" : PROFILE === "capacity10k" ? "40s" : PROFILE === "fault" ? "15s" : "15s",
   );
   if (PROFILE === "spike") {
-    return {
+    return includeVisibility({
       ingest: {
         executor: "ramping-arrival-rate",
         exec: "ingestEvent",
@@ -74,20 +90,20 @@ function scenarios() {
         gracefulStop: "15s",
         tags: { workload: "read" },
       },
-    };
+    });
   }
   const result = { ingest: constantArrival(rate, duration) };
   if (PROFILE !== "fault") {
     result.read = {
       executor: "constant-vus",
       exec: "readSOC",
-      vus: numberEnv("KCSP_READ_VUS", PROFILE === "sustained" ? 10 : 2),
+      vus: numberEnv("KCSP_READ_VUS", PROFILE === "sustained" || PROFILE === "capacity10k" ? 10 : 2),
       duration,
       gracefulStop: "15s",
       tags: { workload: "read" },
     };
   }
-  return result;
+  return includeVisibility(result);
 }
 
 const thresholds = {
@@ -139,7 +155,9 @@ const readEndpoints = [
   "/api/v1/incidents?limit=50",
 ];
 
-function eventPayload(eventID) {
+function eventPayload(eventID, assetIndex = 0) {
+	const fallbackIndex = (Number(exec.vu.idInTest || 0) % ASSET_CARDINALITY) + 1;
+	const boundedAssetIndex = assetIndex > 0 ? assetIndex : fallbackIndex;
   return JSON.stringify({
     event_id: eventID,
     event_time: new Date().toISOString(),
@@ -152,7 +170,7 @@ function eventPayload(eventID) {
       type: "synthetic",
     },
     device: {
-      hostname: `load-${exec.vu.idInTest || 0}`,
+      hostname: `load-asset-${String(boundedAssetIndex).padStart(5, "0")}`,
       criticality: 1,
     },
     src_endpoint: {
@@ -165,12 +183,15 @@ function eventPayload(eventID) {
     },
     metadata: {
       load_profile: PROFILE,
+      load_run_id: __ENV.KCSP_RUN_ID || "kcsp-load",
+      asset_index: boundedAssetIndex,
+      asset_cardinality: ASSET_CARDINALITY,
     },
   });
 }
 
-function queue(eventID, tags = {}) {
-  const response = http.post(`${BASE_URL}/api/v1/ingest/events`, eventPayload(eventID), {
+function queue(eventID, tags = {}, assetIndex = 0) {
+  const response = http.post(`${BASE_URL}/api/v1/ingest/events`, eventPayload(eventID, assetIndex), {
     headers: collectorHeaders,
     tags: { endpoint: "ingest", ...tags },
     timeout: "10s",
@@ -220,13 +241,16 @@ export function setup() {
 }
 
 export function ingestEvent(data) {
-  const eventID = [
-    data.runID,
-    exec.scenario.name,
-    exec.vu.idInTest,
-    exec.scenario.iterationInTest,
-  ].join("-");
-  queue(eventID, { phase: "load" });
+  const iteration = Number(exec.scenario.iterationInTest);
+  if (PROFILE === "capacity10k" && iteration >= ASSET_CARDINALITY) return;
+	const eventID = [
+		data.runID,
+		exec.scenario.name,
+		exec.vu.idInTest,
+    iteration,
+	].join("-");
+  const assetIndex = (iteration % ASSET_CARDINALITY) + 1;
+  queue(eventID, { phase: "load" }, assetIndex);
 }
 
 export function readSOC() {
@@ -244,7 +268,7 @@ export function readSOC() {
   sleep(0.2);
 }
 
-export function teardown(data) {
+export function verifyVisibility(data) {
   if (SKIP_VISIBILITY) return;
   const timeoutMs = numberEnv("KCSP_PIPELINE_VISIBILITY_TIMEOUT_MS", 30000);
   const deadline = Date.now() + timeoutMs;
@@ -273,6 +297,7 @@ export function handleSummary(data) {
   const report = {
     schema: "kcsp.load-summary/v1",
     profile: PROFILE,
+    expected_asset_cardinality: ASSET_CARDINALITY,
     events_accepted: metric(data, "events_accepted", "count"),
     dropped_iterations: metric(data, "dropped_iterations", "count"),
     ingest_error_rate: metric(data, "ingest_errors", "rate"),

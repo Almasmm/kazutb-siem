@@ -9,10 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kcsp/platform/internal/core"
+	"github.com/kcsp/platform/internal/platform/quota"
 )
 
 func TestSignedLicenseEntitlementsExpiryAndQuota(t *testing.T) {
@@ -49,7 +51,7 @@ func TestSignedLicenseEntitlementsExpiryAndQuota(t *testing.T) {
 		t.Fatalf("disabled module authorization = %v", err)
 	}
 	repository.overview["tenant-a"] = map[string]interface{}{"events_24h": float64(payload.Limits.EventsPerDay)}
-	if err = service.Authorize(context.Background(), "tenant-a", "siem.events.ingest", http.MethodPost); !errors.Is(err, ErrQuotaExceeded) {
+	if err = service.AuthorizeIngestBatch(context.Background(), "tenant-a", 1, 1); !errors.Is(err, ErrQuotaExceeded) {
 		t.Fatalf("quota authorization = %v", err)
 	}
 
@@ -135,6 +137,24 @@ func TestBatchIngestQuotaIncludesPendingEventsAndBytes(t *testing.T) {
 	}
 }
 
+func TestDistributedIngestQuotaBootstrapsWithoutOverviewScan(t *testing.T) {
+	now := time.Date(2026, 8, 23, 3, 0, 0, 0, time.UTC)
+	repository := newLicenseRepository(now)
+	repository.usageEvents = 40
+	repository.usageBytes = 4 << 20
+	ledger := &bootstrapQuotaLedger{}
+	service := NewService(repository, Config{Profile: "development", Now: func() time.Time { return now }, IngestQuota: ledger})
+	if err := service.AuthorizeIngestBatch(context.Background(), "tenant-a", 5, 1024); err != nil {
+		t.Fatalf("distributed quota reservation failed: %v", err)
+	}
+	if ledger.calls != 2 || ledger.baseline == nil || ledger.baseline.Events != 40 || ledger.baseline.Bytes != 4<<20 {
+		t.Fatalf("unexpected quota bootstrap: calls=%d baseline=%#v", ledger.calls, ledger.baseline)
+	}
+	if repository.overviewCalls.Load() != 0 || repository.usageCalls.Load() != 1 {
+		t.Fatalf("unexpected usage reads: overview=%d ingest_usage=%d", repository.overviewCalls.Load(), repository.usageCalls.Load())
+	}
+}
+
 func TestTenantCatalogPaginationAndSuspension(t *testing.T) {
 	now := time.Date(2026, 8, 23, 3, 0, 0, 0, time.UTC)
 	repository := newLicenseRepository(now)
@@ -198,9 +218,13 @@ func signLicense(t *testing.T, keyID string, payload core.LicensePayload, privat
 }
 
 type licenseRepository struct {
-	licenses map[string][]core.LicenseRecord
-	tenants  map[string]core.Tenant
-	overview map[string]map[string]interface{}
+	licenses      map[string][]core.LicenseRecord
+	tenants       map[string]core.Tenant
+	overview      map[string]map[string]interface{}
+	usageEvents   int64
+	usageBytes    int64
+	usageCalls    atomic.Int64
+	overviewCalls atomic.Int64
 }
 
 func newLicenseRepository(now time.Time) *licenseRepository {
@@ -266,5 +290,26 @@ func (r *licenseRepository) SetTenantState(_ context.Context, tenantID, state st
 }
 
 func (r *licenseRepository) Overview(_ context.Context, tenantID string) (map[string]interface{}, error) {
+	r.overviewCalls.Add(1)
 	return r.overview[tenantID], nil
+}
+
+func (r *licenseRepository) IngestUsage(_ context.Context, _ string, _ time.Time) (int64, int64, error) {
+	r.usageCalls.Add(1)
+	return r.usageEvents, r.usageBytes, nil
+}
+
+type bootstrapQuotaLedger struct {
+	calls    int
+	baseline *quota.IngestBaseline
+}
+
+func (l *bootstrapQuotaLedger) ReserveIngest(_ context.Context, request quota.IngestReservation) (quota.IngestResult, error) {
+	l.calls++
+	if request.Baseline == nil {
+		return quota.IngestResult{NeedsBootstrap: true, Limit: "bootstrap"}, nil
+	}
+	copy := *request.Baseline
+	l.baseline = &copy
+	return quota.IngestResult{Allowed: true, Events: copy.Events + request.Events, Bytes: copy.Bytes + request.Bytes}, nil
 }

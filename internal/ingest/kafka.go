@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,7 +67,7 @@ func (p *KafkaPublisher) Publish(ctx context.Context, envelope RawEnvelope) erro
 		return fmt.Errorf("encode raw envelope: %w", err)
 	}
 	record := &kgo.Record{
-		Topic: p.rawTopic, Key: []byte(envelope.TenantID + "|" + envelope.CollectorID), Value: payload,
+		Topic: p.rawTopic, Key: kafkaPartitionKey(envelope), Value: payload,
 		Headers: []kgo.RecordHeader{
 			{Key: "message_id", Value: []byte(envelope.MessageID)},
 			{Key: "event_id", Value: []byte(envelope.EventID)},
@@ -79,6 +80,31 @@ func (p *KafkaPublisher) Publish(ctx context.Context, envelope RawEnvelope) erro
 		return fmt.Errorf("produce %s: %w", p.rawTopic, err)
 	}
 	return nil
+}
+
+func kafkaPartitionKey(envelope RawEnvelope) []byte {
+	base := envelope.TenantID + "|" + envelope.CollectorID
+	identity := strings.TrimSpace(envelope.SourceID)
+	if identity != "" {
+		identity = "source:" + identity
+	} else if len(envelope.Payload) > 0 {
+		var hint struct {
+			Device struct {
+				Hostname string `json:"hostname"`
+			} `json:"device"`
+		}
+		if json.Unmarshal(envelope.Payload, &hint) == nil {
+			hostname := strings.ToLower(strings.TrimSpace(hint.Device.Hostname))
+			if hostname != "" && len(hostname) <= 256 {
+				identity = "device:" + hostname
+			}
+		}
+	}
+	if identity == "" {
+		return []byte(base)
+	}
+	digest := sha256.Sum256([]byte(identity))
+	return []byte(fmt.Sprintf("%s|%x", base, digest[:12]))
 }
 
 func (p *KafkaPublisher) PublishDeadLetter(ctx context.Context, deadLetter DeadLetter) error {

@@ -39,8 +39,9 @@ func OpenClickHouse(ctx context.Context, dsn string) (*ClickHouse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse ClickHouse configuration: %w", err)
 	}
-	options.MaxOpenConns = 20
-	options.MaxIdleConns = 5
+	configureTelemetryInsertOptions(options)
+	options.MaxOpenConns = 96
+	options.MaxIdleConns = 24
 	options.ConnMaxLifetime = time.Hour
 	conn, err := clickhouse.Open(options)
 	if err != nil {
@@ -56,6 +57,29 @@ func OpenClickHouse(ctx context.Context, dsn string) (*ClickHouse, error) {
 		return nil, err
 	}
 	return store, nil
+}
+
+// configureTelemetryInsertOptions lets ClickHouse coalesce the small inserts
+// produced by independent collectors while retaining durable acknowledgement.
+// wait_for_async_insert is intentionally forced on: KCSP must never report a
+// Kafka record as processed before ClickHouse has flushed it successfully.
+func configureTelemetryInsertOptions(options *clickhouse.Options) {
+	if options.Settings == nil {
+		options.Settings = clickhouse.Settings{}
+	}
+	if _, configured := options.Settings["async_insert"]; !configured {
+		options.Settings["async_insert"] = 1
+	}
+	options.Settings["wait_for_async_insert"] = 1
+	if _, configured := options.Settings["async_insert_use_adaptive_busy_timeout"]; !configured {
+		options.Settings["async_insert_use_adaptive_busy_timeout"] = 1
+	}
+	if _, configured := options.Settings["async_insert_busy_timeout_min_ms"]; !configured {
+		options.Settings["async_insert_busy_timeout_min_ms"] = 25
+	}
+	if _, configured := options.Settings["async_insert_busy_timeout_max_ms"]; !configured {
+		options.Settings["async_insert_busy_timeout_max_ms"] = 100
+	}
 }
 
 func (c *ClickHouse) Health(ctx context.Context) error { return c.conn.Ping(ctx) }
@@ -146,7 +170,7 @@ func (c *ClickHouse) PutEventWithExpiry(ctx context.Context, event core.Canonica
 
 func (c *ClickHouse) GetEvent(ctx context.Context, tenantID, eventID string) (core.CanonicalEvent, error) {
 	var payload string
-	err := c.conn.QueryRow(ctx, `SELECT payload FROM normalized_events FINAL
+	err := c.conn.QueryRow(ctx, `SELECT payload FROM normalized_events
 		WHERE tenant_id=? AND event_id=? ORDER BY version DESC LIMIT 1`, tenantID, eventID).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		return core.CanonicalEvent{}, ErrNotFound
@@ -312,6 +336,17 @@ func (c *ClickHouse) ListFindings(ctx context.Context, tenantID, eventID string,
 		result = append(result, finding)
 	}
 	return result, rows.Err()
+}
+
+func (c *ClickHouse) IngestUsage(ctx context.Context, tenantID string, since time.Time) (int64, int64, error) {
+	var events int64
+	var bytes int64
+	err := c.conn.QueryRow(ctx, `SELECT toInt64(count()), toInt64(ifNull(sum(length(payload)), 0))
+		FROM normalized_events FINAL WHERE tenant_id=? AND ingest_time >= ?`, tenantID, since.UTC()).Scan(&events, &bytes)
+	if err != nil {
+		return 0, 0, fmt.Errorf("query ingest license usage: %w", err)
+	}
+	return events, bytes, nil
 }
 
 func (c *ClickHouse) Metrics(ctx context.Context, tenantID string) (TelemetryMetrics, error) {

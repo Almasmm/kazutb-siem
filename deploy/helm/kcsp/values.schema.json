@@ -63,7 +63,7 @@
     },
     "config": {
       "type": "object",
-      "required": ["auth", "kafka", "minio"],
+      "required": ["auth", "processor", "kafka", "minio"],
       "properties": {
         "auth": {
           "type": "object",
@@ -82,6 +82,13 @@
                 "scope": {"type": "string", "minLength": 1}
               }
             }
+          }
+        },
+        "processor": {
+          "type": "object",
+          "required": ["workers"],
+          "properties": {
+            "workers": {"type": "integer", "minimum": 1, "maximum": 256}
           }
         },
         "kafka": {

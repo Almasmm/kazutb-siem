@@ -43,7 +43,7 @@ func TestPostgresServiceAccountLifecycleIsTenantBoundAndAudited(t *testing.T) {
 		t.Fatal(err)
 	}
 	hash := sha256.Sum256([]byte(issued.AccessToken))
-	account, err := repository.ServiceAccountByTokenHash(ctx, hash[:])
+	account, err := repository.ServiceAccountByTokenHash(ctx, hash[:], time.Now().UTC())
 	if err != nil || account.TenantID != tenantID || account.LastUsedAt == nil {
 		t.Fatalf("authenticate service account: account=%+v err=%v", account, err)
 	}
@@ -51,14 +51,14 @@ func TestPostgresServiceAccountLifecycleIsTenantBoundAndAudited(t *testing.T) {
 	if err != nil || replacement.ServiceAccount.TokenVersion != 2 {
 		t.Fatalf("rotate service account: issue=%+v err=%v", replacement, err)
 	}
-	if _, err := repository.ServiceAccountByTokenHash(ctx, hash[:]); !errors.Is(err, store.ErrNotFound) {
+	if _, err := repository.ServiceAccountByTokenHash(ctx, hash[:], time.Now().UTC()); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("old service token remained valid: %v", err)
 	}
 	if _, err := service.Revoke(ctx, tenantID, account.ID, actor); err != nil {
 		t.Fatal(err)
 	}
 	replacementHash := sha256.Sum256([]byte(replacement.AccessToken))
-	if _, err := repository.ServiceAccountByTokenHash(ctx, replacementHash[:]); !errors.Is(err, store.ErrNotFound) {
+	if _, err := repository.ServiceAccountByTokenHash(ctx, replacementHash[:], time.Now().UTC()); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("revoked service token remained valid: %v", err)
 	}
 	audit, err := repository.ListAudit(ctx, tenantID, 10)

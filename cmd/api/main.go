@@ -113,7 +113,6 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	licenseService := licensing.NewService(repository, licensing.Config{Profile: profile, TrustedKeys: licenseKeys})
 	publisher, err := ingest.OpenKafkaPublisher(startupContext, kafkaConfig("kcsp-api"))
 	if err != nil {
 		return err
@@ -149,6 +148,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer valkeyClient.Close()
+	ingestQuota, err := ephemeral.NewIngestQuotaLedger(valkeyClient)
+	if err != nil {
+		return err
+	}
+	licenseService := licensing.NewService(repository, licensing.Config{Profile: profile, TrustedKeys: licenseKeys, IngestQuota: ingestQuota})
 	enrollmentLimiter, err := ephemeral.NewFixedWindowLimiter(valkeyClient, ephemeral.FixedWindowConfig{
 		Scope: "agent-enrollment", Limit: enrollmentRatePerMinute, Window: time.Minute,
 	})
