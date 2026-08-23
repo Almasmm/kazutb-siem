@@ -24,6 +24,7 @@ export const ru = {
     assets: "Активы и сущности",
     parsers: "Parser Studio",
     mitre: "Покрытие MITRE",
+    reports: "Отчеты",
     rules: "Детектирование",
     collectors: "Коллекторы",
     threatIntel: "Threat Intelligence",
@@ -312,6 +313,10 @@ export const ru = {
     coverage: "Взвешенное покрытие", covered: "Покрыто", partial: "Частично", gaps: "Пробелы покрытия", gapsShort: "пробелов", rules: "правил", collectors: "коллекторов", incidents: "инцидентов", techniques: "техник",
     noTechniques: "Техники для этого представления не найдены", detections: "детектов", riskPerTechnique: "Контекст риска инцидентов", averageRisk: "Средний риск", maximumRisk: "Максимальный риск", dataDependencies: "Зависимости данных",
     detectionsPerTechnique: "Детекты по технике", noDetections: "На технику не сопоставлен ни один детект", dataSources: "Зависимости от источников данных", noDependencies: "Сопоставленные правила не объявляют зависимостей.", sourceMissing: "Необходимая телеметрия недоступна",
+  },
+  reportsPage: {
+    eyebrow: "Управление и контроль", title: "Центр отчетности", subtitle: "Неизменяемые серверные снимки для руководства, SOC, инцидентов и закрытия расследований.", generate: "Создать отчет", assurance: "Последний подтвержденный снимок", noRuns: "Отчеты еще не сформированы", createFirst: "Создайте первый серверный снимок", integrity: "Контроль целостности SHA-256", awaitingSnapshot: "Ожидается первый снимок", generator: "Генератор", newSnapshot: "Новый отчет", immutableHint: "Содержимое фиксируется на момент создания и не редактируется.", reportType: "Тип отчета", periodStart: "Начало периода", periodEnd: "Конец периода", incidentId: "ID инцидента", caseId: "ID кейса", generating: "Формирование...", generateSnapshot: "Зафиксировать снимок", totalRuns: "Всего отчетов", completed: "Завершено", formats: "Форматы", retention: "Режим хранения", immutable: "Неизменяемый", ledger: "Журнал отчетов", history: "История снимков", report: "Отчет", checksum: "Контрольная сумма", noReports: "Для выбранного типа отчетов нет", integrityVerified: "Целостность снимка подтверждена", completedAt: "Сформирован", period: "Период", keyMetrics: "Ключевые метрики", snapshot: "Состав снимка",
+    types: { EXECUTIVE_SECURITY: "Отчет руководству", SOC_OPERATIONS: "Операционный отчет SOC", INCIDENT: "Отчет по инциденту", CASE_CLOSURE: "Отчет о закрытии кейса" },
   },
   severity: {
     critical: "Критический",

@@ -18,6 +18,7 @@ export const kk = {
     assets: "Активтер мен нысандар",
     parsers: "Parser Studio",
     mitre: "MITRE қамтуы",
+    reports: "Есептер",
     threatIntel: "Threat Intelligence", ueba: "UEBA", evidence: "Дәлелдер", soar: "SOAR", aiSoc: "AI SOC", system: "Жүйе", audit: "Аудит",
   },
   common: {
@@ -186,6 +187,10 @@ export const kk = {
     coverage: "Салмақталған қамту", covered: "Қамтылған", partial: "Жартылай", gaps: "Қамту бос орындары", gapsShort: "бос орын", rules: "ереже", collectors: "коллектор", incidents: "инцидент", techniques: "техника",
     noTechniques: "Бұл көрініске сәйкес техника жоқ", detections: "детект", riskPerTechnique: "Инцидент тәуекелі", averageRisk: "Орташа тәуекел", maximumRisk: "Ең жоғары тәуекел", dataDependencies: "Дерек тәуелділігі",
     detectionsPerTechnique: "Техника детектері", noDetections: "Техникаға детект сәйкестендірілмеген", dataSources: "Дереккөз тәуелділігі", noDependencies: "Ережелер дереккөз тәуелділігін көрсетпейді.", sourceMissing: "Қажетті телеметрия қолжетімсіз",
+  },
+  reportsPage: {
+    eyebrow: "Басқару және бақылау", title: "Есептер орталығы", subtitle: "Басшылық, SOC, инциденттер және тергеулерді жабуға арналған өзгермейтін серверлік кескіндер.", generate: "Есеп құру", assurance: "Соңғы расталған кескін", noRuns: "Есептер әлі құрылмады", createFirst: "Алғашқы серверлік кескінді құрыңыз", integrity: "SHA-256 тұтастығын бақылау", awaitingSnapshot: "Алғашқы кескін күтілуде", generator: "Генератор", newSnapshot: "Жаңа есеп", immutableHint: "Мазмұн құрылған сәтте бекітіледі және өзгертілмейді.", reportType: "Есеп түрі", periodStart: "Кезең басы", periodEnd: "Кезең соңы", incidentId: "Инцидент ID", caseId: "Кейс ID", generating: "Құрылуда...", generateSnapshot: "Кескінді бекіту", totalRuns: "Барлық есеп", completed: "Аяқталды", formats: "Форматтар", retention: "Сақтау режимі", immutable: "Өзгермейтін", ledger: "Есеп журналы", history: "Кескіндер тарихы", report: "Есеп", checksum: "Бақылау сомасы", noReports: "Таңдалған түр үшін есеп жоқ", integrityVerified: "Кескін тұтастығы расталды", completedAt: "Құрылды", period: "Кезең", keyMetrics: "Негізгі метрикалар", snapshot: "Кескін құрамы",
+    types: { EXECUTIVE_SECURITY: "Басшылыққа есеп", SOC_OPERATIONS: "SOC операциялық есебі", INCIDENT: "Инцидент есебі", CASE_CLOSURE: "Кейсті жабу есебі" },
   },
   severity: { critical: "Сындарлы", high: "Жоғары", medium: "Орташа", low: "Төмен", informational: "Ақпараттық", unknown: "Берілмеген" },
   status: {

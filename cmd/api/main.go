@@ -27,6 +27,7 @@ import (
 	"github.com/kcsp/platform/internal/parser"
 	"github.com/kcsp/platform/internal/pipeline"
 	"github.com/kcsp/platform/internal/platform/auth"
+	"github.com/kcsp/platform/internal/reporting"
 	"github.com/kcsp/platform/internal/soar"
 	"github.com/kcsp/platform/internal/soc"
 	"github.com/kcsp/platform/internal/store"
@@ -103,6 +104,7 @@ func run(logger *slog.Logger) error {
 	entityService := entitygraph.NewService(repository)
 	parserService := parser.NewStudioService(repository)
 	mitreService := mitre.NewService(repository)
+	reportService := reporting.NewService(repository)
 	publisher, err := ingest.OpenKafkaPublisher(startupContext, kafkaConfig("kcsp-api"))
 	if err != nil {
 		return err
@@ -150,6 +152,7 @@ func run(logger *slog.Logger) error {
 			EntityService:      entityService,
 			ParserService:      parserService,
 			MITREService:       mitreService,
+			ReportService:      reportService,
 			RequireRegisteredCollectors: strings.EqualFold(
 				envOr("KCSP_REQUIRE_REGISTERED_COLLECTORS", strconv.FormatBool(authMode == "oidc")), "true",
 			),

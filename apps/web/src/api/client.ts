@@ -5,6 +5,7 @@ import type {
 	ParserDescriptorDto,
 	ParserSimulationDto,
 	MITRECoverageDto,
+	ReportRunDto,
   AlertDto,
   AISOCDecisionDto,
   AISOCPolicyDto,
@@ -119,7 +120,7 @@ async function requestDownload(path: string, reason: string): Promise<{ blob: Bl
   const plain = disposition.match(/filename="?([^";]+)"?/i)?.[1];
   let filename = encoded || plain || "kcsp-evidence.bin";
   try { filename = decodeURIComponent(filename); } catch { /* retain server-provided filename */ }
-  return { blob: await response.blob(), filename, sha256: response.headers.get("X-KCSP-SHA256") || "" };
+  return { blob: await response.blob(), filename, sha256: response.headers.get("X-KCSP-SHA256") || response.headers.get("X-KCSP-Report-SHA256") || "" };
 }
 
 async function publicRequest<T>(path: string, signal?: AbortSignal): Promise<T> {
@@ -296,6 +297,10 @@ export const api = {
   disableParser: (id: string) => request<ParserContentDto>(`/parsers/${encodeURIComponent(id)}/disable`, { method: "POST" }),
   simulateParser: (id: string, version: number, payload: string) => request<ParserSimulationDto>(`/parsers/${encodeURIComponent(id)}/versions/${version}/simulate`, { method: "POST", body: JSON.stringify({ payload }) }),
   mitreCoverage: (signal?: AbortSignal) => request<MITRECoverageDto>("/mitre/coverage", { signal }),
+  reports: (params?: Record<string, QueryValue>, signal?: AbortSignal) => getList<ReportRunDto>("/reports", params, signal),
+  report: (id: string, signal?: AbortSignal) => request<ReportRunDto>(`/reports/${encodeURIComponent(id)}`, { signal }),
+  generateReport: (payload: { report_type: ReportRunDto["report_type"]; parameters: ReportRunDto["parameters"] }) => request<ReportRunDto>("/reports", { method: "POST", body: JSON.stringify(payload), headers: { "Idempotency-Key": crypto.randomUUID() } }),
+  downloadReport: (id: string, format: "json" | "csv" | "html") => requestDownload(`/reports/${encodeURIComponent(id)}/download?format=${format}`, "Security report export"),
   updateUEBAFeedback: (id: string, payload: { status: string; reason: string; version: number }) =>
     request<UEBAAnomalyDto>(`/ueba/anomalies/${encodeURIComponent(id)}/feedback`, {
       method: "POST",

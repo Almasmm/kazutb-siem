@@ -24,6 +24,7 @@ export const en = {
     assets: "Assets & entities",
     parsers: "Parser Studio",
     mitre: "MITRE Coverage",
+    reports: "Reports",
     rules: "Detections",
     collectors: "Collectors",
     threatIntel: "Threat Intelligence",
@@ -196,6 +197,10 @@ export const en = {
     coverage: "Weighted coverage", covered: "Covered", partial: "Partial", gaps: "Coverage gaps", gapsShort: "gaps", rules: "rules", collectors: "collectors", incidents: "incidents", techniques: "techniques",
     noTechniques: "No techniques match this view", detections: "detections", riskPerTechnique: "Incident risk context", averageRisk: "Average risk", maximumRisk: "Maximum risk", dataDependencies: "Data dependencies",
     detectionsPerTechnique: "Detections per technique", noDetections: "No detection mapped to this technique", dataSources: "Data-source dependencies", noDependencies: "Mapped rules declare no data-source dependency.", sourceMissing: "Required telemetry is not available",
+  },
+  reportsPage: {
+    eyebrow: "Governance and assurance", title: "Reporting Center", subtitle: "Immutable server-side snapshots for executives, SOC operations, incidents and case closure.", generate: "Generate report", assurance: "Latest assured snapshot", noRuns: "No report has been generated", createFirst: "Create the first server-side snapshot", integrity: "SHA-256 integrity control", awaitingSnapshot: "Awaiting first snapshot", generator: "Generator", newSnapshot: "New report", immutableHint: "Contents are fixed at generation time and cannot be edited.", reportType: "Report type", periodStart: "Period start", periodEnd: "Period end", incidentId: "Incident ID", caseId: "Case ID", generating: "Generating...", generateSnapshot: "Seal snapshot", totalRuns: "Total reports", completed: "Completed", formats: "Formats", retention: "Storage mode", immutable: "Immutable", ledger: "Report ledger", history: "Snapshot history", report: "Report", checksum: "Checksum", noReports: "No reports match this type", integrityVerified: "Snapshot integrity verified", completedAt: "Completed at", period: "Period", keyMetrics: "Key metrics", snapshot: "Snapshot contents",
+    types: { EXECUTIVE_SECURITY: "Executive security", SOC_OPERATIONS: "SOC operations", INCIDENT: "Incident report", CASE_CLOSURE: "Case closure" },
   },
   severity: { critical: "Critical", high: "High", medium: "Medium", low: "Low", informational: "Informational", unknown: "Not set" },
   status: {

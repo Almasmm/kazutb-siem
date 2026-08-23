@@ -26,6 +26,7 @@ import (
 	"github.com/kcsp/platform/internal/parser"
 	"github.com/kcsp/platform/internal/pipeline"
 	"github.com/kcsp/platform/internal/platform/auth"
+	"github.com/kcsp/platform/internal/reporting"
 	"github.com/kcsp/platform/internal/soar"
 	"github.com/kcsp/platform/internal/soc"
 	"github.com/kcsp/platform/internal/store"
@@ -68,6 +69,7 @@ type Server struct {
 	entities          *entitygraph.Service
 	parsers           *parser.StudioService
 	mitre             *mitre.Service
+	reports           *reporting.Service
 }
 
 type Authenticator interface {
@@ -93,6 +95,7 @@ type Config struct {
 	EntityService               *entitygraph.Service
 	ParserService               *parser.StudioService
 	MITREService                *mitre.Service
+	ReportService               *reporting.Service
 }
 
 func New(repository store.Repository, engine *pipeline.Engine, socService *soc.Service, authenticator Authenticator, logger *slog.Logger, seed func(context.Context) error) http.Handler {
@@ -108,7 +111,7 @@ func NewWithConfig(repository store.Repository, engine *pipeline.Engine, socServ
 		collectors: config.CollectorRegistry, requireCollectors: config.RequireRegisteredCollectors,
 		detections: config.DetectionService, hunts: config.HuntStore, retention: config.RetentionStore,
 		evidence: config.EvidenceService, threatIntel: config.ThreatIntelService, soar: config.SOARService,
-		ueba: config.UEBAService, aiSOC: config.AISOCService, cases: config.CasesService, entities: config.EntityService, parsers: config.ParserService, mitre: config.MITREService,
+		ueba: config.UEBAService, aiSOC: config.AISOCService, cases: config.CasesService, entities: config.EntityService, parsers: config.ParserService, mitre: config.MITREService, reports: config.ReportService,
 	}
 	server.routes()
 	return server.middleware(server.mux)
@@ -201,6 +204,12 @@ func (s *Server) routes() {
 	}
 	if s.mitre != nil {
 		s.mux.Handle("GET /api/v1/mitre/coverage", s.protect("siem.mitre.read", http.HandlerFunc(s.mitreCoverage)))
+	}
+	if s.reports != nil {
+		s.mux.Handle("GET /api/v1/reports", s.protect("reports.read", http.HandlerFunc(s.listReports)))
+		s.mux.Handle("POST /api/v1/reports", s.protect("reports.generate", http.HandlerFunc(s.generateReport)))
+		s.mux.Handle("GET /api/v1/reports/{reportID}", s.protect("reports.read", http.HandlerFunc(s.getReport)))
+		s.mux.Handle("GET /api/v1/reports/{reportID}/download", s.protect("reports.read", http.HandlerFunc(s.downloadReport)))
 	}
 	if s.threatIntel != nil {
 		s.mux.Handle("GET /api/v1/threat-intel/feeds", s.protect("ti.indicators.read", http.HandlerFunc(s.listThreatIntelFeeds)))

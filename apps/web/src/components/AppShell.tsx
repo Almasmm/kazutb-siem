@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   Activity,
   Archive,
+  BarChart3,
   BellRing,
   Briefcase,
   BrainCircuit,
@@ -59,6 +60,7 @@ const navGroups = [
     label: "nav.governance",
     items: [
       { to: "/evidence", label: "nav.evidence", icon: Archive },
+      { to: "/reports", label: "nav.reports", icon: BarChart3 },
       { to: "/collectors", label: "nav.collectors", icon: RadioTower },
       { to: "/system", label: "nav.system", icon: Settings2 },
       { to: "/audit", label: "nav.audit", icon: ClipboardList },
@@ -84,6 +86,7 @@ const pageKeys: Record<string, string> = {
   "/assets": "nav.assets",
   "/parsers": "nav.parsers",
   "/mitre": "nav.mitre",
+  "/reports": "nav.reports",
 };
 
 export function AppShell() {

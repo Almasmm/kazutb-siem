@@ -797,3 +797,18 @@ export interface MITRECoverageDto {
   incident_count: number;
   generated_at: string;
 }
+
+export interface ReportRunDto {
+  report_id: string;
+  tenant_id?: string;
+  report_type: "EXECUTIVE_SECURITY" | "SOC_OPERATIONS" | "INCIDENT" | "CASE_CLOSURE";
+  title: string;
+  status: "COMPLETED" | "FAILED";
+  parameters: { start?: string; end?: string; incident_id?: string; case_id?: string };
+  snapshot: Record<string, unknown>;
+  checksum_sha256: string;
+  created_by: string;
+  request_id?: string;
+  created_at: string;
+  completed_at?: string;
+}
