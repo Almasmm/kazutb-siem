@@ -101,6 +101,8 @@ func run(logger *slog.Logger) error {
 	}
 	evidenceService := evidence.NewService(repository, blobStore, evidence.Config{MaximumBytes: maximumEvidenceBytes})
 	threatIntelService := threatintel.NewService(repository)
+	feedRuntime := threatintel.NewFeedRuntime(threatIntelService, nil, nil)
+	threatIntelService.ConfigureFeedRuntime(feedRuntime)
 	soarService := soar.NewService(repository, nil)
 	uebaService := ueba.NewService(repository)
 	aiSOCService := aisoc.NewService(repository)
@@ -216,6 +218,19 @@ func run(logger *slog.Logger) error {
 
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	feedPollInterval, err := time.ParseDuration(envOr("KCSP_TI_SYNC_POLL_INTERVAL", "5s"))
+	if err != nil || feedPollInterval < time.Second {
+		return errors.New("KCSP_TI_SYNC_POLL_INTERVAL must be a duration of at least one second")
+	}
+	feedLease, err := time.ParseDuration(envOr("KCSP_TI_SYNC_LEASE", "2m"))
+	if err != nil || feedLease < 30*time.Second {
+		return errors.New("KCSP_TI_SYNC_LEASE must be a duration of at least 30 seconds")
+	}
+	hostname, _ := os.Hostname()
+	feedWorker := threatintel.NewFeedSyncWorker(repository, feedRuntime, threatintel.FeedSyncWorkerConfig{
+		ID: "api-" + hostname + "-" + core.NewID("tiw"), PollInterval: feedPollInterval, Lease: feedLease,
+	}, logger)
+	go feedWorker.Run(shutdownContext)
 	go func() {
 		<-shutdownContext.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

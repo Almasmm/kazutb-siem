@@ -126,6 +126,9 @@ export const en = {
     type: "Type", indicator: "Indicator", reputation: "Reputation", lastSeen: "Last seen", noIndicators: "No indicators found",
     retrosearch: "Search last 7 days", campaign: "Campaign", context: "Threat context", noMatches: "No event matches",
     retroResult: "Matched {{matched}} of {{candidates}} candidate events.",
+    feedControl: "Provider control plane", provider: "Provider", newFeed: "New feed", noFeeds: "No provider feeds configured",
+    lastSync: "Last sync", syncResult: "Imported", syncCounts: "{{deduplicated}} deduplicated · {{rejected}} rejected", testFeed: "Test connection", syncNow: "Sync now",
+    createFeedTitle: "Register threat intelligence feed", sourceUrl: "Provider base URL", secretRef: "Secret binding", secretRefHint: "Use env://, vault:// or k8s://. The credential value is never stored in KCSP.", refreshSeconds: "Refresh interval (seconds)", feedCreated: "Feed registered and scheduled.", syncQueued: "Feed synchronization queued.",
   },
   uebaPage: {
     eyebrow: "Behavior analytics", title: "Users and entities", subtitle: "Review explainable deviations from university behavior baselines.",

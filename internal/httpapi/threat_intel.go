@@ -74,6 +74,46 @@ func (s *Server) updateThreatIntelFeed(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, feed)
 }
 
+func (s *Server) queueThreatIntelFeedSync(w http.ResponseWriter, r *http.Request) {
+	principal := principalFrom(r.Context())
+	feed, err := s.threatIntel.QueueFeedSync(r.Context(), tenantFrom(r.Context()), r.PathValue("feedID"))
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	if err := s.auditThreatIntel(r, principal.ID, "threat_intel.feed.sync.queued", "threat_intel_feed", feed.ID,
+		map[string]interface{}{"kind": feed.Kind, "sync_status": feed.SyncStatus}); err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusAccepted, feed)
+}
+
+func (s *Server) testThreatIntelFeed(w http.ResponseWriter, r *http.Request) {
+	principal := principalFrom(r.Context())
+	result, err := s.threatIntel.TestFeedConnection(r.Context(), tenantFrom(r.Context()), r.PathValue("feedID"))
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	outcome := "SUCCESS"
+	if result.Status != core.ThreatIntelFeedSyncSucceeded {
+		outcome = "FAILURE"
+	}
+	_, err = s.store.AppendAudit(r.Context(), core.AuditEntry{
+		TenantID: tenantFrom(r.Context()), Actor: principal.ID, Action: "threat_intel.feed.connection.tested",
+		ResourceType: "threat_intel_feed", ResourceID: r.PathValue("feedID"), Outcome: outcome,
+		RequestID: requestIDFrom(r.Context()), Metadata: map[string]interface{}{
+			"status": result.Status, "error_class": result.ErrorClass, "http_status": result.HTTPStatus,
+		},
+	})
+	if err != nil {
+		s.handleDomainError(w, r, err)
+		return
+	}
+	s.json(w, http.StatusOK, result)
+}
+
 func (s *Server) listThreatIndicators(w http.ResponseWriter, r *http.Request) {
 	items, err := s.threatIntel.Indicators(r.Context(), tenantFrom(r.Context()), core.ThreatIndicatorFilter{
 		FeedID: strings.TrimSpace(r.URL.Query().Get("feed_id")),

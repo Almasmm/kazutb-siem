@@ -17,7 +17,9 @@ import (
 )
 
 const threatFeedColumns = `tenant_id,feed_id,name,kind,description,state,source_url,auth_reference,
-	refresh_interval_seconds,default_confidence,tags,version,created_by,updated_by,created_at,updated_at`
+	refresh_interval_seconds,default_confidence,tags,version,created_by,updated_by,created_at,updated_at,
+	sync_status,health_status,health_error_class,health_detail,sync_cursor,last_sync_at,last_tested_at,next_sync_at,
+	last_imported,last_deduplicated,last_rejected,sync_attempt,sync_lease_owner,sync_lease_until`
 
 const threatIndicatorColumns = `tenant_id,indicator_id,feed_id,indicator_type,value,normalized_value,source,
 	confidence,reputation,ttl_seconds,first_seen,last_seen,valid_from,valid_until,tags,campaign,malware,
@@ -37,11 +39,12 @@ func (p *Postgres) CreateThreatIntelFeed(ctx context.Context, feed core.ThreatIn
 	}
 	created, err := scanThreatFeed(p.pool.QueryRow(ctx, `INSERT INTO threat_intel_feeds(
 		tenant_id,feed_id,name,kind,description,state,source_url,auth_reference,refresh_interval_seconds,
-		default_confidence,tags,version,created_by,updated_by,created_at,updated_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+		default_confidence,tags,version,created_by,updated_by,created_at,updated_at,sync_status,health_status,next_sync_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 		RETURNING `+threatFeedColumns, feed.TenantID, feed.ID, feed.Name, feed.Kind, feed.Description,
 		feed.State, feed.SourceURL, feed.AuthReference, feed.RefreshIntervalSeconds, feed.DefaultConfidence,
-		tags, feed.Version, feed.CreatedBy, feed.UpdatedBy, feed.CreatedAt, feed.UpdatedAt))
+		tags, feed.Version, feed.CreatedBy, feed.UpdatedBy, feed.CreatedAt, feed.UpdatedAt,
+		feed.SyncStatus, feed.HealthStatus, feed.NextSyncAt))
 	if err != nil {
 		var postgresError *pgconn.PgError
 		if errors.As(err, &postgresError) && postgresError.Code == "23505" {
@@ -92,7 +95,22 @@ func (p *Postgres) UpdateThreatIntelFeed(ctx context.Context, feed core.ThreatIn
 	}
 	updated, err := scanThreatFeed(p.pool.QueryRow(ctx, `UPDATE threat_intel_feeds SET
 		name=$4,description=$5,state=$6,source_url=$7,auth_reference=$8,refresh_interval_seconds=$9,
-		default_confidence=$10,tags=$11,updated_by=$12,updated_at=$13,version=version+1
+		default_confidence=$10,tags=$11,updated_by=$12,updated_at=$13,version=version+1,
+		sync_status=CASE
+			WHEN $6='DISABLED' THEN 'NOT_APPLICABLE'
+			WHEN kind IN ('MISP','OPENCTI') AND $8='' THEN 'CREDENTIALS_REQUIRED'
+			WHEN kind IN ('MISP','OPENCTI') AND (state IS DISTINCT FROM $6 OR source_url IS DISTINCT FROM $7 OR auth_reference IS DISTINCT FROM $8) THEN 'QUEUED'
+			ELSE sync_status END,
+		health_status=CASE
+			WHEN $6='DISABLED' THEN 'UNKNOWN'
+			WHEN kind IN ('MISP','OPENCTI') AND $8='' THEN 'CREDENTIALS_REQUIRED'
+			WHEN kind IN ('MISP','OPENCTI') AND (state IS DISTINCT FROM $6 OR source_url IS DISTINCT FROM $7 OR auth_reference IS DISTINCT FROM $8) THEN 'UNKNOWN'
+			ELSE health_status END,
+		health_error_class=CASE WHEN source_url IS DISTINCT FROM $7 OR auth_reference IS DISTINCT FROM $8 THEN '' ELSE health_error_class END,
+		health_detail=CASE WHEN source_url IS DISTINCT FROM $7 OR auth_reference IS DISTINCT FROM $8 THEN '' ELSE health_detail END,
+		next_sync_at=CASE WHEN $6='ACTIVE' AND kind IN ('MISP','OPENCTI') AND (state IS DISTINCT FROM $6 OR source_url IS DISTINCT FROM $7 OR auth_reference IS DISTINCT FROM $8) THEN $13 ELSE next_sync_at END,
+		sync_lease_owner=CASE WHEN state IS DISTINCT FROM $6 OR source_url IS DISTINCT FROM $7 OR auth_reference IS DISTINCT FROM $8 THEN '' ELSE sync_lease_owner END,
+		sync_lease_until=CASE WHEN state IS DISTINCT FROM $6 OR source_url IS DISTINCT FROM $7 OR auth_reference IS DISTINCT FROM $8 THEN NULL ELSE sync_lease_until END
 		WHERE tenant_id=$1 AND feed_id=$2 AND version=$3 RETURNING `+threatFeedColumns,
 		feed.TenantID, feed.ID, feed.Version, feed.Name, feed.Description, feed.State, feed.SourceURL,
 		feed.AuthReference, feed.RefreshIntervalSeconds, feed.DefaultConfidence, tags, feed.UpdatedBy, feed.UpdatedAt))
@@ -107,6 +125,99 @@ func (p *Postgres) UpdateThreatIntelFeed(ctx context.Context, feed core.ThreatIn
 		return core.ThreatIntelFeed{}, fmt.Errorf("update threat intelligence feed: %w", err)
 	}
 	return updated, nil
+}
+
+func (p *Postgres) QueueThreatIntelFeedSync(ctx context.Context, tenantID, feedID string, queuedAt time.Time) (core.ThreatIntelFeed, error) {
+	feed, err := scanThreatFeed(p.pool.QueryRow(ctx, `UPDATE threat_intel_feeds SET
+		sync_status=CASE WHEN auth_reference='' THEN 'CREDENTIALS_REQUIRED' ELSE 'QUEUED' END,
+		health_status=CASE WHEN auth_reference='' THEN 'CREDENTIALS_REQUIRED' ELSE health_status END,
+		health_error_class=CASE WHEN auth_reference='' THEN 'CREDENTIALS_REQUIRED' ELSE '' END,
+		health_detail=CASE WHEN auth_reference='' THEN 'feed has no secret binding' ELSE '' END,
+		next_sync_at=$3,sync_lease_owner='',sync_lease_until=NULL
+		WHERE tenant_id=$1 AND feed_id=$2 AND state='ACTIVE' AND kind IN ('MISP','OPENCTI')
+		RETURNING `+threatFeedColumns, tenantID, feedID, queuedAt.UTC()))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return core.ThreatIntelFeed{}, ErrNotFound
+	}
+	if err != nil {
+		return core.ThreatIntelFeed{}, fmt.Errorf("queue threat intelligence feed sync: %w", err)
+	}
+	return feed, nil
+}
+
+func (p *Postgres) ClaimThreatIntelFeedSync(ctx context.Context, workerID, tenantScope string,
+	now, leaseUntil time.Time) (core.ThreatIntelFeed, bool, error) {
+	feed, err := scanThreatFeed(p.pool.QueryRow(ctx, `WITH candidate AS (
+		SELECT tenant_id,feed_id FROM threat_intel_feeds
+		WHERE state='ACTIVE' AND kind IN ('MISP','OPENCTI') AND ($4='' OR tenant_id=$4)
+			AND (next_sync_at IS NULL OR next_sync_at <= $2)
+			AND (sync_lease_until IS NULL OR sync_lease_until <= $2)
+		ORDER BY COALESCE(next_sync_at,created_at),tenant_id,feed_id
+		FOR UPDATE SKIP LOCKED LIMIT 1
+	) UPDATE threat_intel_feeds f SET sync_status='RUNNING',sync_lease_owner=$1,
+		sync_lease_until=$3,sync_attempt=sync_attempt+1
+	WHERE (f.tenant_id,f.feed_id) IN (SELECT tenant_id,feed_id FROM candidate)
+	RETURNING `+threatFeedColumns, workerID, now.UTC(), leaseUntil.UTC(), strings.TrimSpace(tenantScope)))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return core.ThreatIntelFeed{}, false, nil
+	}
+	if err != nil {
+		return core.ThreatIntelFeed{}, false, fmt.Errorf("claim threat intelligence feed sync: %w", err)
+	}
+	return feed, true, nil
+}
+
+func (p *Postgres) FinishThreatIntelFeedSync(ctx context.Context, tenantID, feedID, workerID string,
+	result core.ThreatIntelFeedSyncResult, completedAt time.Time) (core.ThreatIntelFeed, error) {
+	health := core.ThreatIntelFeedHealthDegraded
+	switch result.Status {
+	case core.ThreatIntelFeedSyncSucceeded:
+		health = core.ThreatIntelFeedHealthHealthy
+	case core.ThreatIntelFeedSyncCredentialsNeeded:
+		health = core.ThreatIntelFeedHealthCredentialsNeeded
+	case core.ThreatIntelFeedSyncFailed:
+	default:
+		return core.ThreatIntelFeed{}, fmt.Errorf("finish threat intelligence feed sync: invalid status %q", result.Status)
+	}
+	if len(result.Detail) > 1000 {
+		result.Detail = result.Detail[:1000]
+	}
+	feed, err := scanThreatFeed(p.pool.QueryRow(ctx, `UPDATE threat_intel_feeds SET
+		sync_status=$5,health_status=$6,health_error_class=$7,health_detail=$8,sync_cursor=$9,
+		last_sync_at=$10::timestamptz,next_sync_at=CASE WHEN state='ACTIVE' THEN $10::timestamptz+(refresh_interval_seconds*interval '1 second') ELSE NULL END,
+		last_imported=$11,last_deduplicated=$12,last_rejected=$13,sync_lease_owner='',sync_lease_until=NULL
+		WHERE tenant_id=$1 AND feed_id=$2 AND sync_lease_owner=$3 AND sync_lease_until>$4
+		RETURNING `+threatFeedColumns, tenantID, feedID, workerID, completedAt.UTC(),
+		result.Status, health, strings.TrimSpace(result.ErrorClass), strings.TrimSpace(result.Detail),
+		result.Cursor, completedAt.UTC(), result.Imported, result.Deduplicated, result.Rejected))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return core.ThreatIntelFeed{}, ErrVersionConflict
+	}
+	if err != nil {
+		return core.ThreatIntelFeed{}, fmt.Errorf("finish threat intelligence feed sync: %w", err)
+	}
+	return feed, nil
+}
+
+func (p *Postgres) RecordThreatIntelFeedTest(ctx context.Context, tenantID, feedID string,
+	result core.ThreatIntelFeedTestResult, testedAt time.Time) (core.ThreatIntelFeed, error) {
+	health := core.ThreatIntelFeedHealthDegraded
+	if result.Status == core.ThreatIntelFeedSyncSucceeded {
+		health = core.ThreatIntelFeedHealthHealthy
+	} else if result.Status == core.ThreatIntelFeedSyncCredentialsNeeded {
+		health = core.ThreatIntelFeedHealthCredentialsNeeded
+	}
+	feed, err := scanThreatFeed(p.pool.QueryRow(ctx, `UPDATE threat_intel_feeds SET
+		health_status=$3,health_error_class=$4,health_detail=$5,last_tested_at=$6
+		WHERE tenant_id=$1 AND feed_id=$2 RETURNING `+threatFeedColumns,
+		tenantID, feedID, health, strings.TrimSpace(result.ErrorClass), strings.TrimSpace(result.Detail), testedAt.UTC()))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return core.ThreatIntelFeed{}, ErrNotFound
+	}
+	if err != nil {
+		return core.ThreatIntelFeed{}, fmt.Errorf("record threat intelligence feed test: %w", err)
+	}
+	return feed, nil
 }
 
 func (p *Postgres) UpsertThreatIndicator(ctx context.Context, candidate core.ThreatIndicator) (core.ThreatIndicator, bool, error) {
@@ -524,7 +635,10 @@ func scanThreatFeed(row threatRow) (core.ThreatIntelFeed, error) {
 	var tags []byte
 	err := row.Scan(&feed.TenantID, &feed.ID, &feed.Name, &feed.Kind, &feed.Description, &feed.State,
 		&feed.SourceURL, &feed.AuthReference, &feed.RefreshIntervalSeconds, &feed.DefaultConfidence,
-		&tags, &feed.Version, &feed.CreatedBy, &feed.UpdatedBy, &feed.CreatedAt, &feed.UpdatedAt)
+		&tags, &feed.Version, &feed.CreatedBy, &feed.UpdatedBy, &feed.CreatedAt, &feed.UpdatedAt,
+		&feed.SyncStatus, &feed.HealthStatus, &feed.HealthErrorClass, &feed.HealthDetail, &feed.SyncCursor,
+		&feed.LastSyncAt, &feed.LastTestedAt, &feed.NextSyncAt, &feed.LastImported, &feed.LastDeduplicated,
+		&feed.LastRejected, &feed.SyncAttempt, &feed.SyncLeaseOwner, &feed.SyncLeaseUntil)
 	if err != nil {
 		return core.ThreatIntelFeed{}, err
 	}

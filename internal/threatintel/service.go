@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ var (
 	ErrInvalidFeed            = errors.New("invalid threat intelligence feed")
 	ErrInvalidIndicator       = errors.New("invalid threat indicator")
 	ErrRetrosearchUnavailable = errors.New("threat intelligence retrosearch is unavailable")
+	ErrFeedSyncUnavailable    = errors.New("threat intelligence feed synchronization is unavailable")
 )
 
 const maximumIndicatorTTL = int64((10 * 365 * 24 * time.Hour) / time.Second)
@@ -33,9 +35,12 @@ type Store interface {
 }
 
 type Service struct {
-	store Store
-	now   func() time.Time
+	store   Store
+	now     func() time.Time
+	runtime *FeedRuntime
 }
+
+var feedAuthReferencePattern = regexp.MustCompile(`^(?:env://KCSP_TI_FEED_SECRET_[A-Z0-9_]{1,96}|vault://[A-Za-z0-9._/-]{1,240}|k8s://[A-Za-z0-9._/-]{1,240})$`)
 
 type retrosearchProvider interface {
 	RetrosearchThreatIndicator(context.Context, core.ThreatIndicator, core.ThreatIntelRetrosearchRequest) (core.ThreatIntelRetrosearchResult, error)
@@ -88,6 +93,10 @@ func NewService(store Store) *Service {
 	return &Service{store: store, now: func() time.Time { return time.Now().UTC() }}
 }
 
+func (s *Service) ConfigureFeedRuntime(runtime *FeedRuntime) {
+	s.runtime = runtime
+}
+
 func (s *Service) CreateFeed(ctx context.Context, tenantID, actor string, draft FeedDraft) (core.ThreatIntelFeed, error) {
 	now := s.now()
 	feed := core.ThreatIntelFeed{
@@ -106,6 +115,16 @@ func (s *Service) CreateFeed(ctx context.Context, tenantID, actor string, draft 
 	}
 	if feed.DefaultConfidence == 0 {
 		feed.DefaultConfidence = 70
+	}
+	feed.SyncStatus = core.ThreatIntelFeedSyncNotApplicable
+	feed.HealthStatus = core.ThreatIntelFeedHealthUnknown
+	if feed.Kind == "MISP" || feed.Kind == "OPENCTI" {
+		feed.SyncStatus = core.ThreatIntelFeedSyncQueued
+		feed.NextSyncAt = &now
+		if feed.AuthReference == "" {
+			feed.SyncStatus = core.ThreatIntelFeedSyncCredentialsNeeded
+			feed.HealthStatus = core.ThreatIntelFeedHealthCredentialsNeeded
+		}
 	}
 	if err := validateFeed(feed); err != nil {
 		return core.ThreatIntelFeed{}, err
@@ -160,6 +179,43 @@ func (s *Service) Feed(ctx context.Context, tenantID, feedID string) (core.Threa
 
 func (s *Service) Feeds(ctx context.Context, tenantID string) ([]core.ThreatIntelFeed, error) {
 	return s.store.ListThreatIntelFeeds(ctx, tenantID)
+}
+
+func (s *Service) QueueFeedSync(ctx context.Context, tenantID, feedID string) (core.ThreatIntelFeed, error) {
+	feed, err := s.store.GetThreatIntelFeed(ctx, tenantID, strings.TrimSpace(feedID))
+	if err != nil {
+		return core.ThreatIntelFeed{}, err
+	}
+	if feed.State != core.ThreatIntelStateActive || (feed.Kind != "MISP" && feed.Kind != "OPENCTI") {
+		return core.ThreatIntelFeed{}, fmt.Errorf("%w: only active MISP or OPENCTI feeds can be synchronized", ErrInvalidFeed)
+	}
+	control, ok := s.store.(FeedSyncStore)
+	if !ok {
+		return core.ThreatIntelFeed{}, ErrFeedSyncUnavailable
+	}
+	return control.QueueThreatIntelFeedSync(ctx, tenantID, feed.ID, s.now())
+}
+
+func (s *Service) TestFeedConnection(ctx context.Context, tenantID, feedID string) (core.ThreatIntelFeedTestResult, error) {
+	feed, err := s.store.GetThreatIntelFeed(ctx, tenantID, strings.TrimSpace(feedID))
+	if err != nil {
+		return core.ThreatIntelFeedTestResult{}, err
+	}
+	if feed.Kind != "MISP" && feed.Kind != "OPENCTI" {
+		return core.ThreatIntelFeedTestResult{}, fmt.Errorf("%w: connection tests require a MISP or OPENCTI feed", ErrInvalidFeed)
+	}
+	if s.runtime == nil {
+		return core.ThreatIntelFeedTestResult{}, ErrFeedSyncUnavailable
+	}
+	result := s.runtime.Test(ctx, feed)
+	control, ok := s.store.(FeedSyncStore)
+	if !ok {
+		return core.ThreatIntelFeedTestResult{}, ErrFeedSyncUnavailable
+	}
+	if _, err := control.RecordThreatIntelFeedTest(ctx, tenantID, feed.ID, result, s.now()); err != nil {
+		return core.ThreatIntelFeedTestResult{}, err
+	}
+	return result, nil
 }
 
 func (s *Service) UpsertIndicator(ctx context.Context, tenantID, actor string, draft IndicatorDraft) (core.ThreatIndicator, bool, error) {
@@ -341,9 +397,17 @@ func validateFeed(feed core.ThreatIntelFeed) error {
 	if len(feed.Description) > 2000 || len(feed.AuthReference) > 500 {
 		return fmt.Errorf("%w: description or auth reference is too long", ErrInvalidFeed)
 	}
+	remote := feed.Kind == "MISP" || feed.Kind == "OPENCTI"
+	if feed.AuthReference != "" && !feedAuthReferencePattern.MatchString(feed.AuthReference) {
+		return fmt.Errorf("%w: auth_reference must be an env://, vault://, or k8s:// secret binding", ErrInvalidFeed)
+	}
+	if remote && feed.SourceURL == "" {
+		return fmt.Errorf("%w: MISP and OPENCTI feeds require source_url", ErrInvalidFeed)
+	}
 	if feed.SourceURL != "" {
 		parsed, err := url.Parse(feed.SourceURL)
-		if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
+			(parsed.Scheme != "https" && (!remote && parsed.Scheme != "http")) {
 			return fmt.Errorf("%w: source_url must be an http(s) URL without embedded credentials", ErrInvalidFeed)
 		}
 	}

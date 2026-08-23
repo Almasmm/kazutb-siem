@@ -21,23 +21,69 @@ const (
 	ThreatIntelStateExpired  = "EXPIRED"
 )
 
+const (
+	ThreatIntelFeedSyncNotApplicable       = "NOT_APPLICABLE"
+	ThreatIntelFeedSyncQueued              = "QUEUED"
+	ThreatIntelFeedSyncRunning             = "RUNNING"
+	ThreatIntelFeedSyncSucceeded           = "SUCCEEDED"
+	ThreatIntelFeedSyncFailed              = "FAILED"
+	ThreatIntelFeedSyncCredentialsNeeded   = "CREDENTIALS_REQUIRED"
+	ThreatIntelFeedHealthUnknown           = "UNKNOWN"
+	ThreatIntelFeedHealthHealthy           = "HEALTHY"
+	ThreatIntelFeedHealthDegraded          = "DEGRADED"
+	ThreatIntelFeedHealthCredentialsNeeded = "CREDENTIALS_REQUIRED"
+)
+
 type ThreatIntelFeed struct {
-	ID                     string    `json:"feed_id"`
-	TenantID               string    `json:"tenant_id"`
-	Name                   string    `json:"name"`
-	Kind                   string    `json:"kind"`
-	Description            string    `json:"description,omitempty"`
-	State                  string    `json:"state"`
-	SourceURL              string    `json:"source_url,omitempty"`
-	AuthReference          string    `json:"auth_reference,omitempty"`
-	RefreshIntervalSeconds int       `json:"refresh_interval_seconds"`
-	DefaultConfidence      int       `json:"default_confidence"`
-	Tags                   []string  `json:"tags"`
-	Version                int       `json:"version"`
-	CreatedBy              string    `json:"created_by"`
-	UpdatedBy              string    `json:"updated_by"`
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
+	ID                     string     `json:"feed_id"`
+	TenantID               string     `json:"tenant_id"`
+	Name                   string     `json:"name"`
+	Kind                   string     `json:"kind"`
+	Description            string     `json:"description,omitempty"`
+	State                  string     `json:"state"`
+	SourceURL              string     `json:"source_url,omitempty"`
+	AuthReference          string     `json:"auth_reference,omitempty"`
+	RefreshIntervalSeconds int        `json:"refresh_interval_seconds"`
+	DefaultConfidence      int        `json:"default_confidence"`
+	Tags                   []string   `json:"tags"`
+	Version                int        `json:"version"`
+	CreatedBy              string     `json:"created_by"`
+	UpdatedBy              string     `json:"updated_by"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
+	SyncStatus             string     `json:"sync_status"`
+	HealthStatus           string     `json:"health_status"`
+	HealthErrorClass       string     `json:"health_error_class,omitempty"`
+	HealthDetail           string     `json:"health_detail,omitempty"`
+	SyncCursor             string     `json:"-"`
+	LastSyncAt             *time.Time `json:"last_sync_at,omitempty"`
+	LastTestedAt           *time.Time `json:"last_tested_at,omitempty"`
+	NextSyncAt             *time.Time `json:"next_sync_at,omitempty"`
+	LastImported           int        `json:"last_imported"`
+	LastDeduplicated       int        `json:"last_deduplicated"`
+	LastRejected           int        `json:"last_rejected"`
+	SyncAttempt            int        `json:"sync_attempt"`
+	SyncLeaseOwner         string     `json:"-"`
+	SyncLeaseUntil         *time.Time `json:"-"`
+}
+
+type ThreatIntelFeedSyncResult struct {
+	Status       string `json:"status"`
+	Cursor       string `json:"-"`
+	Imported     int    `json:"imported"`
+	Deduplicated int    `json:"deduplicated"`
+	Rejected     int    `json:"rejected"`
+	ErrorClass   string `json:"error_class,omitempty"`
+	Detail       string `json:"detail,omitempty"`
+	DurationMS   int64  `json:"duration_ms"`
+}
+
+type ThreatIntelFeedTestResult struct {
+	Status     string `json:"status"`
+	ErrorClass string `json:"error_class,omitempty"`
+	Detail     string `json:"detail,omitempty"`
+	HTTPStatus int    `json:"http_status,omitempty"`
+	LatencyMS  int64  `json:"latency_ms"`
 }
 
 type ThreatIndicator struct {

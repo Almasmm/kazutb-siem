@@ -291,6 +291,18 @@ func (h *Hybrid) ListThreatIntelFeeds(ctx context.Context, tenantID string) ([]c
 func (h *Hybrid) UpdateThreatIntelFeed(ctx context.Context, feed core.ThreatIntelFeed) (core.ThreatIntelFeed, error) {
 	return h.control.UpdateThreatIntelFeed(ctx, feed)
 }
+func (h *Hybrid) QueueThreatIntelFeedSync(ctx context.Context, tenantID, feedID string, queuedAt time.Time) (core.ThreatIntelFeed, error) {
+	return h.control.QueueThreatIntelFeedSync(ctx, tenantID, feedID, queuedAt)
+}
+func (h *Hybrid) ClaimThreatIntelFeedSync(ctx context.Context, workerID, tenantScope string, now, leaseUntil time.Time) (core.ThreatIntelFeed, bool, error) {
+	return h.control.ClaimThreatIntelFeedSync(ctx, workerID, tenantScope, now, leaseUntil)
+}
+func (h *Hybrid) FinishThreatIntelFeedSync(ctx context.Context, tenantID, feedID, workerID string, result core.ThreatIntelFeedSyncResult, completedAt time.Time) (core.ThreatIntelFeed, error) {
+	return h.control.FinishThreatIntelFeedSync(ctx, tenantID, feedID, workerID, result, completedAt)
+}
+func (h *Hybrid) RecordThreatIntelFeedTest(ctx context.Context, tenantID, feedID string, result core.ThreatIntelFeedTestResult, testedAt time.Time) (core.ThreatIntelFeed, error) {
+	return h.control.RecordThreatIntelFeedTest(ctx, tenantID, feedID, result, testedAt)
+}
 func (h *Hybrid) UpsertThreatIndicator(ctx context.Context, indicator core.ThreatIndicator) (core.ThreatIndicator, bool, error) {
 	return h.control.UpsertThreatIndicator(ctx, indicator)
 }

@@ -320,11 +320,31 @@ export interface ThreatIntelFeedDto {
   description?: string;
   state: string;
   source_url?: string;
+  auth_reference?: string;
   refresh_interval_seconds?: number;
   default_confidence?: number;
   tags?: string[];
   version: number;
   updated_at?: string;
+  sync_status: string;
+  health_status: string;
+  health_error_class?: string;
+  health_detail?: string;
+  last_sync_at?: string;
+  last_tested_at?: string;
+  next_sync_at?: string;
+  last_imported?: number;
+  last_deduplicated?: number;
+  last_rejected?: number;
+  sync_attempt?: number;
+}
+
+export interface ThreatIntelFeedTestDto {
+  status: string;
+  error_class?: string;
+  detail?: string;
+  http_status?: number;
+  latency_ms: number;
 }
 
 export interface ThreatIndicatorDto {

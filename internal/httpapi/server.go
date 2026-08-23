@@ -256,6 +256,8 @@ func (s *Server) routes() {
 		s.mux.Handle("POST /api/v1/threat-intel/feeds", s.protect("ti.indicators.manage", http.HandlerFunc(s.createThreatIntelFeed)))
 		s.mux.Handle("GET /api/v1/threat-intel/feeds/{feedID}", s.protect("ti.indicators.read", http.HandlerFunc(s.getThreatIntelFeed)))
 		s.mux.Handle("PATCH /api/v1/threat-intel/feeds/{feedID}", s.protect("ti.indicators.manage", http.HandlerFunc(s.updateThreatIntelFeed)))
+		s.mux.Handle("POST /api/v1/threat-intel/feeds/{feedID}/sync", s.protect("ti.indicators.manage", http.HandlerFunc(s.queueThreatIntelFeedSync)))
+		s.mux.Handle("POST /api/v1/threat-intel/feeds/{feedID}/test", s.protect("ti.indicators.manage", http.HandlerFunc(s.testThreatIntelFeed)))
 		s.mux.Handle("GET /api/v1/threat-intel/indicators", s.protect("ti.indicators.read", http.HandlerFunc(s.listThreatIndicators)))
 		s.mux.Handle("POST /api/v1/threat-intel/indicators", s.protect("ti.indicators.manage", http.HandlerFunc(s.upsertThreatIndicator)))
 		s.mux.Handle("GET /api/v1/threat-intel/indicators/{indicatorID}", s.protect("ti.indicators.read", http.HandlerFunc(s.getThreatIndicator)))

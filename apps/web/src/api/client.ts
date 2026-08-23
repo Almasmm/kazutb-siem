@@ -44,6 +44,7 @@ import type {
   SOARPlaybookDto,
   ThreatIndicatorDto,
   ThreatIntelFeedDto,
+  ThreatIntelFeedTestDto,
   ThreatIntelMatchDto,
   ThreatRetrosearchDto,
   UEBAAnomalyDto,
@@ -283,6 +284,10 @@ export const api = {
     }),
   downloadEvidence: (id: string, reason: string) => requestDownload(`/evidence/${encodeURIComponent(id)}/content`, reason),
   threatFeeds: (signal?: AbortSignal) => getList<ThreatIntelFeedDto>("/threat-intel/feeds", undefined, signal),
+  createThreatFeed: (payload: { name: string; kind: string; description?: string; source_url: string; auth_reference?: string; refresh_interval_seconds: number; default_confidence: number; tags?: string[] }) =>
+    request<ThreatIntelFeedDto>("/threat-intel/feeds", { method: "POST", body: JSON.stringify(payload) }),
+  syncThreatFeed: (id: string) => request<ThreatIntelFeedDto>(`/threat-intel/feeds/${encodeURIComponent(id)}/sync`, { method: "POST" }),
+  testThreatFeed: (id: string) => request<ThreatIntelFeedTestDto>(`/threat-intel/feeds/${encodeURIComponent(id)}/test`, { method: "POST" }),
   threatIndicators: (params?: Record<string, QueryValue>, signal?: AbortSignal) =>
     getList<ThreatIndicatorDto>("/threat-intel/indicators", params, signal),
   threatMatches: (params?: Record<string, QueryValue>, signal?: AbortSignal) =>

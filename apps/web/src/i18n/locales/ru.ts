@@ -242,6 +242,9 @@ export const ru = {
     type: "Тип", indicator: "Индикатор", reputation: "Репутация", lastSeen: "Последнее наблюдение", noIndicators: "Индикаторы не найдены",
     retrosearch: "Искать за 7 дней", campaign: "Кампания", context: "Контекст угрозы", noMatches: "Совпадений в событиях нет",
     retroResult: "Найдено {{matched}} совпадений среди {{candidates}} событий-кандидатов.",
+    feedControl: "Контур провайдеров", provider: "Провайдер", newFeed: "Новый фид", noFeeds: "Фиды провайдеров не настроены",
+    lastSync: "Последняя синхронизация", syncResult: "Импортировано", syncCounts: "Дедуплицировано: {{deduplicated}} · отклонено: {{rejected}}", testFeed: "Проверить соединение", syncNow: "Синхронизировать",
+    createFeedTitle: "Регистрация threat intelligence фида", sourceUrl: "Базовый URL провайдера", secretRef: "Привязка секрета", secretRefHint: "Используйте env://, vault:// или k8s://. Значение credential никогда не сохраняется в KCSP.", refreshSeconds: "Интервал обновления (секунды)", feedCreated: "Фид зарегистрирован и поставлен в расписание.", syncQueued: "Синхронизация фида поставлена в очередь.",
   },
   uebaPage: {
     eyebrow: "Поведенческая аналитика", title: "Пользователи и сущности", subtitle: "Разбор объяснимых отклонений от поведенческих профилей университета.",

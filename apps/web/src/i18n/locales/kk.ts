@@ -115,6 +115,9 @@ export const kk = {
     type: "Түрі", indicator: "Индикатор", reputation: "Бедел", lastSeen: "Соңғы бақылау", noIndicators: "Индикаторлар табылмады",
     retrosearch: "7 күннен іздеу", campaign: "Кампания", context: "Қауіп контексті", noMatches: "Оқиғаларда сәйкестік жоқ",
     retroResult: "{{candidates}} ықтимал оқиғадан {{matched}} сәйкестік табылды.",
+    feedControl: "Провайдерлерді басқару контуры", provider: "Провайдер", newFeed: "Жаңа арна", noFeeds: "Провайдер арналары бапталмаған",
+    lastSync: "Соңғы синхрондау", syncResult: "Импортталды", syncCounts: "Дедупликация: {{deduplicated}} · қабылданбады: {{rejected}}", testFeed: "Қосылымды тексеру", syncNow: "Синхрондау",
+    createFeedTitle: "Threat intelligence арнасын тіркеу", sourceUrl: "Провайдердің негізгі URL мекенжайы", secretRef: "Құпияны байланыстыру", secretRefHint: "env://, vault:// немесе k8s:// қолданыңыз. Credential мәні KCSP ішінде сақталмайды.", refreshSeconds: "Жаңарту аралығы (секунд)", feedCreated: "Арна тіркеліп, кестеге қойылды.", syncQueued: "Арнаны синхрондау кезекке қойылды.",
   },
   uebaPage: {
     eyebrow: "Мінез-құлық талдауы", title: "Пайдаланушылар мен нысандар", subtitle: "Университеттің мінез-құлық профилінен түсіндірілетін ауытқуларды талдау.",
