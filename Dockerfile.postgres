@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1.7
+FROM postgres:17-alpine
+
+RUN apk add --no-cache openssl pgbackrest postgresql17-client && \
+    mkdir -p /etc/pgbackrest /var/log/pgbackrest /var/lib/pgbackrest \
+      /var/lib/postgresql/pitr-drill && \
+    chown -R postgres:postgres /etc/pgbackrest /var/log/pgbackrest \
+      /var/lib/pgbackrest /var/lib/postgresql/pitr-drill
+
+COPY ops/postgres/configure-pgbackrest.sh /usr/local/bin/kcsp-configure-pgbackrest
+COPY ops/postgres/postgres-entrypoint.sh /usr/local/bin/kcsp-postgres-entrypoint
+COPY ops/postgres/pitr-scheduler.sh /usr/local/bin/kcsp-pitr-scheduler
+COPY ops/postgres/pitr-restore-drill.sh /usr/local/bin/kcsp-pitr-restore-drill
+COPY ops/postgres/pgbackrest-self-test.sh /usr/local/bin/kcsp-pgbackrest-self-test
+
+RUN chmod 0755 /usr/local/bin/kcsp-* && \
+    /bin/sh -n /usr/local/bin/kcsp-configure-pgbackrest && \
+    /bin/sh -n /usr/local/bin/kcsp-postgres-entrypoint && \
+    /bin/sh -n /usr/local/bin/kcsp-pitr-scheduler && \
+    /bin/sh -n /usr/local/bin/kcsp-pitr-restore-drill && \
+    /usr/local/bin/kcsp-pgbackrest-self-test
+
+ENTRYPOINT ["/usr/local/bin/kcsp-postgres-entrypoint"]
+CMD ["postgres"]

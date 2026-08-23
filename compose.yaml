@@ -2,11 +2,32 @@ name: kcsp
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: kcsp-postgres:17
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
     environment:
       POSTGRES_DB: kcsp
       POSTGRES_USER: kcsp
       POSTGRES_PASSWORD: ${KCSP_POSTGRES_PASSWORD:?Set KCSP_POSTGRES_PASSWORD in .env}
+      KCSP_PITR_ENABLED: ${KCSP_PITR_ENABLED:-false}
+      KCSP_PITR_SCHEDULER_ENABLED: ${KCSP_PITR_SCHEDULER_ENABLED:-true}
+      KCSP_PITR_STANZA: kcsp
+      KCSP_PITR_S3_ENDPOINT: ${KCSP_PITR_S3_ENDPOINT:-}
+      KCSP_PITR_S3_PORT: ${KCSP_PITR_S3_PORT:-443}
+      KCSP_PITR_S3_BUCKET: ${KCSP_PITR_S3_BUCKET:-kcsp-dr}
+      KCSP_PITR_S3_REGION: ${KCSP_PITR_S3_REGION:-us-east-1}
+      KCSP_PITR_TLS_VERIFY: ${KCSP_PITR_TLS_VERIFY:-y}
+      KCSP_PITR_REPO_PATH: ${KCSP_PITR_REPO_PATH:-/pgbackrest}
+      KCSP_PITR_ARCHIVE_TIMEOUT_SECONDS: ${KCSP_PITR_ARCHIVE_TIMEOUT_SECONDS:-60}
+      KCSP_PITR_RPO_SECONDS: ${KCSP_PITR_RPO_SECONDS:-300}
+      KCSP_PITR_SCHEDULE_SECONDS: ${KCSP_PITR_SCHEDULE_SECONDS:-21600}
+      KCSP_PITR_FULL_INTERVAL_SECONDS: ${KCSP_PITR_FULL_INTERVAL_SECONDS:-604800}
+      KCSP_PITR_RETENTION_FULL: ${KCSP_PITR_RETENTION_FULL:-7}
+      KCSP_PITR_RETENTION_DIFF: ${KCSP_PITR_RETENTION_DIFF:-14}
+      PGBACKREST_REPO1_S3_KEY: ${KCSP_PITR_S3_ACCESS_KEY:-}
+      PGBACKREST_REPO1_S3_KEY_SECRET: ${KCSP_PITR_S3_SECRET_KEY:-}
+      PGBACKREST_REPO1_CIPHER_PASS: ${KCSP_PITR_REPO_CIPHER_PASS:-}
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
@@ -16,6 +37,7 @@ services:
       retries: 20
     volumes:
       - kcsp-postgres-data:/var/lib/postgresql/data
+      - kcsp-pgbackrest-state:/var/lib/pgbackrest
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -283,7 +305,7 @@ services:
 
   backup-store:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
-    profiles: ["dr", "dr-scheduled"]
+    profiles: ["dr", "dr-scheduled", "pitr"]
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${KCSP_DR_TARGET_ACCESS_KEY:-}
@@ -300,6 +322,71 @@ services:
     volumes:
       - kcsp-dr-target-data:/data
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  pitr-s3-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile.pitr-proxy
+    profiles: ["pitr"]
+    user: "101:101"
+    depends_on:
+      backup-store:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://127.0.0.1:9443/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    read_only: true
+    tmpfs:
+      - /run/kcsp-pitr:uid=101,gid=101,mode=0700
+      - /tmp:uid=101,gid=101,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  pitr-drill:
+    image: kcsp-postgres:17
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+    profiles: ["pitr"]
+    entrypoint: ["/usr/local/bin/kcsp-pitr-restore-drill"]
+    environment:
+      KCSP_PITR_ENABLED: "true"
+      KCSP_PITR_STANZA: kcsp
+      KCSP_PITR_TARGET_NAME: ${KCSP_PITR_TARGET_NAME:-}
+      KCSP_PITR_VERIFY_DATABASE: kcsp
+      KCSP_PITR_RTO_SECONDS: ${KCSP_PITR_RTO_SECONDS:-3600}
+      KCSP_PITR_S3_ENDPOINT: ${KCSP_PITR_S3_ENDPOINT:-}
+      KCSP_PITR_S3_PORT: ${KCSP_PITR_S3_PORT:-443}
+      KCSP_PITR_S3_BUCKET: ${KCSP_PITR_S3_BUCKET:-kcsp-dr}
+      KCSP_PITR_S3_REGION: ${KCSP_PITR_S3_REGION:-us-east-1}
+      KCSP_PITR_TLS_VERIFY: ${KCSP_PITR_TLS_VERIFY:-y}
+      KCSP_PITR_REPO_PATH: ${KCSP_PITR_REPO_PATH:-/pgbackrest}
+      PGBACKREST_REPO1_S3_KEY: ${KCSP_PITR_S3_ACCESS_KEY:-}
+      PGBACKREST_REPO1_S3_KEY_SECRET: ${KCSP_PITR_S3_SECRET_KEY:-}
+      PGBACKREST_REPO1_CIPHER_PASS: ${KCSP_PITR_REPO_CIPHER_PASS:-}
+      POSTGRES_USER: kcsp
+      PGDATA: /var/lib/postgresql/pitr-primary-reference
+    user: "70:70"
+    volumes:
+      - kcsp-pitr-drill-data:/var/lib/postgresql/pitr-drill
+      - kcsp-pgbackrest-state:/var/lib/pgbackrest
+    depends_on:
+      pitr-s3-proxy:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:uid=70,gid=70,mode=1770
+      - /etc/pgbackrest:uid=70,gid=70,mode=0700
+      - /var/log/pgbackrest:uid=70,gid=70,mode=0700
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
 
@@ -406,6 +493,8 @@ services:
 
 volumes:
   kcsp-postgres-data:
+  kcsp-pgbackrest-state:
+  kcsp-pitr-drill-data:
   kcsp-kafka-data:
   kcsp-clickhouse-data:
   kcsp-clickhouse-logs:

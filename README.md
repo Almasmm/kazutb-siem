@@ -115,3 +115,6 @@ See the [local development runbook](docs/runbooks/local-development.md) for API 
 Backup and recovery use a separate object-store failure domain, signed manifests,
 cryptographic artifact verification, safe-name restores, retention, and measured
 restore drills. See the [backup and restore runbook](docs/runbooks/backup-restore.md).
+
+Continuous PostgreSQL WAL archiving and named point-in-time recovery are
+documented in the [PostgreSQL PITR runbook](docs/runbooks/postgresql-pitr.md).
