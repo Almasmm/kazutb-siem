@@ -1,3 +1,5 @@
+import { runtimeConfig } from "../config/runtime";
+
 export type AuthMode = "demo" | "oidc";
 
 export interface SessionUser {
@@ -11,19 +13,17 @@ interface OIDCUserLike {
   profile: Record<string, unknown>;
 }
 
-const inferredMode = import.meta.env.MODE === "test" ? "demo" : "oidc";
-const browserOrigin = typeof window === "undefined" ? "http://localhost" : window.location.origin;
 export const authConfig = {
-  mode: (import.meta.env.VITE_AUTH_MODE || inferredMode) as AuthMode,
-  authority: String(import.meta.env.VITE_OIDC_AUTHORITY || "").replace(/\/$/, ""),
-  clientId: String(import.meta.env.VITE_OIDC_CLIENT_ID || ""),
-  scope: String(import.meta.env.VITE_OIDC_SCOPE || "openid profile email offline_access"),
-  redirectUri: String(import.meta.env.VITE_OIDC_REDIRECT_URI || `${browserOrigin}/auth/callback`),
-  postLogoutRedirectUri: String(import.meta.env.VITE_OIDC_POST_LOGOUT_REDIRECT_URI || browserOrigin),
-  configuredTenant: String(import.meta.env.VITE_TENANT_ID || "university-kulazhanov"),
+  mode: runtimeConfig.authMode as AuthMode,
+  authority: runtimeConfig.oidcAuthority,
+  clientId: runtimeConfig.oidcClientId,
+  scope: runtimeConfig.oidcScope,
+  redirectUri: runtimeConfig.oidcRedirectUri,
+  postLogoutRedirectUri: runtimeConfig.oidcPostLogoutRedirectUri,
+  configuredTenant: runtimeConfig.tenantId,
 };
 
-let accessToken = authConfig.mode === "demo" ? String(import.meta.env.VITE_API_TOKEN || "kcsp-demo-l2") : "";
+let accessToken = authConfig.mode === "demo" ? runtimeConfig.apiToken : "";
 let tenantId = authConfig.configuredTenant;
 let currentUser: SessionUser | null = authConfig.mode === "demo"
   ? { id: "user-soc-l2", displayName: "Development SOC L2", role: "SOC L2" }

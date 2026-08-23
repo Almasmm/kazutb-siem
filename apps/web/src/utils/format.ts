@@ -1,6 +1,7 @@
 import i18n from "../i18n";
+import { runtimeConfig } from "../config/runtime";
 
-export const TENANT_TIME_ZONE = import.meta.env.VITE_TIME_ZONE || "Asia/Almaty";
+export const TENANT_TIME_ZONE = runtimeConfig.timeZone;
 
 const localeMap: Record<string, string> = {
   ru: "ru-KZ",

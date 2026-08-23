@@ -1,25 +1,15 @@
 FROM node:24-alpine AS build
 
 WORKDIR /app
-ARG VITE_AUTH_MODE=oidc
-ARG VITE_API_BASE_URL=/api/v1
-ARG VITE_API_TOKEN=
-ARG VITE_TENANT_ID=university-kulazhanov
-ARG VITE_OIDC_AUTHORITY=
-ARG VITE_OIDC_CLIENT_ID=
-ARG VITE_OIDC_SCOPE="openid profile email offline_access"
-ENV VITE_AUTH_MODE=$VITE_AUTH_MODE \
-    VITE_API_BASE_URL=$VITE_API_BASE_URL \
-    VITE_API_TOKEN=$VITE_API_TOKEN \
-    VITE_TENANT_ID=$VITE_TENANT_ID \
-    VITE_OIDC_AUTHORITY=$VITE_OIDC_AUTHORITY \
-    VITE_OIDC_CLIENT_ID=$VITE_OIDC_CLIENT_ID \
-    VITE_OIDC_SCOPE=$VITE_OIDC_SCOPE
+ARG KCSP_WEB_MODE=oidc
+ARG KCSP_WEB_TENANT=university-kulazhanov
 COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-RUN npm run build
+RUN VITE_AUTH_MODE="$KCSP_WEB_MODE" \
+    VITE_TENANT_ID="$KCSP_WEB_TENANT" \
+    npm run build
 
 FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
 

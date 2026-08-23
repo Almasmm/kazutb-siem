@@ -1,0 +1,43 @@
+name: Supply chain
+
+on:
+  push:
+    paths:
+      - "Dockerfile.api"
+      - "Dockerfile.dr"
+      - "apps/web/**"
+      - "ops/supply-chain/**"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/supply-chain.yml"
+  pull_request:
+    paths:
+      - "Dockerfile.api"
+      - "Dockerfile.dr"
+      - "apps/web/**"
+      - "ops/supply-chain/**"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/supply-chain.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test release policy
+        run: bash ops/supply-chain/self-test.sh
+
+      - name: ShellCheck release tooling
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" \
+            -w /src \
+            koalaman/shellcheck:v0.10.0@sha256:2097951f02e735b613f4a34de20c40f937a6c8f18ecb170612c88c34517221fb \
+            ops/supply-chain/release.sh \
+            ops/supply-chain/verify-release.sh \
+            ops/supply-chain/self-test.sh

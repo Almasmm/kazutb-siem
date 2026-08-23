@@ -67,13 +67,14 @@
             "mode": {"type": "string", "enum": ["oidc", "trusted_headers", "development"]},
             "oidc": {
               "type": "object",
-              "required": ["issuerURL", "clientID", "rolesClaim", "permissionClaim", "tenantClaim"],
+              "required": ["issuerURL", "clientID", "rolesClaim", "permissionClaim", "tenantClaim", "scope"],
               "properties": {
                 "issuerURL": {"type": "string", "minLength": 1},
                 "clientID": {"type": "string", "minLength": 1},
                 "rolesClaim": {"type": "string", "minLength": 1},
                 "permissionClaim": {"type": "string", "minLength": 1},
-                "tenantClaim": {"type": "string", "minLength": 1}
+                "tenantClaim": {"type": "string", "minLength": 1},
+                "scope": {"type": "string", "minLength": 1}
               }
             }
           }

@@ -11,8 +11,9 @@ import type {
   RuleDto,
 } from "./types";
 import { getAccessToken, getTenantId } from "../auth/session";
+import { runtimeConfig } from "../config/runtime";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "/api/v1").replace(/\/$/, "");
+const API_BASE = runtimeConfig.apiBaseUrl.replace(/\/$/, "");
 
 export class ApiError extends Error {
   readonly status: number;

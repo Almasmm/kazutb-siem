@@ -65,6 +65,7 @@ config:
       rolesClaim: roles
       permissionClaim: permissions
       tenantClaim: tenant_id
+      scope: openid profile email offline_access
   collectors:
     requireRegistered: true
   evidence:
@@ -95,6 +96,9 @@ config:
       endpoint: ""
       model: ""
   web:
+    authMode: oidc
+    apiBaseUrl: /api/v1
+    tenantTimeZone: Asia/Almaty
     clientMaxBodySize: 32m
 
 workloads:

@@ -23,6 +23,8 @@ single-node data stores from being presented as a production topology.
 - NetworkPolicy is default-deny. External egress is fail-closed until exact
   CIDRs or in-cluster data-plane peers are configured.
 - Web traffic reaches the API through a release-aware internal Service.
+- Public OIDC and tenant settings are mounted through runtime `config.js`, so
+  one immutable web image digest can be promoted across environments.
 - PodDisruptionBudgets, rolling updates, topology spread, probes, and optional
   HPA resources are included.
 

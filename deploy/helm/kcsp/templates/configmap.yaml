@@ -47,6 +47,16 @@ metadata:
     {{- include "kcsp.labels" . | nindent 4 }}
     app.kubernetes.io/component: web
 data:
+  config.js: |
+    window.__KCSP_CONFIG__ = Object.freeze({
+      apiBaseUrl: {{ .Values.config.web.apiBaseUrl | quote }},
+      authMode: {{ .Values.config.web.authMode | quote }},
+      oidcAuthority: {{ .Values.config.auth.oidc.issuerURL | quote }},
+      oidcClientId: {{ .Values.config.auth.oidc.clientID | quote }},
+      oidcScope: {{ .Values.config.auth.oidc.scope | quote }},
+      tenantId: {{ .Values.global.tenant.id | quote }},
+      timeZone: {{ .Values.config.web.tenantTimeZone | quote }}
+    });
   default.conf: |
     server {
         listen 8080;
@@ -61,6 +71,13 @@ data:
             access_log off;
             default_type text/plain;
             return 200 "ok\n";
+        }
+
+        location = /config.js {
+            access_log off;
+            default_type application/javascript;
+            add_header Cache-Control "no-store";
+            try_files $uri =404;
         }
 
         location /api/ {

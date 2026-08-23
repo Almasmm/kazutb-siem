@@ -27,6 +27,7 @@ grep -q 'type: RuntimeDefault' "$rendered"
 grep -q '^kind: NetworkPolicy$' "$rendered"
 grep -q '^kind: PodDisruptionBudget$' "$rendered"
 grep -q 'proxy_pass http://kcsp-api:8080;' "$rendered"
+grep -q 'window.__KCSP_CONFIG__ = Object.freeze' "$rendered"
 
 helm template kcsp "$chart" \
     --namespace kcsp \
