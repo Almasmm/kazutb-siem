@@ -76,7 +76,7 @@ jobs:
       KCSP_TEST_VALKEY_URL: redis://127.0.0.1:6379/0
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.26.6'
           cache: true
