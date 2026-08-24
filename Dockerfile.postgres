@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM postgres:17-alpine AS prepared
+FROM postgres:18-alpine AS prepared
 
 RUN apk add --no-cache openssl pgbackrest postgresql17-client su-exec && \
     rm -f /usr/local/bin/gosu && \
