@@ -180,24 +180,27 @@ func TestPostgresSOARWorkerApprovalManualResumeAndActionLedger(t *testing.T) {
 		t.Fatalf("unexpected pending approval: %+v err=%v", approvals, err)
 	}
 	approvalID := approvals[0].ID
+	approvalVersion := approvals[0].Version
 	if _, err := service.DecideApproval(ctx, tenantID, approvalID, "soc-l2", soar.ApprovalDecisionRequest{
-		Decision: "APPROVE", Reason: "Self approval must fail",
+		Decision: core.ApprovalDecisionApprove, Reason: "Self approval must fail", Version: approvalVersion,
 	}); !errors.Is(err, soar.ErrInvalidState) {
 		t.Fatalf("execution initiator approved their own action: %v", err)
 	}
-	if approval, err := service.DecideApproval(ctx, tenantID, approvalID, "soc-manager", soar.ApprovalDecisionRequest{
-		Decision: "APPROVE", Reason: "Containment plan reviewed",
-	}); err != nil || approval.Status != "PENDING" || len(approval.Decisions) != 1 {
-		t.Fatalf("first independent approval failed: %+v err=%v", approval, err)
+	firstApproval, err := service.DecideApproval(ctx, tenantID, approvalID, "soc-manager", soar.ApprovalDecisionRequest{
+		Decision: core.ApprovalDecisionApprove, Reason: "Containment plan reviewed", Version: approvalVersion,
+	})
+	if err != nil || firstApproval.Status != core.ApprovalStatusPending || len(firstApproval.Decisions) != 1 {
+		t.Fatalf("first independent approval failed: %+v err=%v", firstApproval, err)
 	}
+	approvalVersion = firstApproval.Version
 	if _, err := service.DecideApproval(ctx, tenantID, approvalID, "soc-manager", soar.ApprovalDecisionRequest{
-		Decision: "APPROVE", Reason: "Duplicate approval",
+		Decision: core.ApprovalDecisionApprove, Reason: "Duplicate approval", Version: approvalVersion,
 	}); !errors.Is(err, store.ErrAlreadyExists) {
 		t.Fatalf("duplicate approver was accepted: %v", err)
 	}
 	if approval, err := service.DecideApproval(ctx, tenantID, approvalID, "tenant-admin", soar.ApprovalDecisionRequest{
-		Decision: "APPROVE", Reason: "Second independent review completed",
-	}); err != nil || approval.Status != "APPROVED" || len(approval.Decisions) != 2 {
+		Decision: core.ApprovalDecisionApprove, Reason: "Second independent review completed", Version: approvalVersion,
+	}); err != nil || approval.Status != core.ApprovalStatusApproved || len(approval.Decisions) != 2 {
 		t.Fatalf("second independent approval failed: %+v err=%v", approval, err)
 	}
 	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {

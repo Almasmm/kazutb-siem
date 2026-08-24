@@ -40,6 +40,8 @@ tags:
     description: Analyst-created investigations and lifecycle state.
   - name: Rules
     description: Read-only embedded detection rules.
+  - name: SOAR
+    description: Tenant-scoped human approval commands and durable workflow state.
   - name: Audit
     description: Per-tenant volatile SHA-256 chained audit history.
   - name: Demo
@@ -557,6 +559,76 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/soar/approvals:
+    parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+    get:
+      tags: [SOAR]
+      operationId: listSOARApprovals
+      summary: List tenant-scoped human approval requests.
+      x-kcsp-permission: soar.actions.approve
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ApprovalStatus'
+        - name: execution_id
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Approval requests and canonical resulting statuses.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SOARApprovalList'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/soar/approvals/{approvalID}/decisions:
+    parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/ApprovalId'
+    post:
+      tags: [SOAR]
+      operationId: decideSOARApproval
+      summary: Commit a canonical human approval command and advance workflow state atomically.
+      description: |
+        `decision` is a command and accepts only `APPROVE` or `REJECT`. It is intentionally
+        distinct from the resulting `APPROVED` or `REJECTED` status. `version` is mandatory;
+        a stale version returns 409 and never advances the protected workflow action.
+      x-kcsp-permission: soar.actions.approve
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SOARApprovalDecisionRequest'
+            examples:
+              approve:
+                value: { decision: APPROVE, reason: Validated by SOC analyst, version: 4 }
+              reject:
+                value: { decision: REJECT, reason: Endpoint ownership is not verified, version: 4 }
+      responses:
+        '200':
+          description: Decision committed, audit appended, and current resulting status returned.
+          headers:
+            ETag:
+              $ref: '#/components/headers/VersionETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SOARApproval'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /api/v1/audit:
     parameters:
       - $ref: '#/components/parameters/TenantHeader'
@@ -642,6 +714,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    ApprovalId:
+      name: approvalID
+      in: path
+      required: true
+      schema: { type: string }
 
   headers:
     RequestId:
@@ -704,6 +781,74 @@ components:
             $ref: '#/components/schemas/Problem'
 
   schemas:
+    ApprovalDecision:
+      type: string
+      enum: [APPROVE, REJECT]
+
+    ApprovalStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED, EXPIRED, CANCELLED]
+
+    SOARApprovalDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [decision, reason, version]
+      properties:
+        decision:
+          $ref: '#/components/schemas/ApprovalDecision'
+        reason:
+          type: string
+          minLength: 2
+          maxLength: 2000
+        version:
+          type: integer
+          minimum: 1
+
+    SOARApprovalDecision:
+      type: object
+      additionalProperties: false
+      required: [approver, decision, reason, decided_at]
+      properties:
+        approver: { type: string }
+        decision:
+          $ref: '#/components/schemas/ApprovalDecision'
+        reason: { type: string }
+        decided_at: { type: string, format: date-time }
+
+    SOARApproval:
+      type: object
+      additionalProperties: false
+      required: [approval_id, tenant_id, execution_id, node_execution_id, risk_level, required_approvals, status, version, requested_by, requested_at, expires_at, decisions]
+      properties:
+        approval_id: { type: string }
+        tenant_id: { type: string }
+        execution_id: { type: string }
+        node_execution_id: { type: string }
+        risk_level: { type: integer, minimum: 0, maximum: 6 }
+        required_approvals: { type: integer, minimum: 1, maximum: 2 }
+        status:
+          $ref: '#/components/schemas/ApprovalStatus'
+        version: { type: integer, minimum: 1 }
+        requested_by: { type: string }
+        requested_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        decided_at: { type: string, format: date-time }
+        decisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/SOARApprovalDecision'
+
+    SOARApprovalList:
+      type: object
+      additionalProperties: false
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SOARApproval'
+        total: { type: integer, minimum: 0 }
+
     EventSource:
       type: object
       additionalProperties: false

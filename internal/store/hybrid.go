@@ -451,8 +451,8 @@ func (h *Hybrid) ListSOARExecutions(ctx context.Context, tenantID string, filter
 func (h *Hybrid) ListSOARApprovals(ctx context.Context, tenantID string, filter core.SOARApprovalFilter) ([]core.SOARApproval, error) {
 	return h.control.ListSOARApprovals(ctx, tenantID, filter)
 }
-func (h *Hybrid) DecideSOARApproval(ctx context.Context, tenantID, approvalID, approver, decision, reason string) (core.SOARApproval, error) {
-	return h.control.DecideSOARApproval(ctx, tenantID, approvalID, approver, decision, reason)
+func (h *Hybrid) DecideSOARApproval(ctx context.Context, tenantID, approvalID, approver string, command core.SOARApprovalCommand) (core.SOARApproval, error) {
+	return h.control.DecideSOARApproval(ctx, tenantID, approvalID, approver, command)
 }
 func (h *Hybrid) CompleteSOARManualTask(ctx context.Context, tenantID, executionID, nodeID string, output map[string]interface{}) (core.SOARExecution, error) {
 	return h.control.CompleteSOARManualTask(ctx, tenantID, executionID, nodeID, output)

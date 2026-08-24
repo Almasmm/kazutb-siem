@@ -160,9 +160,24 @@ func TestPostgresSOARWebhookExecutesA2OnceAndEnforcesRateLimit(t *testing.T) {
 	worker := soar.NewWorker(repository, nil, executor, soar.WorkerConfig{
 		ID: "webhook-worker", TenantID: tenantID, PollInterval: time.Millisecond, Lease: time.Minute,
 	}, nil)
-	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
-		t.Fatalf("process connector health test: worked=%v err=%v", worked, err)
+	processOne := func(message string) {
+		t.Helper()
+		deadline := time.Now().Add(time.Second)
+		for {
+			worked, processErr := worker.ProcessOne(ctx)
+			if processErr != nil {
+				t.Fatalf("%s: %v", message, processErr)
+			}
+			if worked {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: worker did not claim the ready job", message)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
+	processOne("process connector health test")
 	healthy, err := service.Connector(ctx, tenantID, connector.ID)
 	if err != nil || healthy.State != core.SOARConnectorReady ||
 		healthy.HealthStatus != core.SOARConnectorHealthHealthy {
@@ -196,9 +211,7 @@ func TestPostgresSOARWebhookExecutesA2OnceAndEnforcesRateLimit(t *testing.T) {
 		return execution
 	}
 	first := start("webhook-first-" + core.NewID("request"))
-	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
-		t.Fatalf("execute webhook action: worked=%v err=%v", worked, err)
-	}
+	processOne("execute webhook action")
 	first, err = service.Execution(ctx, tenantID, first.ID)
 	if err != nil || first.Status != core.SOARExecutionSucceeded || deliveries.Load() != 1 {
 		t.Fatalf("webhook action was not completed exactly once: %+v deliveries=%d err=%v",
@@ -210,9 +223,7 @@ func TestPostgresSOARWebhookExecutesA2OnceAndEnforcesRateLimit(t *testing.T) {
 		t.Fatalf("webhook action ledger is incomplete: %+v err=%v", attempts, err)
 	}
 	second := start("webhook-second-" + core.NewID("request"))
-	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
-		t.Fatalf("process rate-limited webhook action: worked=%v err=%v", worked, err)
-	}
+	processOne("process rate-limited webhook action")
 	second, err = service.Execution(ctx, tenantID, second.ID)
 	if err != nil || second.Status != core.SOARExecutionFailed || deliveries.Load() != 1 {
 		t.Fatalf("rate limit did not prevent a second delivery: %+v deliveries=%d err=%v",

@@ -497,9 +497,23 @@ export interface SOARExecutionDto {
 
 export interface SOARApprovalDecisionDto {
   approver: string;
-  decision: string;
+  decision: ApprovalDecision;
   reason: string;
   decided_at: string;
+}
+
+export const ApprovalDecision = {
+  APPROVE: "APPROVE",
+  REJECT: "REJECT",
+} as const;
+
+export type ApprovalDecision = typeof ApprovalDecision[keyof typeof ApprovalDecision];
+export type ApprovalStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | "CANCELLED";
+
+export interface SOARApprovalDecisionRequest {
+  decision: ApprovalDecision;
+  reason: string;
+  version: number;
 }
 
 export interface SOARApprovalDto {
@@ -508,7 +522,8 @@ export interface SOARApprovalDto {
   node_execution_id: string;
   risk_level: number;
   required_approvals: number;
-  status: string;
+  status: ApprovalStatus;
+  version: number;
   requested_by: string;
   requested_at: string;
   expires_at: string;

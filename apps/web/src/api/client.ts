@@ -33,6 +33,7 @@ import type {
   RuleDto,
   SessionDto,
   SOARApprovalDto,
+  SOARApprovalDecisionRequest,
   SOARConnectorDraftDto,
   SOARConnectorDto,
   SOARConnectorTestDto,
@@ -335,7 +336,7 @@ export const api = {
     getList<SOARExecutionDto>("/soar/executions", params, signal),
   soarApprovals: (params?: Record<string, QueryValue>, signal?: AbortSignal) =>
     getList<SOARApprovalDto>("/soar/approvals", params, signal),
-  decideSOARApproval: (id: string, payload: { decision: string; reason: string }) =>
+  decideSOARApproval: (id: string, payload: SOARApprovalDecisionRequest) =>
     request<SOARApprovalDto>(`/soar/approvals/${encodeURIComponent(id)}/decisions`, {
       method: "POST",
       body: JSON.stringify(payload),

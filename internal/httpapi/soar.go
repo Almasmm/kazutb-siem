@@ -1,12 +1,15 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/kcsp/platform/internal/core"
+	"github.com/kcsp/platform/internal/observability"
 	"github.com/kcsp/platform/internal/soar"
+	"github.com/kcsp/platform/internal/store"
 )
 
 func (s *Server) listSOARPlaybooks(w http.ResponseWriter, r *http.Request) {
@@ -193,20 +196,61 @@ func (s *Server) decideSOARApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal := principalFrom(r.Context())
+	request.RequestID = requestIDFrom(r.Context())
+	request.CorrelationID = request.RequestID
+	request.ActorType = "USER"
+	request.Source = soarApprovalSource(r)
 	approval, err := s.soar.DecideApproval(r.Context(), tenantFrom(r.Context()),
 		r.PathValue("approvalID"), principal.ID, request)
 	if err != nil {
+		s.auditSOARApprovalFailure(r, principal.ID, request, err)
+		observability.Default.SOARApprovalFailure(soarApprovalFailureCode(err))
 		s.handleDomainError(w, r, err)
 		return
 	}
-	if err := s.auditSOAR(r, principal.ID, "soar.approval."+strings.ToLower(request.Decision),
-		"soar_approval", approval.ID, map[string]interface{}{
-			"execution_id": approval.ExecutionID, "status": approval.Status, "risk_level": approval.RiskLevel,
-		}); err != nil {
-		s.handleDomainError(w, r, err)
-		return
-	}
+	observability.Default.SOARApprovalDecision(string(request.Decision))
+	w.Header().Set("ETag", strconv.Quote(strconv.Itoa(approval.Version)))
 	s.json(w, http.StatusOK, approval)
+}
+
+func soarApprovalSource(r *http.Request) map[string]interface{} {
+	userAgent := strings.TrimSpace(r.UserAgent())
+	if len(userAgent) > 256 {
+		userAgent = userAgent[:256]
+	}
+	return map[string]interface{}{"client_ip": remoteIP(r.RemoteAddr), "user_agent": userAgent, "transport": "HTTP"}
+}
+
+func soarApprovalFailureCode(err error) string {
+	switch {
+	case errors.Is(err, soar.ErrApprovalVersionConflict):
+		return "VERSION_CONFLICT"
+	case errors.Is(err, store.ErrAlreadyExists):
+		return "DUPLICATE"
+	case errors.Is(err, soar.ErrInvalidState):
+		return "INVALID_STATE"
+	case errors.Is(err, soar.ErrInvalidApprovalDecision), errors.Is(err, soar.ErrInvalidApprovalReason):
+		return "VALIDATION"
+	default:
+		return "ERROR"
+	}
+}
+
+func (s *Server) auditSOARApprovalFailure(r *http.Request, actor string, request soar.ApprovalDecisionRequest, decisionErr error) {
+	_, auditErr := s.store.AppendAudit(r.Context(), core.AuditEntry{
+		TenantID: tenantFrom(r.Context()), Actor: actor, Action: "soar.approval.decision_rejected",
+		ResourceType: "soar_approval", ResourceID: r.PathValue("approvalID"), Outcome: "DENIED",
+		RequestID: requestIDFrom(r.Context()), Metadata: map[string]interface{}{
+			"actor_id": actor, "actor_type": "USER", "tenant_id": tenantFrom(r.Context()),
+			"approval_request_id": r.PathValue("approvalID"), "decision": request.Decision,
+			"optimistic_version": request.Version, "correlation_id": requestIDFrom(r.Context()),
+			"request_id": requestIDFrom(r.Context()), "reason_code": soarApprovalFailureCode(decisionErr),
+			"source": soarApprovalSource(r),
+		},
+	})
+	if auditErr != nil {
+		s.logger.Error("SOAR approval failure audit failed", "error", auditErr, "request_id", requestIDFrom(r.Context()))
+	}
 }
 
 func (s *Server) completeSOARManualTask(w http.ResponseWriter, r *http.Request) {

@@ -25,7 +25,7 @@ type Store interface {
 
 type RuntimeControlStore interface {
 	ListSOARApprovals(context.Context, string, core.SOARApprovalFilter) ([]core.SOARApproval, error)
-	DecideSOARApproval(context.Context, string, string, string, string, string) (core.SOARApproval, error)
+	DecideSOARApproval(context.Context, string, string, string, core.SOARApprovalCommand) (core.SOARApproval, error)
 	CompleteSOARManualTask(context.Context, string, string, string, map[string]interface{}) (core.SOARExecution, error)
 	ListSOARActionAttempts(context.Context, string, string, int) ([]core.SOARActionAttempt, error)
 }
@@ -52,8 +52,13 @@ type ExecutionRequest struct {
 }
 
 type ApprovalDecisionRequest struct {
-	Decision string `json:"decision"`
-	Reason   string `json:"reason"`
+	Decision      core.ApprovalDecision  `json:"decision"`
+	Reason        string                 `json:"reason"`
+	Version       int                    `json:"version"`
+	RequestID     string                 `json:"-"`
+	CorrelationID string                 `json:"-"`
+	ActorType     string                 `json:"-"`
+	Source        map[string]interface{} `json:"-"`
 }
 
 func NewService(store Store, validator *Validator) *Service {
@@ -203,7 +208,7 @@ func (s *Service) Approvals(ctx context.Context, tenantID string, filter core.SO
 	}
 	filter.Status = strings.ToUpper(strings.TrimSpace(filter.Status))
 	switch filter.Status {
-	case "", "PENDING", "APPROVED", "REJECTED", "EXPIRED", "CANCELLED":
+	case "", string(core.ApprovalStatusPending), string(core.ApprovalStatusApproved), string(core.ApprovalStatusRejected), string(core.ApprovalStatusExpired), string(core.ApprovalStatusCancelled):
 	default:
 		return nil, fmt.Errorf("%w: unsupported approval status", ErrInvalidExecution)
 	}
@@ -225,13 +230,24 @@ func (s *Service) DecideApproval(ctx context.Context, tenantID, approvalID, acto
 	}
 	approvalID = strings.TrimSpace(approvalID)
 	actor = strings.TrimSpace(actor)
-	request.Decision = strings.ToUpper(strings.TrimSpace(request.Decision))
 	request.Reason = strings.TrimSpace(request.Reason)
-	if approvalID == "" || actor == "" || (request.Decision != "APPROVE" && request.Decision != "REJECT") ||
-		len(request.Reason) < 2 || len(request.Reason) > 2000 {
-		return core.SOARApproval{}, fmt.Errorf("%w: approval, actor, APPROVE/REJECT, and a 2-2000 character reason are required", ErrInvalidExecution)
+	if approvalID == "" || actor == "" {
+		return core.SOARApproval{}, fmt.Errorf("%w: approval and actor are required", ErrInvalidExecution)
 	}
-	return runtimeStore.DecideSOARApproval(ctx, tenantID, approvalID, actor, request.Decision, request.Reason)
+	if !request.Decision.Valid() {
+		return core.SOARApproval{}, fmt.Errorf("%w: allowed values are APPROVE and REJECT", ErrInvalidApprovalDecision)
+	}
+	if len(request.Reason) < 2 || len(request.Reason) > 2000 {
+		return core.SOARApproval{}, fmt.Errorf("%w: reason must contain 2-2000 characters", ErrInvalidApprovalReason)
+	}
+	if request.Version < 1 {
+		return core.SOARApproval{}, fmt.Errorf("%w: a positive optimistic version is required", ErrInvalidApprovalDecision)
+	}
+	return runtimeStore.DecideSOARApproval(ctx, tenantID, approvalID, actor, core.SOARApprovalCommand{
+		Decision: request.Decision, Reason: request.Reason, Version: request.Version,
+		RequestID: request.RequestID, CorrelationID: request.CorrelationID,
+		ActorType: request.ActorType, Source: request.Source,
+	})
 }
 
 func (s *Service) CompleteManualTask(ctx context.Context, tenantID, executionID, nodeID, actor string,

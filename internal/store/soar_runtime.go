@@ -14,7 +14,7 @@ import (
 )
 
 const soarApprovalColumns = `tenant_id,approval_id,execution_id,node_execution_id,risk_level,
-	required_approvals,status,requested_by,requested_at,expires_at,decided_at`
+	required_approvals,status,version,requested_by,requested_at,expires_at,decided_at`
 
 const soarActionAttemptColumns = `tenant_id,action_attempt_id,execution_id,node_execution_id,
 	idempotency_key,connector_id,action_type,risk_level,mode,status,request,result,error_class,
@@ -355,9 +355,8 @@ func (p *Postgres) ListSOARApprovals(ctx context.Context, tenantID string,
 	return items, nil
 }
 
-func (p *Postgres) DecideSOARApproval(ctx context.Context, tenantID, approvalID, approver, decision,
-	reason string) (core.SOARApproval, error) {
-	decision = strings.ToUpper(strings.TrimSpace(decision))
+func (p *Postgres) DecideSOARApproval(ctx context.Context, tenantID, approvalID, approver string,
+	command core.SOARApprovalCommand) (core.SOARApproval, error) {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return core.SOARApproval{}, fmt.Errorf("begin SOAR approval decision: %w", err)
@@ -372,11 +371,14 @@ func (p *Postgres) DecideSOARApproval(ctx context.Context, tenantID, approvalID,
 		return core.SOARApproval{}, fmt.Errorf("lock SOAR approval: %w", err)
 	}
 	now := time.Now().UTC()
-	if approval.Status != "PENDING" {
+	if approval.Version != command.Version {
+		return core.SOARApproval{}, fmt.Errorf("%w: expected version %d, current version %d", soar.ErrApprovalVersionConflict, command.Version, approval.Version)
+	}
+	if approval.Status != core.ApprovalStatusPending {
 		return core.SOARApproval{}, fmt.Errorf("%w: approval is already %s", soar.ErrInvalidState, approval.Status)
 	}
 	if !now.Before(approval.ExpiresAt) {
-		if _, err := tx.Exec(ctx, `UPDATE soar_approvals SET status='EXPIRED',decided_at=$3
+		if _, err := tx.Exec(ctx, `UPDATE soar_approvals SET status='EXPIRED',decided_at=$3,version=version+1
 			WHERE tenant_id=$1 AND approval_id=$2`, tenantID, approvalID, now); err != nil {
 			return core.SOARApproval{}, err
 		}
@@ -400,16 +402,16 @@ func (p *Postgres) DecideSOARApproval(ctx context.Context, tenantID, approvalID,
 	tag, err := tx.Exec(ctx, `INSERT INTO soar_approval_decisions(
 		tenant_id,approval_id,approver,decision,reason,decided_at)
 		VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
-		tenantID, approvalID, approver, decision, reason, now)
+		tenantID, approvalID, approver, command.Decision, command.Reason, now)
 	if err != nil {
 		return core.SOARApproval{}, fmt.Errorf("record SOAR approval decision: %w", err)
 	}
 	if tag.RowsAffected() != 1 {
 		return core.SOARApproval{}, ErrAlreadyExists
 	}
-	finalStatus := ""
-	if decision == "REJECT" {
-		finalStatus = "REJECTED"
+	var finalStatus core.ApprovalStatus
+	if command.Decision == core.ApprovalDecisionReject {
+		finalStatus = core.ApprovalStatusRejected
 	} else {
 		var approvals int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM soar_approval_decisions
@@ -418,19 +420,23 @@ func (p *Postgres) DecideSOARApproval(ctx context.Context, tenantID, approvalID,
 			return core.SOARApproval{}, fmt.Errorf("count SOAR approvals: %w", err)
 		}
 		if approvals >= approval.RequiredApprovals {
-			finalStatus = "APPROVED"
+			finalStatus = core.ApprovalStatusApproved
 		}
 	}
+	newStatus := core.ApprovalStatusPending
 	if finalStatus != "" {
-		if _, err := tx.Exec(ctx, `UPDATE soar_approvals SET status=$3,decided_at=$4
+		newStatus = finalStatus
+	}
+	if finalStatus != "" {
+		if _, err := tx.Exec(ctx, `UPDATE soar_approvals SET status=$3,decided_at=$4,version=version+1
 			WHERE tenant_id=$1 AND approval_id=$2`, tenantID, approvalID, finalStatus, now); err != nil {
 			return core.SOARApproval{}, fmt.Errorf("finalize SOAR approval: %w", err)
 		}
-		if finalStatus == "REJECTED" {
+		if finalStatus == core.ApprovalStatusRejected {
 			tag, err = tx.Exec(ctx, `UPDATE soar_node_executions SET status='FAILED',
 				error_code='approval_rejected',error_detail=$3,completed_at=$4,updated_at=$4
 				WHERE tenant_id=$1 AND node_execution_id=$2 AND status='WAITING_APPROVAL'`,
-				tenantID, approval.NodeExecutionID, reason, now)
+				tenantID, approval.NodeExecutionID, command.Reason, now)
 		} else {
 			output, _ := json.Marshal(map[string]interface{}{
 				"approval_id": approvalID, "approved": true, "required_approvals": approval.RequiredApprovals,
@@ -448,6 +454,32 @@ func (p *Postgres) DecideSOARApproval(ctx context.Context, tenantID, approvalID,
 		if err := promoteAndReconcileSOAR(ctx, tx, tenantID, approval.ExecutionID, now); err != nil {
 			return core.SOARApproval{}, err
 		}
+	} else if _, err := tx.Exec(ctx, `UPDATE soar_approvals SET version=version+1
+		WHERE tenant_id=$1 AND approval_id=$2`, tenantID, approvalID); err != nil {
+		return core.SOARApproval{}, fmt.Errorf("advance SOAR approval version: %w", err)
+	}
+	actorType := strings.TrimSpace(command.ActorType)
+	if actorType == "" {
+		actorType = "USER"
+	}
+	correlationID := strings.TrimSpace(command.CorrelationID)
+	if correlationID == "" {
+		correlationID = strings.TrimSpace(command.RequestID)
+	}
+	if _, err := appendAuditTx(ctx, tx, core.AuditEntry{
+		TenantID: tenantID, Actor: approver,
+		Action:       "soar.approval." + strings.ToLower(string(command.Decision)),
+		ResourceType: "soar_approval", ResourceID: approvalID, Outcome: "SUCCESS",
+		RequestID: command.RequestID, Metadata: map[string]interface{}{
+			"actor_id": approver, "actor_type": actorType, "tenant_id": tenantID,
+			"approval_request_id": approvalID, "playbook_run_id": approval.ExecutionID,
+			"action_id": approval.NodeExecutionID, "decision": command.Decision,
+			"previous_status": approval.Status, "new_status": newStatus, "reason": command.Reason,
+			"timestamp": now, "correlation_id": correlationID, "request_id": command.RequestID,
+			"optimistic_version": approval.Version + 1, "source": command.Source,
+		},
+	}); err != nil {
+		return core.SOARApproval{}, fmt.Errorf("append SOAR approval audit: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return core.SOARApproval{}, fmt.Errorf("commit SOAR approval decision: %w", err)
@@ -569,7 +601,7 @@ func promoteAndReconcileSOAR(ctx context.Context, tx pgx.Tx, tenantID, execution
 }
 
 func expireSOARApprovals(ctx context.Context, tx pgx.Tx, now time.Time) error {
-	rows, err := tx.Query(ctx, `UPDATE soar_approvals SET status='EXPIRED',decided_at=$1
+	rows, err := tx.Query(ctx, `UPDATE soar_approvals SET status='EXPIRED',decided_at=$1,version=version+1
 		WHERE status='PENDING' AND expires_at <= $1
 		RETURNING tenant_id,execution_id,node_execution_id`, now)
 	if err != nil {
@@ -634,9 +666,11 @@ func (p *Postgres) listSOARApprovalDecisions(ctx context.Context, tenantID, appr
 	items := []core.SOARApprovalDecision{}
 	for rows.Next() {
 		var item core.SOARApprovalDecision
-		if err := rows.Scan(&item.Approver, &item.Decision, &item.Reason, &item.DecidedAt); err != nil {
+		var decision string
+		if err := rows.Scan(&item.Approver, &decision, &item.Reason, &item.DecidedAt); err != nil {
 			return nil, err
 		}
+		item.Decision = core.ApprovalDecision(decision)
 		items = append(items, item)
 	}
 	return items, rows.Err()
@@ -644,9 +678,11 @@ func (p *Postgres) listSOARApprovalDecisions(ctx context.Context, tenantID, appr
 
 func scanSOARApproval(row threatRow) (core.SOARApproval, error) {
 	var item core.SOARApproval
+	var status string
 	err := row.Scan(&item.TenantID, &item.ID, &item.ExecutionID, &item.NodeExecutionID,
-		&item.RiskLevel, &item.RequiredApprovals, &item.Status, &item.RequestedBy,
+		&item.RiskLevel, &item.RequiredApprovals, &status, &item.Version, &item.RequestedBy,
 		&item.RequestedAt, &item.ExpiresAt, &item.DecidedAt)
+	item.Status = core.ApprovalStatus(status)
 	item.Decisions = []core.SOARApprovalDecision{}
 	return item, err
 }

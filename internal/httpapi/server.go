@@ -323,15 +323,21 @@ func (s *Server) protect(permission string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		principal, err := s.auth.Authenticate(r)
 		if err != nil {
+			s.auditSOARApprovalAccessDenied(r, auth.Principal{}, "authentication_required")
+			observability.Default.SOARApprovalFailure("AUTHENTICATION")
 			s.problem(w, r, http.StatusUnauthorized, "authentication_required", "Authentication required", "Use an authorized bearer credential.")
 			return
 		}
 		if permission != "platform.session.read" && !principal.Can(permission) {
+			s.auditSOARApprovalAccessDenied(r, principal, "permission_denied")
+			observability.Default.SOARApprovalFailure("PERMISSION")
 			s.problem(w, r, http.StatusForbidden, "permission_denied", "Permission denied", "The principal does not have "+permission+".")
 			return
 		}
 		tenantID := tenantIDFromHeader(r.Header.Values("X-KCSP-Tenant-ID"))
 		if !principal.CanAccessTenant(tenantID) {
+			s.auditSOARApprovalAccessDenied(r, principal, "tenant_denied")
+			observability.Default.SOARApprovalFailure("TENANT")
 			s.problem(w, r, http.StatusForbidden, "tenant_denied", "Tenant access denied", "The requested tenant is not in the principal membership.")
 			return
 		}
@@ -345,6 +351,48 @@ func (s *Server) protect(permission string, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func isSOARApprovalDecisionRequest(r *http.Request) bool {
+	return r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/soar/approvals/") && strings.HasSuffix(r.URL.Path, "/decisions")
+}
+
+func (s *Server) auditSOARApprovalAccessDenied(r *http.Request, principal auth.Principal, reasonCode string) {
+	if !isSOARApprovalDecisionRequest(r) {
+		return
+	}
+	requestedTenant := tenantIDFromHeader(r.Header.Values("X-KCSP-Tenant-ID"))
+	auditTenant := ""
+	if principal.ID == "" {
+		auditTenant = requestedTenant
+	} else if principal.CanAccessTenant(requestedTenant) {
+		auditTenant = requestedTenant
+	} else {
+		for candidate := range principal.AllowedTenants {
+			auditTenant = candidate
+			break
+		}
+	}
+	if auditTenant == "" {
+		return
+	}
+	actor := principal.ID
+	if actor == "" {
+		actor = "anonymous"
+	}
+	_, err := s.store.AppendAudit(r.Context(), core.AuditEntry{
+		TenantID: auditTenant, Actor: actor, Action: "soar.approval.access_denied",
+		ResourceType: "soar_approval", ResourceID: r.PathValue("approvalID"), Outcome: "DENIED",
+		RequestID: requestIDFrom(r.Context()), Metadata: map[string]interface{}{
+			"actor_id": actor, "actor_type": "USER", "tenant_id": auditTenant,
+			"requested_tenant_id": requestedTenant, "approval_request_id": r.PathValue("approvalID"),
+			"reason_code": reasonCode, "correlation_id": requestIDFrom(r.Context()),
+			"request_id": requestIDFrom(r.Context()), "source": soarApprovalSource(r),
+		},
+	})
+	if err != nil {
+		s.logger.Error("SOAR approval access audit failed", "error", err, "request_id", requestIDFrom(r.Context()))
+	}
 }
 
 func (s *Server) handleLicenseAuthorization(w http.ResponseWriter, r *http.Request, err error) {
@@ -1119,6 +1167,12 @@ func (s *Server) handleDomainError(w http.ResponseWriter, r *http.Request, err e
 		s.problem(w, r, http.StatusPreconditionFailed, "version_conflict", "The resource changed", "Refresh the resource and retry with its current version.")
 	case errors.Is(err, store.ErrAlreadyExists):
 		s.problem(w, r, http.StatusConflict, "already_exists", "Resource already exists", "A resource with this identity already exists in the tenant.")
+	case errors.Is(err, soar.ErrApprovalVersionConflict):
+		s.problem(w, r, http.StatusConflict, "approval_version_conflict", "Approval changed", "Refresh the approval and retry with its current version.")
+	case errors.Is(err, soar.ErrInvalidApprovalDecision):
+		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_approval_decision", "Invalid approval decision", err.Error())
+	case errors.Is(err, soar.ErrInvalidApprovalReason):
+		s.problem(w, r, http.StatusUnprocessableEntity, "invalid_approval_reason", "Invalid approval reason", err.Error())
 	case errors.Is(err, store.ErrAISOCIdempotencyMismatch):
 		s.problem(w, r, http.StatusConflict, "ai_idempotency_mismatch", "AI request conflict", "The idempotency key was already used with a different request.")
 	case errors.Is(err, aisoc.ErrInvalidRequest):

@@ -166,6 +166,10 @@ export const kk = {
     timeoutSeconds: "Күту уақыты (секунд)", rateLimit: "Минутына шақыру", healthDetail: "Күй мәліметтері",
     connectionTests: "Қосылым тексерістері", noConnectionTests: "Қосылым тексерістері әлі орындалмады", testQueued: "Қосылым тексерісі кезекке қойылды.",
     connectorSaved: "Коннектор баптауы сақталды. LIVE орындау алдында қосылымды тексеріңіз.", connectorDisabled: "Коннектор өшірілді.",
+    approvedSuccess: "Шешім мақұлданды. Workflow серверде жалғастырылды.", rejectedSuccess: "Шешім қабылданбады. Қорғалған әрекет орындалмайды.",
+    decisionRecorded: "Шешім жазылды; қосымша мақұлдау күтілуде.", decisionError: "Шешім жазылмады. Сұрауды қайталаңыз.",
+    staleVersion: "Мақұлдау өзгеріп кетті. Деректер жаңартылуда; ағымдағы нұсқамен қайталаңыз.", permissionDenied: "Бұл мақұлдауды шешуге рұқсат жеткіліксіз.",
+    validationError: "Шешімді, себепті және мақұлдаудың ағымдағы нұсқасын тексеріңіз.",
   },
   aiSocPage: {
     eyebrow: "Адам бақылауындағы AI", title: "AI SOC ұсыныстары", subtitle: "Дереккөздері, PII жасыруы және талдаушы шешімі бар local-first ұсыныстар.",
@@ -229,6 +233,7 @@ export const kk = {
   },
   severity: { critical: "Сындарлы", high: "Жоғары", medium: "Орташа", low: "Төмен", informational: "Ақпараттық", unknown: "Берілмеген" },
   status: {
+	approved: "Мақұлданды", rejected: "Қабылданбады", pending: "Шешім күтілуде", expired: "Мерзімі өтті", cancelled: "Болдырылмады",
     new: "Жаңа", open: "Ашық", acknowledged: "Қабылданды", triage: "Триаж", in_progress: "Жұмыста",
     investigation: "Тергеу", containment: "Тежеу", eradication: "Жою", recovery: "Қалпына келтіру",
     closed: "Жабық", escalated: "Эскалацияланды", active: "Белсенді", enabled: "Қосылған",

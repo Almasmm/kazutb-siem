@@ -15,10 +15,13 @@ import (
 )
 
 var (
-	ErrInvalidPlaybook  = errors.New("invalid SOAR playbook")
-	ErrValidationFailed = errors.New("SOAR playbook validation failed")
-	ErrInvalidState     = errors.New("invalid SOAR lifecycle state")
-	ErrInvalidExecution = errors.New("invalid SOAR execution")
+	ErrInvalidPlaybook         = errors.New("invalid SOAR playbook")
+	ErrValidationFailed        = errors.New("SOAR playbook validation failed")
+	ErrInvalidState            = errors.New("invalid SOAR lifecycle state")
+	ErrInvalidExecution        = errors.New("invalid SOAR execution")
+	ErrInvalidApprovalDecision = errors.New("invalid SOAR approval decision")
+	ErrInvalidApprovalReason   = errors.New("invalid SOAR approval reason")
+	ErrApprovalVersionConflict = errors.New("SOAR approval version conflict")
 )
 
 type ActionDescriptor struct {

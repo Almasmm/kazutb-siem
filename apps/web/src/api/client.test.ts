@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError } from "./client";
+import { ApprovalDecision } from "./types";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -69,5 +70,24 @@ describe("KCSP API client", () => {
     const headers = new Headers((init as RequestInit).headers);
     expect(headers.get("Authorization")).toBe("Bearer kcsp-demo-l2");
     expect(headers.get("X-KCSP-Tenant-ID")).toBe("university-kulazhanov");
+  });
+
+  it("sends only canonical SOAR approval commands with optimistic version", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
+      approval_id: "sap-1", execution_id: "run-1", node_execution_id: "node-1",
+      risk_level: 4, required_approvals: 1, status: "APPROVED", version: 5,
+      requested_by: "user-l2", requested_at: "2026-08-24T00:00:00Z", expires_at: "2026-08-25T00:00:00Z",
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.decideSOARApproval("sap-1", { decision: ApprovalDecision.APPROVE, reason: "Validated by SOC analyst", version: 4 });
+    await api.decideSOARApproval("sap-2", { decision: ApprovalDecision.REJECT, reason: "Unsafe containment scope", version: 7 });
+
+    expect(JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body))).toEqual({
+      decision: "APPROVE", reason: "Validated by SOC analyst", version: 4,
+    });
+    expect(JSON.parse(String((fetchMock.mock.calls[1]![1] as RequestInit).body))).toEqual({
+      decision: "REJECT", reason: "Unsafe containment scope", version: 7,
+    });
   });
 });

@@ -25,6 +25,27 @@ const (
 	SOARExecutionCancelled       = "CANCELLED"
 )
 
+type ApprovalDecision string
+
+const (
+	ApprovalDecisionApprove ApprovalDecision = "APPROVE"
+	ApprovalDecisionReject  ApprovalDecision = "REJECT"
+)
+
+func (decision ApprovalDecision) Valid() bool {
+	return decision == ApprovalDecisionApprove || decision == ApprovalDecisionReject
+}
+
+type ApprovalStatus string
+
+const (
+	ApprovalStatusPending   ApprovalStatus = "PENDING"
+	ApprovalStatusApproved  ApprovalStatus = "APPROVED"
+	ApprovalStatusRejected  ApprovalStatus = "REJECTED"
+	ApprovalStatusExpired   ApprovalStatus = "EXPIRED"
+	ApprovalStatusCancelled ApprovalStatus = "CANCELLED"
+)
+
 const (
 	SOARNodeTrigger      = "TRIGGER"
 	SOARNodeCondition    = "CONDITION"
@@ -167,10 +188,10 @@ type SOARWorkItem struct {
 }
 
 type SOARApprovalDecision struct {
-	Approver  string    `json:"approver"`
-	Decision  string    `json:"decision"`
-	Reason    string    `json:"reason"`
-	DecidedAt time.Time `json:"decided_at"`
+	Approver  string           `json:"approver"`
+	Decision  ApprovalDecision `json:"decision"`
+	Reason    string           `json:"reason"`
+	DecidedAt time.Time        `json:"decided_at"`
 }
 
 type SOARApproval struct {
@@ -180,12 +201,23 @@ type SOARApproval struct {
 	NodeExecutionID   string                 `json:"node_execution_id"`
 	RiskLevel         int                    `json:"risk_level"`
 	RequiredApprovals int                    `json:"required_approvals"`
-	Status            string                 `json:"status"`
+	Status            ApprovalStatus         `json:"status"`
+	Version           int                    `json:"version"`
 	RequestedBy       string                 `json:"requested_by"`
 	RequestedAt       time.Time              `json:"requested_at"`
 	ExpiresAt         time.Time              `json:"expires_at"`
 	DecidedAt         *time.Time             `json:"decided_at,omitempty"`
 	Decisions         []SOARApprovalDecision `json:"decisions"`
+}
+
+type SOARApprovalCommand struct {
+	Decision      ApprovalDecision
+	Reason        string
+	Version       int
+	RequestID     string
+	CorrelationID string
+	ActorType     string
+	Source        map[string]interface{}
 }
 
 type SOARApprovalFilter struct {

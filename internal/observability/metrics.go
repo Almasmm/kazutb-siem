@@ -66,6 +66,11 @@ type Registry struct {
 	recentErrors            atomic.Uint64
 	enrollmentLimited       atomic.Uint64
 	enrollmentLimiterErrors atomic.Uint64
+	soarApprovalApproved    atomic.Uint64
+	soarApprovalRejected    atomic.Uint64
+	soarApprovalDenied      atomic.Uint64
+	soarApprovalConflicts   atomic.Uint64
+	soarApprovalDuplicates  atomic.Uint64
 
 	detectionLatency  histogram
 	apiLatency        histogram
@@ -153,12 +158,29 @@ func (r *Registry) EventReceived() {
 	r.rateMu.Unlock()
 }
 
-func (r *Registry) EventParsed()                         { r.eventsParsed.Add(1) }
-func (r *Registry) EventFailed()                         { r.eventsFailed.Add(1); r.recentErrors.Add(1) }
-func (r *Registry) AlertCreated()                        { r.alertsCreated.Add(1) }
-func (r *Registry) IncidentCreated()                     { r.incidentsCreated.Add(1) }
-func (r *Registry) EnrollmentRateLimited()               { r.enrollmentLimited.Add(1) }
-func (r *Registry) EnrollmentLimiterError()              { r.enrollmentLimiterErrors.Add(1); r.recentErrors.Add(1) }
+func (r *Registry) EventParsed()            { r.eventsParsed.Add(1) }
+func (r *Registry) EventFailed()            { r.eventsFailed.Add(1); r.recentErrors.Add(1) }
+func (r *Registry) AlertCreated()           { r.alertsCreated.Add(1) }
+func (r *Registry) IncidentCreated()        { r.incidentsCreated.Add(1) }
+func (r *Registry) EnrollmentRateLimited()  { r.enrollmentLimited.Add(1) }
+func (r *Registry) EnrollmentLimiterError() { r.enrollmentLimiterErrors.Add(1); r.recentErrors.Add(1) }
+func (r *Registry) SOARApprovalDecision(decision string) {
+	if decision == "APPROVE" {
+		r.soarApprovalApproved.Add(1)
+	} else if decision == "REJECT" {
+		r.soarApprovalRejected.Add(1)
+	}
+}
+func (r *Registry) SOARApprovalFailure(class string) {
+	switch class {
+	case "VERSION_CONFLICT":
+		r.soarApprovalConflicts.Add(1)
+	case "DUPLICATE":
+		r.soarApprovalDuplicates.Add(1)
+	default:
+		r.soarApprovalDenied.Add(1)
+	}
+}
 func (r *Registry) ObserveDetection(value time.Duration) { r.detectionLatency.observe(value.Seconds()) }
 func (r *Registry) ObserveAPI(value time.Duration)       { r.apiLatency.observe(value.Seconds()) }
 func (r *Registry) ObserveClickHouse(value time.Duration) {
@@ -186,6 +208,11 @@ func (r *Registry) WritePrometheus(writer io.Writer) {
 	writeCounter(builder, "kcsp_recent_errors_total", "Errors observed since process start.", r.recentErrors.Load())
 	writeCounter(builder, "agent_enrollment_rate_limited_total", "Agent enrollment requests rejected by the shared rate limiter.", r.enrollmentLimited.Load())
 	writeCounter(builder, "agent_enrollment_rate_limiter_errors_total", "Agent enrollment attempts blocked because shared rate state was unavailable.", r.enrollmentLimiterErrors.Load())
+	writeCounter(builder, "soar_approval_approve_total", "Canonical APPROVE commands committed by this process.", r.soarApprovalApproved.Load())
+	writeCounter(builder, "soar_approval_reject_total", "Canonical REJECT commands committed by this process.", r.soarApprovalRejected.Load())
+	writeCounter(builder, "soar_approval_denied_total", "SOAR approval commands denied before commit.", r.soarApprovalDenied.Load())
+	writeCounter(builder, "soar_approval_version_conflict_total", "SOAR approval commands rejected by optimistic concurrency.", r.soarApprovalConflicts.Load())
+	writeCounter(builder, "soar_approval_duplicate_total", "Duplicate SOAR approval commands rejected by the action ledger.", r.soarApprovalDuplicates.Load())
 	writeHelp(builder, "ingestion_eps", "Approximate events per second in the current ten-second process window.", "gauge")
 	fmt.Fprintf(builder, "ingestion_eps %g\n", r.ingestionEPS())
 	writeHelp(builder, "kcsp_process_uptime_seconds", "Process uptime in seconds.", "gauge")

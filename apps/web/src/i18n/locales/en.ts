@@ -176,6 +176,10 @@ export const en = {
     timeoutSeconds: "Timeout (seconds)", rateLimit: "Calls per minute", healthDetail: "Health detail",
     connectionTests: "Connection tests", noConnectionTests: "No connection tests recorded", testQueued: "Connection test queued.",
     connectorSaved: "Connector configuration saved. Run a connection test before live execution.", connectorDisabled: "Connector disabled.",
+    approvedSuccess: "Approval confirmed. The server resumed the workflow.", rejectedSuccess: "Approval rejected. The protected action will not execute.",
+    decisionRecorded: "Decision recorded; another approval is still required.", decisionError: "The decision was not recorded. Retry the request.",
+    staleVersion: "This approval changed. Data is refreshing; retry against the current version.", permissionDenied: "You do not have permission to decide this approval.",
+    validationError: "Check the decision, reason, and current approval version.",
   },
   aiSocPage: {
     eyebrow: "Human-governed AI", title: "AI SOC recommendations", subtitle: "Review local-first recommendations with provenance, redaction and explicit analyst decisions.",
@@ -239,6 +243,7 @@ export const en = {
   },
   severity: { critical: "Critical", high: "High", medium: "Medium", low: "Low", informational: "Informational", unknown: "Not set" },
   status: {
+	approved: "Approved", rejected: "Rejected", pending: "Pending", expired: "Expired", cancelled: "Cancelled",
     new: "New", open: "Open", acknowledged: "Acknowledged", triage: "Triage", in_progress: "In progress",
     investigation: "Investigation", containment: "Containment", eradication: "Eradication", recovery: "Recovery",
     closed: "Closed", escalated: "Escalated", active: "Active", enabled: "Enabled", disabled: "Disabled",
