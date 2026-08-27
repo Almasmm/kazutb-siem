@@ -1,7 +1,7 @@
 #requires -Version 5.1
 [CmdletBinding()]
 param(
-    [string] $Version = '0.5.1',
+    [string] $Version = '0.5.2',
     [Parameter(Mandatory = $true)] [string] $OutputDirectory,
     [string] $PrebuiltBinary,
     [string] $SigningCertificateThumbprint,
@@ -53,7 +53,7 @@ try {
     foreach ($name in @(
         'Install-KCSPAgent.ps1', 'Uninstall-KCSPAgent.ps1', 'Install-KCSPSysmon.ps1', 'Test-KCSPAgent.ps1', 'New-KCSPRolloutPlan.ps1', 'sysmon-kcsp.xml',
         'Install-KCSPWEFCollector.ps1', 'Install-KCSPWEFSource.ps1', 'Test-KCSPWEFCollector.ps1', 'wef-kcsp-subscription.xml',
-        'Test-KCSPEndToEnd.ps1', 'Upgrade-KCSPAgent.ps1', 'Test-KCSPSysmonService.ps1'
+        'Test-KCSPEndToEnd.ps1', 'Upgrade-KCSPAgent.ps1', 'Test-KCSPSysmonService.ps1', 'Test-KCSPUpgradeCredential.ps1'
     )) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $stage $name)
     }

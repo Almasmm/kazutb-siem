@@ -18,7 +18,7 @@ import (
 	"github.com/kcsp/platform/internal/ingest"
 )
 
-var agentVersion = "0.5.1"
+var agentVersion = "0.5.2"
 
 func main() {
 	logger, logCloser, err := newAgentLogger()

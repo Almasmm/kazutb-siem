@@ -36,9 +36,109 @@ $ErrorActionPreference = 'Stop'
 
 $serviceName = 'KCSPAgent'
 $targetBinary = Join-Path $InstallDirectory 'kcsp-agent.exe'
-$credentialPath = Join-Path $StateDirectory 'credential.json'
 $logPath = Join-Path $StateDirectory 'agent.log'
 $serviceRegistryPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName"
+
+function Get-KCSPJsonProperty {
+    <#
+        .SYNOPSIS
+        Reads an optional property from parsed JSON without tripping StrictMode.
+
+        .DESCRIPTION
+        Under Set-StrictMode -Version Latest, dotting a property that a JSON
+        document does not contain raises PropertyNotFoundException. Agent state
+        files carry optional fields, so absence must read as $null rather than
+        abort the upgrade.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [AllowNull()] $InputObject,
+        [Parameter(Mandatory = $true)] [string] $Name
+    )
+    if ($null -eq $InputObject) { return $null }
+    $property = $InputObject.PSObject.Properties[$Name]
+    if (-not $property) { return $null }
+    $value = [string] $property.Value
+    if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+    return $value.Trim()
+}
+
+function Read-KCSPJsonObject {
+    <#
+        .SYNOPSIS
+        Parses a JSON state file, failing closed on malformed content.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string] $Path,
+        [Parameter(Mandatory = $true)] [string] $Description
+    )
+    $raw = Get-Content -LiteralPath $Path -Raw
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        throw "$Description at $Path is empty."
+    }
+    try {
+        $parsed = $raw | ConvertFrom-Json
+    }
+    catch {
+        throw "$Description at $Path is not valid JSON: $($_.Exception.Message)"
+    }
+    if ($null -eq $parsed -or -not ($parsed -is [psobject])) {
+        throw "$Description at $Path is not a JSON object."
+    }
+    return $parsed
+}
+
+function Resolve-KCSPAgentIdentity {
+    <#
+        .SYNOPSIS
+        Resolves the persisted identity that an in-place upgrade must preserve.
+
+        .DESCRIPTION
+        collector_id is the required identity and lives in credential.json.
+        agent_id is written to a separate identity.json by the agent and is
+        never part of credential.json, so it is read from its own file and is
+        optional: an endpoint whose identity file is absent is still valid and
+        must upgrade without re-enrollment. agent_id is never derived from
+        collector_id, because that would invent an identity rather than read one.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string] $StateDirectory,
+        [string] $ExpectedCollectorId
+    )
+    Set-StrictMode -Version Latest
+
+    $credentialFile = Join-Path $StateDirectory 'credential.json'
+    $identityFile = Join-Path $StateDirectory 'identity.json'
+
+    # An upgrade must never mint a new identity. Without an existing credential
+    # this would silently become a fresh enrollment and duplicate the collector.
+    if (-not (Test-Path -LiteralPath $credentialFile -PathType Leaf)) {
+        throw "No machine credential at $credentialFile. Refusing to upgrade, because that would require re-enrollment."
+    }
+    $credential = Read-KCSPJsonObject -Path $credentialFile -Description 'Machine credential'
+    $collectorId = Get-KCSPJsonProperty -InputObject $credential -Name 'collector_id'
+    if (-not $collectorId) {
+        throw "Existing credential at $credentialFile does not carry a collector_id."
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedCollectorId) -and $collectorId -ne $ExpectedCollectorId) {
+        throw "Installed collector_id is $collectorId, expected $ExpectedCollectorId."
+    }
+
+    $agentId = $null
+    if (Test-Path -LiteralPath $identityFile -PathType Leaf) {
+        $identity = Read-KCSPJsonObject -Path $identityFile -Description 'Agent identity'
+        $agentId = Get-KCSPJsonProperty -InputObject $identity -Name 'agent_id'
+    }
+
+    return [pscustomobject]@{
+        CollectorId    = $collectorId
+        AgentId        = $agentId
+        CredentialPath = $credentialFile
+        IdentityPath   = $identityFile
+    }
+}
 
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -74,20 +174,9 @@ $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if (-not $service) {
     throw "Service '$serviceName' is not installed. Use Install-KCSPAgent.ps1 for a first-time installation."
 }
-# An upgrade must never mint a new identity. Without an existing credential this
-# would silently become a fresh enrollment and create a duplicate collector.
-if (-not (Test-Path -LiteralPath $credentialPath -PathType Leaf)) {
-    throw "No machine credential at $credentialPath. Refusing to upgrade, because that would require re-enrollment."
-}
-$credentialBefore = Get-Content -LiteralPath $credentialPath -Raw | ConvertFrom-Json
-$collectorId = $credentialBefore.collector_id
-$agentId = $credentialBefore.agent_id
-if ([string]::IsNullOrWhiteSpace($collectorId)) {
-    throw 'Existing credential does not carry a collector_id.'
-}
-if (-not [string]::IsNullOrWhiteSpace($ExpectedCollectorId) -and $collectorId -ne $ExpectedCollectorId) {
-    throw "Installed collector_id is $collectorId, expected $ExpectedCollectorId."
-}
+$identityBefore = Resolve-KCSPAgentIdentity -StateDirectory $StateDirectory -ExpectedCollectorId $ExpectedCollectorId
+$collectorId = $identityBefore.CollectorId
+$agentId = $identityBefore.AgentId
 
 $expectedHash = Resolve-ExpectedHash -ExplicitHash $ExpectedSha256
 $actualHash = (Get-FileHash -LiteralPath $BinaryPath -Algorithm SHA256).Hash.ToUpperInvariant()
@@ -184,9 +273,9 @@ while ((Get-Date) -lt $deadline) {
     }
 }
 
-$credentialAfter = Get-Content -LiteralPath $credentialPath -Raw | ConvertFrom-Json
-if ($credentialAfter.collector_id -ne $collectorId) {
-    throw "collector_id changed during upgrade: $collectorId -> $($credentialAfter.collector_id)."
+$identityAfter = Resolve-KCSPAgentIdentity -StateDirectory $StateDirectory
+if ($identityAfter.CollectorId -ne $collectorId) {
+    throw "collector_id changed during upgrade: $collectorId -> $($identityAfter.CollectorId)."
 }
 if (Test-Path -LiteralPath $backupBinary -PathType Leaf) {
     Remove-Item -LiteralPath $backupBinary -Force

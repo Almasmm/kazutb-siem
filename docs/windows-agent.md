@@ -38,9 +38,9 @@ From the repository root, cross-compile the binary and build a versioned ZIP:
 $env:GOOS = 'windows'
 $env:GOARCH = 'amd64'
 $env:CGO_ENABLED = '0'
-go build -trimpath -ldflags '-s -w -X main.agentVersion=0.5.1' -o .artifacts\kcsp-agent.exe .\cmd\agent
+go build -trimpath -ldflags '-s -w -X main.agentVersion=0.5.2' -o .artifacts\kcsp-agent.exe .\cmd\agent
 .\ops\agent\windows\Build-KCSPWindowsPackage.ps1 `
-  -Version 0.5.1 `
+  -Version 0.5.2 `
   -OutputDirectory .artifacts\windows `
   -PrebuiltBinary .artifacts\kcsp-agent.exe
 ```
