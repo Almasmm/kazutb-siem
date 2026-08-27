@@ -125,6 +125,8 @@ export const en = {
     health: "Health", type: "Type", lastSeen: "Last heartbeat", neverSeen: "Never connected",
     queue: "Queue", subject: "OIDC subject", observedIp: "Observed IP", capabilities: "Capabilities",
     healthMetadata: "Health telemetry",
+    sourceHealth: "Telemetry source health", state: "State", lastSuccess: "Last successful read",
+    lag: "Lag", lagSeconds: "{{seconds}} s ago", checkpoint: "Checkpoint", events: "Events read", quarantined: "quarantined",
   },
   threatIntelPage: {
     eyebrow: "Threat intelligence", title: "Indicators and matches", subtitle: "Manage trusted intelligence and search historical telemetry for known threats.",

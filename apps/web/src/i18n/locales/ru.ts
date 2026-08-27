@@ -245,6 +245,8 @@ export const ru = {
     health: "Состояние", type: "Тип", lastSeen: "Последний heartbeat", neverSeen: "Ещё не подключался",
     queue: "Очередь", subject: "OIDC subject", observedIp: "Наблюдаемый IP", capabilities: "Возможности",
     healthMetadata: "Телеметрия здоровья",
+    sourceHealth: "Здоровье источников телеметрии", state: "Состояние", lastSuccess: "Последнее успешное чтение",
+    lag: "Задержка", lagSeconds: "{{seconds}} с назад", checkpoint: "Контрольная точка", events: "Событий прочитано", quarantined: "в карантине",
   },
   threatIntelPage: {
     eyebrow: "Threat intelligence", title: "Индикаторы и совпадения", subtitle: "Управление доверенными IOC и ретропоиск известных угроз в телеметрии.",

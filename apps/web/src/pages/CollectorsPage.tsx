@@ -17,6 +17,7 @@ import {
   Tag,
 } from "../components/ui";
 import { formatDateTime, formatFullDateTime, formatNumber } from "../utils/format";
+import { parseSourceHealth, sourceLagSeconds, summarizeSourceState } from "../collectors/sourceHealth";
 
 export default function CollectorsPage() {
   const { t } = useTranslation();
@@ -30,6 +31,10 @@ export default function CollectorsPage() {
       .filter(Boolean).join(" ").toLowerCase();
     return (!health || collector.health === health) && (!deferredSearch || text.includes(deferredSearch.toLowerCase()));
   }), [collectors.data?.items, deferredSearch, health]);
+  // Acquisition health is reported per source and is independent of the
+  // heartbeat: a collector can be ONLINE while its channels read nothing.
+  const selectedSources = useMemo(() => parseSourceHealth(selected?.health_metadata), [selected?.health_metadata]);
+  const selectedSourceState = useMemo(() => summarizeSourceState(selectedSources), [selectedSources]);
 
   return (
     <div className="page">
@@ -53,9 +58,27 @@ export default function CollectorsPage() {
       </section>
       <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title={selected?.name || ""} eyebrow={selected?.collector_id}>
         {selected && <div className="detail-stack">
-          <div className="drawer-lead"><StatusBadge value={selected.health} /><StatusBadge value={selected.state} /><strong>{selected.type}</strong></div>
+          <div className="drawer-lead"><StatusBadge value={selected.health} /><StatusBadge value={selected.state} />{selectedSourceState && <StatusBadge value={selectedSourceState} />}<strong>{selected.type}</strong></div>
           <dl className="detail-grid"><DetailRow label={t("collectorsPage.subject")}>{selected.auth_subject || "—"}</DetailRow><DetailRow label={t("common.version")}>{selected.version || "—"}</DetailRow><DetailRow label={t("collectorsPage.observedIp")}>{selected.observed_ip || "—"}</DetailRow><DetailRow label={t("collectorsPage.lastSeen")}>{selected.last_seen_at ? formatFullDateTime(selected.last_seen_at) : t("collectorsPage.neverSeen")}</DetailRow><DetailRow label={t("common.created")}>{formatFullDateTime(selected.created_at)}</DetailRow><DetailRow label={t("common.updated")}>{formatFullDateTime(selected.updated_at)}</DetailRow></dl>
           <section className="detail-section"><h3>{t("collectorsPage.capabilities")}</h3><div className="tag-list">{selected.capabilities?.length ? selected.capabilities.map((capability) => <Tag key={capability}>{capability}</Tag>) : <span className="muted">{t("common.noData")}</span>}</div></section>
+          {selectedSources.length > 0 && <section className="detail-section"><h3>{t("collectorsPage.sourceHealth")}</h3>
+            <div className="table-scroll"><table className="data-table"><thead><tr>
+              <th>{t("collectorsPage.state")}</th><th>{t("common.source")}</th><th>{t("collectorsPage.lastSuccess")}</th>
+              <th>{t("collectorsPage.lag")}</th><th>{t("collectorsPage.checkpoint")}</th><th>{t("collectorsPage.events")}</th>
+            </tr></thead><tbody>
+              {selectedSources.map((source) => {
+                const lag = sourceLagSeconds(source);
+                return <tr key={source.name}>
+                  <td><StatusBadge value={source.state} /></td>
+                  <td className="primary-cell"><strong>{source.channel || source.name}</strong>{source.last_error && <small className="danger">{source.last_error}</small>}</td>
+                  <td className="nowrap">{source.last_success_at ? formatDateTime(source.last_success_at) : t("common.notAvailable")}</td>
+                  <td className="nowrap">{lag === null ? "—" : t("collectorsPage.lagSeconds", { seconds: formatNumber(lag) })}</td>
+                  <td>{formatNumber(source.checkpoint)}</td>
+                  <td>{formatNumber(source.events_read)}{source.quarantined ? ` (${formatNumber(source.quarantined)} ${t("collectorsPage.quarantined")})` : ""}</td>
+                </tr>;
+              })}
+            </tbody></table></div>
+          </section>}
           <details className="raw-details"><summary>{t("collectorsPage.healthMetadata")}</summary><JsonBlock value={selected.health_metadata || {}} /></details>
         </div>}
       </Drawer>

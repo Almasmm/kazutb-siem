@@ -18,7 +18,7 @@ import (
 	"github.com/kcsp/platform/internal/ingest"
 )
 
-var agentVersion = "0.5.0"
+var agentVersion = "0.5.1"
 
 func main() {
 	logger, logCloser, err := newAgentLogger()
@@ -95,8 +95,18 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		return err
 	}
 	sourceNames := make([]string, 0, len(sources))
+	tracker := agent.NewSourceTracker()
+	capabilities := make([]string, 0, 1)
 	for _, source := range sources {
 		sourceNames = append(sourceNames, source.Name())
+		channel := ""
+		if windowsSource, ok := source.(*agent.WindowsEventSource); ok {
+			channel = windowsSource.Channel()
+			if strings.EqualFold(channel, agent.SysmonChannel) {
+				capabilities = append(capabilities, "sysmon")
+			}
+		}
+		tracker.Register(source.Name(), channel)
 	}
 	pollInterval := envDuration("KCSP_AGENT_POLL_INTERVAL", 2*time.Second)
 	batchSize := int(envInt64("KCSP_AGENT_BATCH_SIZE", 100))
@@ -136,6 +146,8 @@ func run(ctx context.Context, logger *slog.Logger) error {
 			depth, queueBytes, _ := queue.Depth()
 			if collector, heartbeatErr := forwarder.Heartbeat(ctx, agentVersion, map[string]interface{}{
 				"os": runtime.GOOS, "arch": runtime.GOARCH, "sources": sourceNames, "queue_depth": depth, "queue_bytes": queueBytes,
+				"capabilities": capabilities, "source_state": tracker.Overall(),
+				"degraded_sources": tracker.DegradedSources(), "source_health": tracker.Snapshot(),
 			}); heartbeatErr != nil {
 				logger.Warn("collector heartbeat failed", "error", heartbeatErr)
 			} else {
@@ -149,13 +161,26 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		}
 		queueFull := false
 		for _, source := range sources {
+			attemptedAt := time.Now()
+			// A failing source backs off instead of retrying every poll, so a
+			// broken channel cannot flood the log or starve healthy channels.
+			if !tracker.ShouldAttempt(source.Name(), attemptedAt) {
+				continue
+			}
 			events, readErr := source.Read(ctx, batchSize)
 			if readErr != nil {
-				logger.Warn("telemetry source read failed", "source", source.Name(), "error", readErr)
+				shouldLog, suppressed, retryAt := tracker.RecordFailure(source.Name(), attemptedAt, readErr, errors.Is(readErr, agent.ErrUnsupportedSource))
+				if shouldLog {
+					logger.Warn("telemetry source read failed", "source", source.Name(), "error", readErr,
+						"retry_at", retryAt, "suppressed_repeats", suppressed)
+				}
 				continue
 			}
 			persisted := 0
 			for _, event := range events {
+				// Durability order: the event is fsynced into the local queue
+				// first, and only then does the checkpoint advance past it. The
+				// queue entry survives until the server accepts it.
 				if _, err := queue.Enqueue(event); err != nil {
 					if errors.Is(err, agent.ErrQueueFull) {
 						depth, bytes, _ := queue.Depth()
@@ -170,6 +195,8 @@ func run(ctx context.Context, logger *slog.Logger) error {
 				}
 				persisted++
 			}
+			checkpoint, quarantined, encoding := sourceDiagnostics(source)
+			tracker.RecordSuccess(source.Name(), time.Now(), persisted, checkpoint, quarantined, encoding)
 			if persisted > 0 {
 				last := events[persisted-1]
 				logger.Info("agent events persisted", "source", source.Name(), "count", persisted, "last_cursor", last.Cursor, "last_checkpoint", last.Checkpoint)
@@ -190,23 +217,14 @@ func run(ctx context.Context, logger *slog.Logger) error {
 
 func telemetrySources(stateDirectory string) ([]agent.TelemetrySource, error) {
 	name := strings.ToLower(strings.TrimSpace(os.Getenv("KCSP_AGENT_SOURCE")))
+	cursorMode, err := agent.ParseInitialCursorMode(os.Getenv("KCSP_AGENT_INITIAL_CURSOR"))
+	if err != nil {
+		return nil, err
+	}
 	if name == "" || name == "auto" {
 		switch runtime.GOOS {
 		case "windows":
-			sources := make([]agent.TelemetrySource, 0, 1+len(windowsEventChannels()))
-			sysmon, err := agent.NewSysmonSource(stateDirectory, os.Getenv("KCSP_AGENT_SYSMON_CHANNEL"))
-			if err != nil {
-				return nil, err
-			}
-			sources = append(sources, sysmon)
-			for _, channel := range windowsEventChannels() {
-				source, err := agent.NewWindowsEventSource(stateDirectory, channel)
-				if err != nil {
-					return nil, err
-				}
-				sources = append(sources, source)
-			}
-			return sources, nil
+			return windowsSources(stateDirectory, append([]string{sysmonChannel()}, windowsEventChannels()...), cursorMode)
 		case "linux":
 			name = "journald"
 		default:
@@ -215,24 +233,65 @@ func telemetrySources(stateDirectory string) ([]agent.TelemetrySource, error) {
 	}
 	switch name {
 	case "sysmon":
-		source, err := agent.NewSysmonSource(stateDirectory, os.Getenv("KCSP_AGENT_SYSMON_CHANNEL"))
-		return singleSource(source, err)
+		return windowsSources(stateDirectory, []string{sysmonChannel()}, cursorMode)
 	case "journald":
 		source, err := agent.NewJournalSource(stateDirectory, strings.Fields(os.Getenv("KCSP_AGENT_JOURNAL_MATCHES")))
 		return singleSource(source, err)
 	case "windows-event-log":
-		sources := make([]agent.TelemetrySource, 0, len(windowsEventChannels()))
-		for _, channel := range windowsEventChannels() {
-			source, err := agent.NewWindowsEventSource(stateDirectory, channel)
-			if err != nil {
-				return nil, err
-			}
-			sources = append(sources, source)
-		}
-		return sources, nil
+		return windowsSources(stateDirectory, windowsEventChannels(), cursorMode)
 	default:
 		return nil, fmt.Errorf("unsupported KCSP_AGENT_SOURCE %q", name)
 	}
+}
+
+func sysmonChannel() string {
+	if configured := strings.TrimSpace(os.Getenv("KCSP_AGENT_SYSMON_CHANNEL")); configured != "" {
+		return configured
+	}
+	return agent.SysmonChannel
+}
+
+// windowsSources builds exactly one reader per distinct channel. Sysmon is an
+// ordinary channel, so naming it both through KCSP_AGENT_SYSMON_CHANNEL and in
+// KCSP_AGENT_WINDOWS_CHANNELS collapses to a single canonical source instead of
+// ingesting every Sysmon record twice.
+func windowsSources(stateDirectory string, channels []string, cursorMode agent.InitialCursorMode) ([]agent.TelemetrySource, error) {
+	sources := make([]agent.TelemetrySource, 0, len(channels))
+	seen := make(map[string]struct{}, len(channels))
+	for _, channel := range channels {
+		channel = strings.TrimSpace(channel)
+		if channel == "" {
+			continue
+		}
+		key := strings.ToLower(channel)
+		if _, found := seen[key]; found {
+			continue
+		}
+		seen[key] = struct{}{}
+		config := agent.WindowsEventSourceConfig{StateDirectory: stateDirectory, Channel: channel, InitialCursor: cursorMode}
+		if strings.EqualFold(channel, agent.SysmonChannel) {
+			config.LegacyCheckpointFiles = []string{"sysmon.checkpoint"}
+		}
+		source, err := agent.NewWindowsEventSourceWithConfig(config)
+		if err != nil {
+			return nil, err
+		}
+		sources = append(sources, source)
+	}
+	if len(sources) == 0 {
+		return nil, errors.New("no Windows Event Log channels are configured")
+	}
+	return sources, nil
+}
+
+// sourceDiagnostics reads the durable checkpoint and decode statistics that a
+// Windows channel exposes for health reporting.
+func sourceDiagnostics(source agent.TelemetrySource) (checkpoint, quarantined uint64, encoding string) {
+	windowsSource, ok := source.(*agent.WindowsEventSource)
+	if !ok {
+		return 0, 0, ""
+	}
+	return windowsSource.Checkpoint(), windowsSource.Quarantined(), string(windowsSource.Encoding())
 }
 
 func singleSource(source agent.TelemetrySource, err error) ([]agent.TelemetrySource, error) {

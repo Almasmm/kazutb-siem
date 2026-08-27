@@ -115,6 +115,8 @@ export const kk = {
     health: "Күйі", type: "Түрі", lastSeen: "Соңғы heartbeat", neverSeen: "Әлі қосылмаған",
     queue: "Кезек", subject: "OIDC subject", observedIp: "Бақыланған IP", capabilities: "Мүмкіндіктер",
     healthMetadata: "Денсаулық телеметриясы",
+    sourceHealth: "Телеметрия көздерінің денсаулығы", state: "Күйі", lastSuccess: "Соңғы сәтті оқу",
+    lag: "Кідіріс", lagSeconds: "{{seconds}} с бұрын", checkpoint: "Бақылау нүктесі", events: "Оқылған оқиғалар", quarantined: "карантинде",
   },
   threatIntelPage: {
     eyebrow: "Threat intelligence", title: "Индикаторлар және сәйкестіктер", subtitle: "Сенімді IOC басқару және телеметриядан белгілі қауіптерді ретроспективті іздеу.",

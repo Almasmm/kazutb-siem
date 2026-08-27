@@ -30,11 +30,36 @@ if ($signature.Status -ne [Management.Automation.SignatureStatus]::Valid -or $si
 if ($configuration.DocumentElement.Name -ne 'Sysmon') {
     throw 'Sysmon configuration root element is invalid.'
 }
+function Resolve-KCSPSysmonService {
+    <#
+        .SYNOPSIS
+        Returns the installed Sysmon service, whichever name it uses.
+
+        .DESCRIPTION
+        Sysmon registers as 'Sysmon64' on 64-bit hosts and 'Sysmon' on 32-bit
+        hosts; only one of the two ever exists. Passing both names to a single
+        Get-Service call with -ErrorAction Stop throws for the absent name even
+        when the other resolves, so each candidate is probed individually.
+    #>
+    [CmdletBinding()]
+    param([switch] $Require)
+
+    $candidates = @('Sysmon64', 'Sysmon')
+    foreach ($name in $candidates) {
+        $service = Get-Service -Name $name -ErrorAction SilentlyContinue
+        if ($service) { return $service }
+    }
+    if ($Require) {
+        throw "No Sysmon service found. Expected one of: $($candidates -join ', ')."
+    }
+    return $null
+}
+
 $configDirectory = Join-Path $env:ProgramData 'KCSP\sysmon'
 New-Item -ItemType Directory -Path $configDirectory -Force | Out-Null
 $installedConfiguration = Join-Path $configDirectory 'sysmon-kcsp.xml'
 Copy-Item -LiteralPath $ConfigurationPath -Destination $installedConfiguration -Force
-$service = Get-Service -Name 'Sysmon64', 'Sysmon' -ErrorAction SilentlyContinue | Select-Object -First 1
+$service = Resolve-KCSPSysmonService
 if ($service) {
     & $SysmonExecutable -accepteula -c $installedConfiguration | Out-Null
 }
@@ -48,6 +73,6 @@ if ($LASTEXITCODE -ne 0) {
 if ($LASTEXITCODE -ne 0) {
     throw 'Failed to enable the Sysmon operational channel.'
 }
-$service = Get-Service -Name 'Sysmon64', 'Sysmon' -ErrorAction Stop | Select-Object -First 1
+$service = Resolve-KCSPSysmonService -Require
 $service.WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
 [pscustomobject]@{ service = $service.Name; status = $service.Status.ToString(); config = $installedConfiguration; signer = $signature.SignerCertificate.Subject }
