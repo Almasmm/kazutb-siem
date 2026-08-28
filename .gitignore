@@ -10,3 +10,7 @@ node_modules/
 apps/web/node_modules/
 apps/web/dist/
 .kcsp-dr/
+
+# Hyper-V cyber range: private config, lab credentials and run artifacts.
+.lab/
+.artifacts/
