@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
+  AlertTriangle,
   ArrowRight,
   BellRing,
   DatabaseZap,
@@ -24,6 +25,7 @@ import {
   SeverityBadge,
 } from "../components/ui";
 import { formatDateTime, formatNumber } from "../utils/format";
+import { endpointsNotDelivering, fleetSummary, formatBytes, formatRate } from "../collectors/operational";
 
 function metric(data: OverviewDto | undefined, ...keys: string[]): number {
   for (const key of keys) {
@@ -102,16 +104,27 @@ export default function SocPage() {
   const overview = useQuery({
     queryKey: ["overview"],
     queryFn: ({ signal }) => api.overview(signal),
-    refetchInterval: 30_000,
+    refetchInterval: 15_000,
+  });
+  // Endpoint figures come from the collector records themselves, so the
+  // dashboard reports the fleet the platform actually has rather than a
+  // placeholder. Polled on the same cadence as the operational page.
+  const collectors = useQuery({
+    queryKey: ["collectors"],
+    queryFn: ({ signal }) => api.collectors(signal),
+    refetchInterval: 15_000,
   });
 
   const data = overview.data;
+  const fleet = fleetSummary(data?.fleet, collectors.data?.items);
   const openAlerts = metric(data, "alerts_open", "open_alerts");
   const criticalAlerts = metric(data, "critical_alerts", "alerts_critical");
   const highAlerts = metric(data, "high_alerts", "alerts_high");
   const incidents = metric(data, "incidents_open", "open_incidents");
   const ingestEps = metric(data, "ingest_eps", "eps");
-  const offlineSources = metric(data, "offline_sources", "sources_offline");
+  // "Offline sources" is a real health question, not a collector count: an
+  // endpoint that is degraded, revoked or never seen is not delivering either.
+  const offlineSources = endpointsNotDelivering(fleet);
   const parserErrors = metric(data, "parser_errors", "parser_errors_total");
   const trend = data?.alert_trend?.length ? data.alert_trend : data?.event_trend || [];
   const severityFallback: OverviewBreakdown[] = [
@@ -143,7 +156,22 @@ export default function SocPage() {
             <MetricCard label={t("soc.openAlerts")} value={openAlerts} icon={ShieldAlert} tone={openAlerts ? "warning" : "good"} detail={`${formatNumber(metric(data, "alerts_total"))} ${t("common.total").toLowerCase()}`} />
             <MetricCard label={t("soc.criticalAlerts")} value={criticalAlerts} icon={Siren} tone={criticalAlerts ? "critical" : "good"} detail={`${formatNumber(highAlerts)} High`} />
             <MetricCard label={t("soc.openIncidents")} value={incidents} icon={BellRing} tone={incidents ? "warning" : "good"} detail={`${formatNumber(metric(data, "incidents_total"))} ${t("common.total").toLowerCase()}`} />
-            <MetricCard label={t("soc.ingestRate")} value={ingestEps} icon={DatabaseZap} tone="default" detail={t("soc.eventsPerSecond")} />
+            <MetricCard label={t("soc.ingestRate")} value={ingestEps} icon={DatabaseZap} tone="default" detail={t("soc.persistedEps")} />
+          </section>
+
+          <section className="metrics-grid compact">
+            <MetricCard label={t("soc.endpoints")} value={fleet.total} icon={RadioTower} tone="default"
+              detail={t("soc.endpointsOnline", { count: fleet.online })} />
+            <MetricCard label={t("soc.endpointsHealthy")} value={fleet.healthy} icon={RadioTower}
+              tone={fleet.total && fleet.healthy === fleet.total ? "good" : "default"} detail={t("soc.deliveringNormally")} />
+            <MetricCard label={t("soc.endpointsDegraded")} value={fleet.degraded} icon={AlertTriangle}
+              tone={fleet.degraded ? "warning" : "good"} detail={t("soc.degradedDetail")} />
+            <MetricCard label={t("soc.endpointsOffline")} value={fleet.offline} icon={RadioTower}
+              tone={fleet.offline ? "critical" : "good"} detail={t("soc.staleHeartbeat")} />
+            <MetricCard label={t("soc.backlogEvents")} value={fleet.backlog_events} icon={DatabaseZap}
+              tone={fleet.backlog_events ? "warning" : "good"} detail={formatBytes(fleet.backlog_bytes)} />
+            <MetricCard label={t("soc.collectedEps")} value={formatRate(fleet.collection_rate_eps)} icon={Activity} tone="default"
+              detail={t("soc.deliveredEps", { rate: formatRate(fleet.delivery_rate_eps) })} />
           </section>
 
           <section className="dashboard-grid">

@@ -751,6 +751,12 @@ func (p *Postgres) Overview(ctx context.Context, tenantID string) (map[string]in
 		return nil, fmt.Errorf("measure ingest rate: %w", err)
 	}
 	now := time.Now().UTC()
+	// Fleet figures come from the live collector records rather than being
+	// assumed, so the dashboard reflects what the endpoints actually report.
+	fleet, err := p.collectorFleetSummary(ctx, tenantID, now)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]interface{}{
 		"tenant": map[string]string{"id": tenantID, "name": tenantName},
 		"metrics": map[string]interface{}{
@@ -766,8 +772,67 @@ func (p *Postgres) Overview(ctx context.Context, tenantID string) (map[string]in
 		"top_rules": topRules,
 		"platform": map[string]interface{}{
 			"status": "OPERATIONAL", "profile": "durable-postgres", "ingest_eps": float64(recentEvents) / 300,
-			"sources_healthy": 0, "sources_total": 0, "parser_errors_24h": 0,
+			"sources_healthy": fleet.Healthy, "sources_total": fleet.Total, "parser_errors_24h": 0,
 		},
+		"fleet":        fleet,
 		"generated_at": now,
 	}, nil
+}
+
+// CollectorFleetSummary aggregates endpoint health and backlog for the console
+// dashboard.
+type CollectorFleetSummary struct {
+	Total     int `json:"total"`
+	Online    int `json:"online"`
+	Healthy   int `json:"healthy"`
+	Degraded  int `json:"degraded"`
+	Offline   int `json:"offline"`
+	NeverSeen int `json:"never_seen"`
+	Revoked   int `json:"revoked"`
+
+	BacklogEvents int64 `json:"backlog_events"`
+	BacklogBytes  int64 `json:"backlog_bytes"`
+
+	CollectionRate float64 `json:"collection_rate_eps"`
+	DeliveryRate   float64 `json:"delivery_rate_eps"`
+
+	DegradedCollectors []string `json:"degraded_collectors,omitempty"`
+}
+
+func (p *Postgres) collectorFleetSummary(ctx context.Context, tenantID string, now time.Time) (CollectorFleetSummary, error) {
+	collectors, err := p.ListCollectors(ctx, tenantID)
+	if err != nil {
+		return CollectorFleetSummary{}, fmt.Errorf("summarize collector fleet: %w", err)
+	}
+	return SummarizeCollectorFleet(collectors, now), nil
+}
+
+// SummarizeCollectorFleet folds collector records into dashboard counters. It is
+// a pure function so the semantics are directly testable.
+func SummarizeCollectorFleet(collectors []core.Collector, now time.Time) CollectorFleetSummary {
+	summary := CollectorFleetSummary{Total: len(collectors)}
+	for _, collector := range collectors {
+		operational := core.EvaluateCollectorOperational(collector, now)
+		summary.BacklogEvents += operational.QueueDepth
+		summary.BacklogBytes += operational.QueueBytes
+		summary.CollectionRate += operational.CollectionRate
+		summary.DeliveryRate += operational.DeliveryRate
+		if operational.Connectivity == core.ConnectivityOnline {
+			summary.Online++
+		}
+		switch operational.Overall {
+		case core.OperationalHealthy:
+			summary.Healthy++
+		case core.OperationalDegraded:
+			summary.Degraded++
+			summary.DegradedCollectors = append(summary.DegradedCollectors, collector.ID)
+		case core.OperationalOffline:
+			summary.Offline++
+		case core.OperationalNeverSeen:
+			summary.NeverSeen++
+		case core.OperationalRevoked:
+			summary.Revoked++
+		}
+	}
+	return summary
 }

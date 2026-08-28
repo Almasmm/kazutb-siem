@@ -1,7 +1,7 @@
 #requires -Version 5.1
 [CmdletBinding()]
 param(
-    [string] $Version = '0.5.2',
+    [string] $Version = '0.5.3',
     [Parameter(Mandatory = $true)] [string] $OutputDirectory,
     [string] $PrebuiltBinary,
     [string] $SigningCertificateThumbprint,

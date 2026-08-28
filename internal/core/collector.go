@@ -14,6 +14,9 @@ type Collector struct {
 	Version        string                 `json:"version,omitempty"`
 	ObservedIP     string                 `json:"observed_ip,omitempty"`
 	HealthMetadata map[string]interface{} `json:"health_metadata,omitempty"`
+	// Operational is derived server-side from HealthMetadata and heartbeat
+	// recency so every client sees one consistent health policy.
+	Operational *CollectorOperational `json:"operational,omitempty"`
 	LastSeenAt     *time.Time             `json:"last_seen_at,omitempty"`
 	CreatedAt      time.Time              `json:"created_at"`
 	UpdatedAt      time.Time              `json:"updated_at"`

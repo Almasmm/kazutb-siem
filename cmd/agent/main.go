@@ -18,7 +18,7 @@ import (
 	"github.com/kcsp/platform/internal/ingest"
 )
 
-var agentVersion = "0.5.2"
+var agentVersion = "0.5.3"
 
 func main() {
 	logger, logCloser, err := newAgentLogger()
@@ -117,10 +117,15 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	if batchMaxBytes > ingest.MaxBatchRequestBytes {
 		batchMaxBytes = ingest.MaxBatchRequestBytes
 	}
+	// Time allowed per iteration for draining the local queue. It bounds how
+	// long delivery may run before sources are polled again.
+	deliveryBudget := envDuration("KCSP_AGENT_DELIVERY_BUDGET", 15*time.Second)
+	throughput := agent.NewThroughputTracker(time.Now())
 	heartbeatInterval := envDuration("KCSP_AGENT_HEARTBEAT_INTERVAL", 30*time.Second)
 	credentialRotationBefore := envDuration("KCSP_AGENT_CREDENTIAL_ROTATE_BEFORE", 24*time.Hour)
 	nextCredentialRotationAttempt := time.Time{}
 	nextHeartbeat := time.Time{}
+	startedAt := time.Now().UTC()
 	logger.Info("KCSP lightweight agent started", "version", agentVersion, "sources", sourceNames, "state_directory", stateDirectory)
 	for {
 		now := time.Now()
@@ -144,20 +149,40 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		}
 		if time.Now().After(nextHeartbeat) {
 			depth, queueBytes, _ := queue.Depth()
-			if collector, heartbeatErr := forwarder.Heartbeat(ctx, agentVersion, map[string]interface{}{
-				"os": runtime.GOOS, "arch": runtime.GOARCH, "sources": sourceNames, "queue_depth": depth, "queue_bytes": queueBytes,
+			rates := throughput.Snapshot()
+			metadata := map[string]interface{}{
+				"os": runtime.GOOS, "arch": runtime.GOARCH, "sources": sourceNames,
+				"queue_depth": depth, "queue_bytes": queueBytes,
 				"capabilities": capabilities, "source_state": tracker.Overall(),
 				"degraded_sources": tracker.DegradedSources(), "source_health": tracker.Snapshot(),
-			}); heartbeatErr != nil {
+				"throughput": rates, "poll_interval_seconds": pollInterval.Seconds(),
+				"batch_size": batchSize, "agent_started_at": startedAt,
+			}
+			// Backlog age tells an operator whether the oldest event is minutes
+			// or days old, which queue depth alone cannot express.
+			if oldest, found, oldestErr := queue.OldestQueuedAt(); oldestErr == nil && found {
+				metadata["queue_oldest_event_at"] = oldest
+				metadata["queue_oldest_age_seconds"] = round2Seconds(time.Since(oldest))
+			}
+			if depth > 0 && rates.DeliveryRate > rates.CollectionRate {
+				metadata["queue_drain_eta_seconds"] = round2Seconds(
+					time.Duration(float64(depth)/(rates.DeliveryRate-rates.CollectionRate)) * time.Second)
+			}
+			if collector, heartbeatErr := forwarder.Heartbeat(ctx, agentVersion, metadata); heartbeatErr != nil {
 				logger.Warn("collector heartbeat failed", "error", heartbeatErr)
 			} else {
 				logger.Debug("collector heartbeat accepted", "collector_id", collector.ID, "health", collector.Health)
 			}
 			nextHeartbeat = time.Now().Add(heartbeatInterval)
 		}
-		if err := flush(ctx, queue, forwarder, batchSize, batchMaxBytes); err != nil {
+		delivered, deliverErr := drain(ctx, queue, forwarder, batchSize, batchMaxBytes, deliveryBudget)
+		if delivered > 0 {
+			throughput.RecordDelivered(delivered)
+		}
+		if deliverErr != nil && !errors.Is(deliverErr, context.Canceled) {
 			depth, bytes, _ := queue.Depth()
-			logger.Warn("KCSP gateway unavailable; events remain on disk", "error", err, "queue_depth", depth, "queue_bytes", bytes)
+			throughput.RecordSendFailure(deliverErr)
+			logger.Warn("KCSP gateway unavailable; events remain on disk", "error", deliverErr, "queue_depth", depth, "queue_bytes", bytes)
 		}
 		queueFull := false
 		for _, source := range sources {
@@ -197,6 +222,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 			}
 			checkpoint, quarantined, encoding := sourceDiagnostics(source)
 			tracker.RecordSuccess(source.Name(), time.Now(), persisted, checkpoint, quarantined, encoding)
+			throughput.RecordCollected(persisted)
 			if persisted > 0 {
 				last := events[persisted-1]
 				logger.Info("agent events persisted", "source", source.Name(), "count", persisted, "last_cursor", last.Cursor, "last_checkpoint", last.Checkpoint)
@@ -326,10 +352,37 @@ func windowsEventChannels() []string {
 	return channels
 }
 
-func flush(ctx context.Context, queue *agent.DiskQueue, forwarder *agent.Forwarder, batchSize int, maximumBytes int64) error {
+// drain delivers queued events until the queue is empty, the time budget is
+// spent, or the gateway rejects a batch. One batch per poll is not enough: each
+// configured source enqueues up to batchSize events per iteration, so a single
+// send per iteration caps delivery at 1/N of collection and the backlog can
+// only grow. Returns how many events were accepted.
+func drain(ctx context.Context, queue *agent.DiskQueue, forwarder *agent.Forwarder, batchSize int, maximumBytes int64, budget time.Duration) (int, error) {
+	deadline := time.Now().Add(budget)
+	delivered := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return delivered, err
+		}
+		sent, err := flush(ctx, queue, forwarder, batchSize, maximumBytes)
+		if err != nil {
+			return delivered, err
+		}
+		delivered += sent
+		// A short batch means the queue is drained for now.
+		if sent < batchSize {
+			return delivered, nil
+		}
+		if !time.Now().Before(deadline) {
+			return delivered, nil
+		}
+	}
+}
+
+func flush(ctx context.Context, queue *agent.DiskQueue, forwarder *agent.Forwarder, batchSize int, maximumBytes int64) (int, error) {
 	items, err := queue.Peek(batchSize)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	selected := make([]agent.QueueItem, 0, len(items))
 	events := make([]agent.Event, 0, len(items))
@@ -337,7 +390,7 @@ func flush(ctx context.Context, queue *agent.DiskQueue, forwarder *agent.Forward
 	for _, item := range items {
 		estimate := int64(len(item.Event.Payload))*4/3 + 1024
 		if estimate > maximumBytes {
-			return fmt.Errorf("queued event %s exceeds configured batch byte limit", item.Event.EventID)
+			return 0, fmt.Errorf("queued event %s exceeds configured batch byte limit", item.Event.EventID)
 		}
 		if len(selected) > 0 && estimatedBytes+estimate > maximumBytes {
 			break
@@ -347,17 +400,22 @@ func flush(ctx context.Context, queue *agent.DiskQueue, forwarder *agent.Forward
 		estimatedBytes += estimate
 	}
 	if len(events) == 0 {
-		return nil
+		return 0, nil
 	}
 	if _, err := forwarder.SendBatch(ctx, events); err != nil {
-		return err
+		return 0, err
 	}
 	for _, item := range selected {
 		if err := queue.Ack(item); err != nil {
-			return err
+			return 0, err
 		}
 	}
-	return nil
+	return len(events), nil
+}
+
+// round2Seconds renders a duration as seconds with two decimals.
+func round2Seconds(value time.Duration) float64 {
+	return float64(int64(value.Seconds()*100+0.5)) / 100
 }
 
 func envOr(key, fallback string) string {

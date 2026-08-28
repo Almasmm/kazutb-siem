@@ -154,21 +154,20 @@ func scanCollector(scanner collectorScanner) (core.Collector, error) {
 			return core.Collector{}, err
 		}
 	}
-	collector.Health = collectorHealth(collector, time.Now().UTC())
+	now := time.Now().UTC()
+	collector.Health = collectorHealth(collector, now)
+	// Derived operational state travels with the record so the console can
+	// distinguish "reachable" from "actually delivering telemetry".
+	operational := core.EvaluateCollectorOperational(collector, now)
+	collector.Operational = &operational
 	return collector, nil
 }
 
+// collectorHealth reports connectivity only. Telemetry health is a separate
+// dimension carried in Collector.Operational.
 func collectorHealth(collector core.Collector, now time.Time) string {
-	if collector.State == "REVOKED" {
-		return "REVOKED"
-	}
-	if collector.LastSeenAt == nil {
-		return "NEVER_SEEN"
-	}
-	if now.Sub(collector.LastSeenAt.UTC()) > 2*time.Minute {
-		return "OFFLINE"
-	}
-	return "ONLINE"
+	operational := core.EvaluateCollectorOperational(collector, now)
+	return operational.Connectivity
 }
 
 func normalizedCapabilities(values []string) []string {

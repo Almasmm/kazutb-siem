@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,10 +36,21 @@ type QueueItem struct {
 	file    string
 }
 
+// DiskQueue is the agent's store-and-forward buffer. Occupancy is tracked in
+// memory and adjusted as events are enqueued and acknowledged, because scanning
+// the directory on every operation makes each enqueue O(queue depth): at a
+// 50k backlog that throttles the whole agent loop and the queue can no longer
+// drain faster than it fills.
 type DiskQueue struct {
 	directory string
 	maxBytes  int64
 	mu        sync.Mutex
+	// measured reports whether count/bytes reflect the directory. It is cleared
+	// whenever an operation fails midway so the next call re-scans rather than
+	// trusting a total that may have drifted.
+	measured bool
+	count    int
+	bytes    int64
 }
 
 func OpenDiskQueue(directory string, maxBytes int64) (*DiskQueue, error) {
@@ -49,7 +61,45 @@ func OpenDiskQueue(directory string, maxBytes int64) (*DiskQueue, error) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return nil, fmt.Errorf("create agent queue: %w", err)
 	}
-	return &DiskQueue{directory: directory, maxBytes: maxBytes}, nil
+	queue := &DiskQueue{directory: directory, maxBytes: maxBytes}
+	// One scan at open establishes the baseline for an existing backlog.
+	if _, _, err := queue.Depth(); err != nil {
+		return nil, err
+	}
+	return queue, nil
+}
+
+// measureLocked rebuilds the cached occupancy from the directory.
+func (q *DiskQueue) measureLocked() error {
+	entries, err := os.ReadDir(q.directory)
+	if err != nil {
+		return fmt.Errorf("measure agent queue: %w", err)
+	}
+	count := 0
+	var bytes int64
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".event") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		count++
+		bytes += info.Size()
+	}
+	q.count = count
+	q.bytes = bytes
+	q.measured = true
+	return nil
+}
+
+// ensureMeasuredLocked scans only when the cached totals are not trustworthy.
+func (q *DiskQueue) ensureMeasuredLocked() error {
+	if q.measured {
+		return nil
+	}
+	return q.measureLocked()
 }
 
 func (q *DiskQueue) Enqueue(event Event) (QueueItem, error) {
@@ -123,6 +173,8 @@ func (q *DiskQueue) enqueueLocked(item QueueItem, name string) (QueueItem, error
 	if err := os.Rename(temporaryName, filepath.Join(q.directory, name)); err != nil {
 		return QueueItem{}, fmt.Errorf("commit queued event: %w", err)
 	}
+	q.count++
+	q.bytes += int64(len(body))
 	return item, nil
 }
 
@@ -164,50 +216,69 @@ func (q *DiskQueue) Ack(item QueueItem) error {
 	if item.file == "" || filepath.Base(item.file) != item.file || !strings.HasSuffix(item.file, ".event") {
 		return errors.New("invalid queued event reference")
 	}
-	if err := os.Remove(filepath.Join(q.directory, item.file)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	path := filepath.Join(q.directory, item.file)
+	// Size is read before the unlink so the cached total stays exact.
+	var removed int64
+	if info, err := os.Stat(path); err == nil {
+		removed = info.Size()
+	} else if !errors.Is(err, os.ErrNotExist) {
+		q.measured = false
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		q.measured = false
 		return fmt.Errorf("acknowledge queued event: %w", err)
 	}
+	if q.count > 0 {
+		q.count--
+	}
+	q.bytes -= removed
+	if q.bytes < 0 || q.count == 0 && q.bytes != 0 {
+		q.measured = false
+	}
 	return nil
+}
+
+// OldestQueuedAt reports when the oldest still-unacknowledged event was
+// enqueued. Queue file names are prefixed with the enqueue time in nanoseconds,
+// so the first entry in name order is the oldest. Returns false for an empty
+// queue. This walks the directory, so it is called on the heartbeat path only.
+func (q *DiskQueue) OldestQueuedAt() (time.Time, bool, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	entries, err := os.ReadDir(q.directory)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("read agent queue: %w", err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".event") {
+			continue
+		}
+		separator := strings.IndexByte(name, '-')
+		if separator <= 0 {
+			continue
+		}
+		nanoseconds, err := strconv.ParseInt(name[:separator], 10, 64)
+		if err != nil || nanoseconds <= 0 {
+			continue
+		}
+		return time.Unix(0, nanoseconds).UTC(), true, nil
+	}
+	return time.Time{}, false, nil
 }
 
 func (q *DiskQueue) Depth() (int, int64, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	entries, err := os.ReadDir(q.directory)
-	if err != nil {
+	if err := q.ensureMeasuredLocked(); err != nil {
 		return 0, 0, err
 	}
-	count := 0
-	var bytes int64
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".event") {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return 0, 0, err
-		}
-		count++
-		bytes += info.Size()
-	}
-	return count, bytes, nil
+	return q.count, q.bytes, nil
 }
 
 func (q *DiskQueue) sizeLocked() (int64, error) {
-	entries, err := os.ReadDir(q.directory)
-	if err != nil {
-		return 0, fmt.Errorf("measure agent queue: %w", err)
+	if err := q.ensureMeasuredLocked(); err != nil {
+		return 0, err
 	}
-	var size int64
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".event") {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return 0, err
-		}
-		size += info.Size()
-	}
-	return size, nil
+	return q.bytes, nil
 }

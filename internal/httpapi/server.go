@@ -757,7 +757,34 @@ func (s *Server) collectorHeartbeat(w http.ResponseWriter, r *http.Request) {
 		s.handleDomainError(w, r, err)
 		return
 	}
+	publishAgentMetrics(collector)
 	s.json(w, http.StatusOK, collector)
+}
+
+// publishAgentMetrics refreshes the Prometheus view of one endpoint from the
+// heartbeat that just landed, so a scrape never has to query the database.
+func publishAgentMetrics(collector core.Collector) {
+	operational := collector.Operational
+	if operational == nil {
+		derived := core.EvaluateCollectorOperational(collector, time.Now().UTC())
+		operational = &derived
+	}
+	state := observability.AgentState{
+		TenantID: collector.TenantID, CollectorID: collector.ID,
+		Online:          operational.Connectivity == core.ConnectivityOnline,
+		QueueDepth:      operational.QueueDepth,
+		QueueBytes:      operational.QueueBytes,
+		CollectionRate:  operational.CollectionRate,
+		DeliveryRate:    operational.DeliveryRate,
+		SendFailures:    operational.SendFailures,
+		SourcesTotal:    operational.SourceTotal,
+		SourcesDegraded: operational.SourceDegraded,
+		EventLagSeconds: operational.QueueOldestAgeSeconds,
+	}
+	if collector.LastSeenAt != nil {
+		state.LastSeen = collector.LastSeenAt.UTC()
+	}
+	observability.Default.SetAgentState(state)
 }
 
 func (s *Server) listAgentEnrollmentTokens(w http.ResponseWriter, r *http.Request) {

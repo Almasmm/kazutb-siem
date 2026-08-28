@@ -38,6 +38,7 @@ export interface OverviewDto {
   counts?: Record<string, number>;
   metrics?: Record<string, number>;
   platform?: Record<string, string | number>;
+  fleet?: FleetSummaryDto;
   severity_distribution?: OverviewBreakdown[];
   alerts_by_severity?: OverviewBreakdown[];
   alerts_by_status?: OverviewBreakdown[];
@@ -245,9 +246,53 @@ export interface CollectorDto {
   version?: string;
   observed_ip?: string;
   health_metadata?: Record<string, unknown>;
+  /** Operational state derived server-side; see collectors/operational.ts. */
+  operational?: CollectorOperationalDto;
   last_seen_at?: string;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface CollectorOperationalDto {
+  connectivity: "ONLINE" | "OFFLINE" | "NEVER_SEEN" | "REVOKED" | string;
+  telemetry: "HEALTHY" | "DEGRADED" | "UNKNOWN" | string;
+  overall: "HEALTHY" | "DEGRADED" | "OFFLINE" | "NEVER_SEEN" | "REVOKED" | string;
+  reasons?: string[];
+  queue_depth: number;
+  queue_bytes: number;
+  source_total: number;
+  source_healthy: number;
+  source_degraded: number;
+  collection_rate_eps: number;
+  delivery_rate_eps: number;
+  net_backlog_rate_eps: number;
+  events_collected_total: number;
+  events_delivered_total: number;
+  send_failures_total: number;
+  queue_oldest_age_seconds?: number;
+  queue_drain_eta_seconds?: number;
+  backlog_draining: boolean;
+  last_delivery_at?: string;
+  last_send_error?: string;
+  seconds_since_last_seen?: number;
+  agent_started_at?: string;
+  uptime_seconds?: number;
+  degraded_sources?: string[];
+}
+
+export interface FleetSummaryDto {
+  total: number;
+  online: number;
+  healthy: number;
+  degraded: number;
+  offline: number;
+  never_seen: number;
+  revoked: number;
+  backlog_events: number;
+  backlog_bytes: number;
+  collection_rate_eps: number;
+  delivery_rate_eps: number;
+  degraded_collectors?: string[];
 }
 
 export interface ApiProblem {

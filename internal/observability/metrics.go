@@ -76,6 +76,7 @@ type Registry struct {
 	apiLatency        histogram
 	clickhouseLatency histogram
 
+	agents          agentMetrics
 	rateMu          sync.Mutex
 	rateWindowStart time.Time
 	rateEvents      uint64
@@ -220,6 +221,7 @@ func (r *Registry) WritePrometheus(writer io.Writer) {
 	r.detectionLatency.write(builder, "detection_latency_seconds", "End-to-end embedded detection latency.")
 	r.apiLatency.write(builder, "api_latency_seconds", "HTTP API request latency.")
 	r.clickhouseLatency.write(builder, "clickhouse_query_latency_seconds", "ClickHouse operation latency.")
+	r.writeAgentMetrics(builder)
 	_, _ = io.WriteString(writer, builder.String())
 }
 
