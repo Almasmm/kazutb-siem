@@ -354,27 +354,201 @@ function Get-KCSPLabVMs {
     return @(Get-VM -Name $pattern -ErrorAction SilentlyContinue)
 }
 
-function Test-KCSPLabBaseImage {
-    <# A VHDX is reusable only after image application, boot-file creation and
-       clean dismount completed. The marker records that completed transaction;
-       Get-VHD supplies current Hyper-V truth rather than trusting the marker. #>
+function Test-KCSPLabPathEqual {
+    [CmdletBinding()] param([string] $Left, [string] $Right)
+    if ([string]::IsNullOrWhiteSpace($Left) -or [string]::IsNullOrWhiteSpace($Right)) { return $false }
+    try {
+        return [IO.Path]::GetFullPath($Left).TrimEnd('\') -eq [IO.Path]::GetFullPath($Right).TrimEnd('\')
+    } catch { return $false }
+}
+
+function Get-KCSPLabBaseDependencies {
+    <# Walk each attached lab VM disk through every AVHDX/VHDX parent. This is
+       the authoritative guard before a base can ever be replaced. #>
+    [CmdletBinding()] param([Parameter(Mandatory)] $Config, [Parameter(Mandatory)] [string] $BasePath)
+    $dependencies = New-Object System.Collections.Generic.List[object]
+    foreach ($vm in @(Get-KCSPLabVMs -Config $Config)) {
+        Assert-KCSPLabOwned -Config $Config -Name $vm.Name -Kind 'VM'
+        $runtimeProof = @(Get-VMSnapshot -VMName $vm.Name -Name 'CLEAN_WINDOWS' -ErrorAction SilentlyContinue).Count -gt 0
+        foreach ($drive in @(Get-VMHardDiskDrive -VMName $vm.Name -ErrorAction Stop)) {
+            $leaf = [string] $drive.Path
+            $current = $leaf
+            $chain = New-Object System.Collections.Generic.List[string]
+            $visited = @{}
+            while (-not [string]::IsNullOrWhiteSpace($current) -and -not $visited.ContainsKey($current.ToLowerInvariant())) {
+                $visited[$current.ToLowerInvariant()] = $true
+                $chain.Add($current)
+                if (Test-KCSPLabPathEqual -Left $current -Right $BasePath) {
+                    $dependencies.Add([pscustomobject]@{
+                        VMName=$vm.Name; VMState=[string] $vm.State; DiskPath=$leaf
+                        Chain=@($chain); CleanWindowsCheckpoint=$runtimeProof
+                    })
+                    break
+                }
+                try { $current = [string] (Get-VHD -Path $current -ErrorAction Stop).ParentPath }
+                catch {
+                    Write-KCSPLabLog "VHD chain inspection failed for $current`: $($_.Exception.Message)" -Level WARN
+                    break
+                }
+            }
+        }
+    }
+
+    # Also protect offline/orphaned child disks beneath the lab VM root. They
+    # may not currently be attached to a VM but still make the parent immutable.
+    $paths = Get-KCSPLabPaths -Config $Config
+    $knownLeaves = @{}
+    foreach ($dependency in $dependencies) { $knownLeaves[([string] $dependency.DiskPath).ToLowerInvariant()] = $true }
+    $diskFiles = @(Get-ChildItem -LiteralPath $paths.VMs -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -in '.vhdx', '.avhdx' })
+    foreach ($file in $diskFiles) {
+        if ($knownLeaves.ContainsKey($file.FullName.ToLowerInvariant()) -or
+            (Test-KCSPLabPathEqual -Left $file.FullName -Right $BasePath)) { continue }
+        $current = $file.FullName
+        $chain = New-Object System.Collections.Generic.List[string]
+        $visited = @{}
+        while (-not [string]::IsNullOrWhiteSpace($current) -and -not $visited.ContainsKey($current.ToLowerInvariant())) {
+            $visited[$current.ToLowerInvariant()] = $true
+            $chain.Add($current)
+            if (Test-KCSPLabPathEqual -Left $current -Right $BasePath) {
+                $dependencies.Add([pscustomobject]@{
+                    VMName='unattached-lab-disk'; VMState='Detached'; DiskPath=$file.FullName
+                    Chain=@($chain); CleanWindowsCheckpoint=$false
+                })
+                break
+            }
+            try { $current = [string] (Get-VHD -Path $current -ErrorAction Stop).ParentPath } catch { break }
+        }
+    }
+    return @($dependencies)
+}
+
+function Test-KCSPLabOfflineWindowsImage {
+    <# Marker-loss recovery for an unattached base: mount read-only and prove
+       both the Windows registry hive and UEFI BCD exist. #>
+    [CmdletBinding()] param([Parameter(Mandatory)] [string] $BasePath)
+    $mounted = $false
+    try {
+        $vhd = Get-VHD -Path $BasePath -ErrorAction Stop
+        if ($vhd.Attached) { return $false }
+        $disk = Mount-VHD -Path $BasePath -ReadOnly -PassThru -ErrorAction Stop | Get-Disk -ErrorAction Stop
+        $mounted = $true
+        $volumes = @($disk | Get-Partition -ErrorAction Stop | Get-Volume -ErrorAction SilentlyContinue)
+        $windows = $volumes | Where-Object { $_.FileSystemLabel -eq 'Windows' -and $_.Path } | Select-Object -First 1
+        $system = $volumes | Where-Object { $_.FileSystemLabel -eq 'System' -and $_.Path } | Select-Object -First 1
+        return $windows -and $system -and
+            (Test-Path -LiteralPath (Join-Path $windows.Path 'Windows\System32\Config\SYSTEM') -PathType Leaf) -and
+            (Test-Path -LiteralPath (Join-Path $system.Path 'EFI\Microsoft\Boot\BCD') -PathType Leaf)
+    } catch {
+        Write-KCSPLabLog "Offline base validation failed: $($_.Exception.Message)" -Level WARN
+        return $false
+    } finally {
+        if ($mounted) { Dismount-VHD -Path $BasePath -ErrorAction SilentlyContinue }
+    }
+}
+
+function Get-KCSPLabBaseImageState {
     [CmdletBinding()] param([Parameter(Mandatory)] $Config)
     $paths = Get-KCSPLabPaths -Config $Config
     $basePath = Join-Path $paths.Base "$($Config.Prefix)-WIN-BASE.vhdx"
     $readyPath = "$basePath.ready.json"
-    if (-not (Test-Path -LiteralPath $basePath -PathType Leaf) -or
-        -not (Test-Path -LiteralPath $readyPath -PathType Leaf)) { return $false }
-    try {
-        $marker = Get-Content -LiteralPath $readyPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        $vhd = Get-VHD -Path $basePath -ErrorAction Stop
-        return $marker.status -eq 'ready' -and
-            $marker.base_image -eq $basePath -and
-            $vhd.VhdType -eq 'Dynamic' -and
-            [int64] $vhd.Size -eq [int64] $Config.VMDiskSizeBytes -and
-            -not $vhd.Attached
-    } catch {
-        Write-KCSPLabLog "Base image validation failed: $($_.Exception.Message)" -Level WARN
-        return $false
+    if (-not (Test-Path -LiteralPath $basePath -PathType Leaf)) {
+        return [pscustomobject]@{ BasePath=$basePath; ReadyPath=$readyPath; Exists=$false; Valid=$false; MarkerValid=$false; VHDValid=$false; Attached=$false; OfflineValid=$false; Dependencies=@(); RuntimeProof=$false; Reason='missing' }
+    }
+
+    $markerValid = $false
+    if (Test-Path -LiteralPath $readyPath -PathType Leaf) {
+        try {
+            $marker = Get-Content -LiteralPath $readyPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $markerValid = $marker.status -eq 'ready' -and (Test-KCSPLabPathEqual -Left $marker.base_image -Right $basePath)
+        } catch { Write-KCSPLabLog "Golden image marker is unreadable: $($_.Exception.Message)" -Level WARN }
+    }
+
+    $vhd = $null
+    try { $vhd = Get-VHD -Path $basePath -ErrorAction Stop } catch {
+        return [pscustomobject]@{ BasePath=$basePath; ReadyPath=$readyPath; Exists=$true; Valid=$false; MarkerValid=$markerValid; VHDValid=$false; Attached=$false; OfflineValid=$false; Dependencies=@(); RuntimeProof=$false; Reason=$_.Exception.Message }
+    }
+    $vhdValid = [string] $vhd.VhdType -eq 'Dynamic' -and
+        [string] $vhd.VhdFormat -eq 'VHDX' -and
+        [int64] $vhd.Size -eq [int64] $Config.VMDiskSizeBytes
+    $dependencies = @(Get-KCSPLabBaseDependencies -Config $Config -BasePath $basePath)
+    $runtimeProof = @($dependencies | Where-Object { $_.CleanWindowsCheckpoint }).Count -gt 0
+    $offlineValid = $false
+    if ($vhdValid -and -not $markerValid -and -not $runtimeProof -and -not $vhd.Attached) {
+        $offlineValid = Test-KCSPLabOfflineWindowsImage -BasePath $basePath
+    }
+    $valid = $vhdValid -and ($markerValid -or $runtimeProof -or $offlineValid)
+    $reason = if (-not $vhdValid) { 'VHD metadata mismatch' } elseif ($markerValid) { 'ready marker' } elseif ($runtimeProof) { 'CLEAN_WINDOWS dependent VM proof' } elseif ($offlineValid) { 'offline Windows+UEFI proof' } else { 'no readiness proof' }
+    return [pscustomobject]@{
+        BasePath=$basePath; ReadyPath=$readyPath; Exists=$true; Valid=$valid; MarkerValid=$markerValid
+        VHDValid=$vhdValid; Attached=[bool] $vhd.Attached; OfflineValid=$offlineValid
+        Dependencies=$dependencies; RuntimeProof=$runtimeProof; Reason=$reason
+    }
+}
+
+function Repair-KCSPLabBaseImageMetadata {
+    [CmdletBinding()] param([Parameter(Mandatory)] $State)
+    if (-not $State.Valid -or -not $State.VHDValid) { throw 'BASE_METADATA_REPAIR_REFUSED: base validity has not been proven.' }
+    $proof = if ($State.RuntimeProof) { 'CLEAN_WINDOWS dependent VM proof' } elseif ($State.OfflineValid) { 'offline Windows+UEFI proof' } else { 'ready marker' }
+    $marker = [ordered]@{ status='ready'; base_image=$State.BasePath; validation_proof=$proof; repaired_at=(Get-Date).ToUniversalTime().ToString('o') }
+    $temporary = "$($State.ReadyPath).$([guid]::NewGuid().ToString('N')).tmp"
+    [IO.File]::WriteAllText($temporary, ($marker | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $temporary -Destination $State.ReadyPath -Force -ErrorAction Stop
+    Write-KCSPLabLog "METADATA_REPAIRED golden image marker ($proof)" -Level INFO
+}
+
+function Ensure-KCSPLabBaseImage {
+    [CmdletBinding()] param([Parameter(Mandatory)] $Config)
+    $state = Get-KCSPLabBaseImageState -Config $Config
+    if ($state.Exists) { Write-KCSPLabLog "EXISTS golden image $($state.BasePath)" -Level INFO }
+    if ($state.Valid -and -not $state.MarkerValid) {
+        Repair-KCSPLabBaseImageMetadata -State $state
+        $state = Get-KCSPLabBaseImageState -Config $Config
+    }
+    if ($state.Valid) {
+        Write-KCSPLabLog "VERIFIED golden image ($($state.Reason), dependencies=$(@($state.Dependencies).Count), attached=$($state.Attached))" -Level PASS
+        foreach ($dependency in @($state.Dependencies)) {
+            $displayChain = @($dependency.Chain)
+            [array]::Reverse($displayChain)
+            Write-KCSPLabLog "VERIFIED VHD dependency: $($displayChain -join ' -> ') -> $($dependency.VMName)" -Level INFO
+        }
+    }
+    return $state
+}
+
+function Test-KCSPLabBaseImage {
+    [CmdletBinding()] param([Parameter(Mandatory)] $Config)
+    return [bool] (Get-KCSPLabBaseImageState -Config $Config).Valid
+}
+
+function Assert-KCSPLabBaseImageRemovalSafe {
+    [CmdletBinding()] param([Parameter(Mandatory)] $State)
+    if (@($State.Dependencies).Count -gt 0) {
+        $owners = @($State.Dependencies | ForEach-Object { "$($_.VMName):$($_.DiskPath)" }) -join '; '
+        Write-KCSPLabLog "BLOCKED_BY_DEPENDENCY base removal forbidden: $owners" -Level ERROR
+        throw "BASE_REMOVE_FORBIDDEN: dependent child disks exist: $owners"
+    }
+}
+
+function Remove-KCSPLabInvalidBaseImage {
+    <# One guarded attempt only. The READY marker is removed after the VHDX,
+       so a file lock cannot destroy the last valid metadata proof. #>
+    [CmdletBinding()] param([Parameter(Mandatory)] $State)
+    Assert-KCSPLabBaseImageRemovalSafe -State $State
+    if ($State.Attached) {
+        Write-KCSPLabLog 'REPAIR detaching dependency-free lab base image' -Level WARN
+        Dismount-VHD -Path $State.BasePath -ErrorAction Stop
+    }
+    if (Test-Path -LiteralPath $State.BasePath -PathType Leaf) {
+        Write-KCSPLabLog 'REPAIR removing dependency-free invalid lab base image' -Level WARN
+        try { Remove-Item -LiteralPath $State.BasePath -Force -ErrorAction Stop }
+        catch {
+            Write-KCSPLabLog "FAILED base removal (no retry): $($_.Exception.Message)" -Level ERROR
+            throw
+        }
+    }
+    if (Test-Path -LiteralPath $State.ReadyPath -PathType Leaf) {
+        Remove-Item -LiteralPath $State.ReadyPath -Force -ErrorAction Stop
     }
 }
 

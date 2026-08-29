@@ -35,9 +35,13 @@ Assert-KCSPLabElevated
 
 $basePath = Join-Path $paths.Base "$($config.Prefix)-WIN-BASE.vhdx"
 $readyPath = "$basePath.ready.json"
-if ((Test-KCSPLabBaseImage -Config $config) -and -not $Force) {
+$baseState = Ensure-KCSPLabBaseImage -Config $config
+if ($baseState.Valid -and -not $Force) {
     Write-KCSPLabLog "VERIFIED base image: $basePath (use -Force to rebuild)" -Level INFO
     return [pscustomobject]@{ BaseImage = $basePath; Rebuilt = $false }
+}
+if ($baseState.Exists) {
+    Assert-KCSPLabBaseImageRemovalSafe -State $baseState
 }
 
 # ------------------------------------------------------------------ locate ISO
@@ -90,14 +94,13 @@ try {
     Write-KCSPLabLog "Selected edition: $($selected.ImageName) (index $($selected.ImageIndex))" -Level STEP
 
     # ------------------------------------------------------------ create VHDX
-    if (Test-Path -LiteralPath $readyPath) {
-        Remove-Item -LiteralPath $readyPath -Force -ErrorAction Stop
-    }
-    if (Test-Path -LiteralPath $basePath) {
-        Write-KCSPLabLog "REPAIR removing incomplete or invalid lab base image" -Level WARN
-        Remove-Item -LiteralPath $basePath -Force
-    }
     if (-not $PSCmdlet.ShouldProcess($basePath, 'Create and populate base VHDX')) { return }
+    # Re-evaluate immediately before destructive repair. A VM may have gained
+    # a dependency while the ISO was being inspected.
+    $removalState = Get-KCSPLabBaseImageState -Config $config
+    if ($removalState.Exists) {
+        Remove-KCSPLabInvalidBaseImage -State $removalState
+    }
 
     # Dynamic disk: the file grows with real content instead of reserving 64 GB.
     New-VHD -Path $basePath -SizeBytes $config.VMDiskSizeBytes -Dynamic | Out-Null

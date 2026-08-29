@@ -143,7 +143,7 @@ if (-not $SkipUnit) {
 
     $windowsPowerShell = Resolve-KCSPLabApplication -Name 'powershell.exe'
     if ($windowsPowerShell) {
-        $pesterCommand = "Invoke-Pester -Path '$((Join-Path $PSScriptRoot 'KCSPLab.Network.Tests.ps1').Replace("'", "''"))' -EnableExit"
+        $pesterCommand = "Invoke-Pester -Path '$($PSScriptRoot.Replace("'", "''"))' -EnableExit"
         Invoke-GateCommand 'windows.powershell.test' $windowsPowerShell @('-NoProfile','-Command',$pesterCommand) $repo | Out-Null
     } else {
         Add-KCSPLabCheck -Report $report -Name 'windows.powershell.test' -Status 'FAIL' -Detail 'TOOLCHAIN_MISSING: powershell.exe'

@@ -49,7 +49,9 @@ try {
         'Get-KCSPLabConfig', 'Get-KCSPLabPaths', 'Write-KCSPLabLog', 'Test-KCSPLabElevated',
         'Resolve-KCSPLabApplication', 'Resolve-KCSPLabGoToolchain',
         'Assert-KCSPLabElevated', 'Get-KCSPLabHyperVStatus', 'Get-KCSPLabCredential',
-        'Get-KCSPLabVMName', 'Get-KCSPLabVMAddress', 'Assert-KCSPLabOwned', 'Get-KCSPLabVMs', 'Test-KCSPLabBaseImage',
+        'Get-KCSPLabVMName', 'Get-KCSPLabVMAddress', 'Assert-KCSPLabOwned', 'Get-KCSPLabVMs',
+        'Get-KCSPLabBaseDependencies', 'Get-KCSPLabBaseImageState', 'Ensure-KCSPLabBaseImage',
+        'Assert-KCSPLabBaseImageRemovalSafe', 'Remove-KCSPLabInvalidBaseImage', 'Test-KCSPLabBaseImage',
         'Ensure-KCSPLabNetwork', 'Initialize-KCSPLabNetwork', 'Set-KCSPLabIngress', 'Wait-KCSPLabGuest', 'Invoke-KCSPLabGuest',
         'Copy-KCSPLabFileToGuest', 'Invoke-KCSPApi', 'New-KCSPLabReport', 'Add-KCSPLabCheck', 'Save-KCSPLabReport'
     )
