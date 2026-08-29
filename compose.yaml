@@ -194,7 +194,7 @@ services:
       KCSP_VALKEY_NAMESPACE: kcsp
       KCSP_DEMO_SEED: "false"
       KCSP_LAB_BOOTSTRAP: ${KCSP_LAB_BOOTSTRAP:-false}
-      KCSP_LAB_ADMIN_TOKEN: ${KCSP_LAB_ADMIN_TOKEN:-}
+      KCSP_LAB_ADMIN_CREDENTIAL_FILE: /run/secrets/kcsp_lab_admin_credential
       KCSP_DEFAULT_TENANT_ID: university-kulazhanov
       KCSP_DEFAULT_TENANT_NAME: K. Kulazhanov University
       KCSP_DATABASE_URL: postgres://kcsp:${KCSP_POSTGRES_PASSWORD}@postgres:5432/kcsp?sslmode=disable
@@ -216,6 +216,9 @@ services:
       KCSP_VERSION: ${KCSP_VERSION:-development}
     ports:
       - "127.0.0.1:8080:8080"
+    secrets:
+      - source: kcsp_lab_admin_credential
+        target: kcsp_lab_admin_credential
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health/ready"]
       interval: 5s
@@ -912,3 +915,7 @@ networks:
   kcsp-ha-dcs:
     name: kcsp-ha-dcs
     internal: true
+
+secrets:
+  kcsp_lab_admin_credential:
+    file: ${KCSP_LAB_ADMIN_CREDENTIAL_SOURCE:-./deploy/lab-disabled-credential.json}

@@ -1159,6 +1159,9 @@ function Invoke-KCSPLabApi {
                 } elseif ($errorResponse.PSObject.Properties['Content'] -and $errorResponse.Content) {
                     $problemText = $errorResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
                 }
+                if (-not $problemText -and $caught.ErrorDetails -and $caught.ErrorDetails.Message) {
+                    $problemText = [string] $caught.ErrorDetails.Message
+                }
                 if ($problemText) {
                     $problem = $problemText | ConvertFrom-Json
                     if ($problem.PSObject.Properties['code']) { $problemCode = [string] $problem.code }
@@ -1180,19 +1183,70 @@ function Test-KCSPLabApiAuthorization {
     [CmdletBinding()] param([Parameter(Mandatory)] $Config)
     $credential = Get-KCSPLabTenantCredential -Config $Config
     Invoke-KCSPLabApi -Config $Config -Path '/api/v1/collectors' | Out-Null
+    $session = Invoke-KCSPLabApi -Config $Config -Path '/api/v1/session'
+    $principalProperty = $session.PSObject.Properties['principal']
+    $tenantProperty = $session.PSObject.Properties['tenant']
+    $permissionsProperty = $session.PSObject.Properties['permissions']
+    $runtimePrincipal = if ($principalProperty) { $principalProperty.Value } else { $null }
+    $runtimeTenant = if ($tenantProperty) { $tenantProperty.Value } else { $null }
+    if ($null -eq $runtimePrincipal -or $null -eq $runtimeTenant -or $null -eq $permissionsProperty -or
+        -not $runtimePrincipal.PSObject.Properties['id'] -or -not $runtimePrincipal.PSObject.Properties['role'] -or
+        -not $runtimeTenant.PSObject.Properties['id'] -or
+        [string] $runtimePrincipal.id -ne 'svc-kcsp-lab-admin' -or [string] $runtimePrincipal.role -ne 'Lab Automation' -or
+        [string] $runtimeTenant.id -ne $script:LabTenantId) {
+        throw 'LAB_AUTH_PRINCIPAL_INVALID: runtime identity is not the tenant-scoped Lab Automation principal.'
+    }
+    $expectedPermissions = @(
+        'platform.session.read','platform.overview.read','platform.collectors.read','platform.collectors.manage','platform.audit.read',
+        'siem.events.read','siem.findings.read','siem.hunt.read','siem.hunt.execute','detection.rules.read','siem.rules.read',
+        'soc.alerts.read','soc.alerts.manage','soc.incidents.read','soc.incidents.create','soc.incidents.manage',
+        'soc.cases.read','soc.cases.manage','soc.evidence.read'
+    )
+    $actualPermissions = @($permissionsProperty.Value)
+    $unexpectedPermissions = @($actualPermissions | Where-Object { $_ -notin $expectedPermissions })
+    $missingPermissions = @($expectedPermissions | Where-Object { $_ -notin $actualPermissions })
+    if ($unexpectedPermissions.Count -gt 0 -or $missingPermissions.Count -gt 0) {
+        throw "LAB_AUTH_PRINCIPAL_INVALID: runtime permission allowlist mismatch (unexpected=$($unexpectedPermissions -join ','); missing=$($missingPermissions -join ','))."
+    }
+
+    $crossTokenBody = @{ label='KCSP-LAB-AUTH-CROSS-TENANT-DENY'; collector_type='lightweight-agent'; capabilities=@('windows_eventlog'); expires_in_seconds=300; max_uses=1 }
     $checks = @(
-        @{ Name='cross-tenant'; Expected=403; Call={ Invoke-KCSPLabApi -Config $Config -Path '/api/v1/events?limit=1' -TenantId $script:ForbiddenTenantId | Out-Null } },
-        @{ Name='no-bearer'; Expected=401; Call={ Invoke-KCSPLabApi -Config $Config -Path '/api/v1/collectors' -NoBearer | Out-Null } },
-        @{ Name='wrong-bearer'; Expected=401; Call={ Invoke-KCSPLabApi -Config $Config -Path '/api/v1/collectors' -Bearer 'invalid-lab-credential-value' | Out-Null } },
-        @{ Name='platform-privileged'; Expected=403; Call={ Invoke-KCSPLabApi -Config $Config -Path '/api/v1/demo/reset' -Method POST | Out-Null } }
+        @{ Name='cross-events'; Path='/api/v1/events?limit=1'; Method='GET'; Tenant=$script:ForbiddenTenantId; Expected=403; Code='tenant_denied' },
+        @{ Name='cross-collectors'; Path='/api/v1/collectors'; Method='GET'; Tenant=$script:ForbiddenTenantId; Expected=403; Code='tenant_denied' },
+        @{ Name='cross-incidents'; Path='/api/v1/incidents?limit=1'; Method='GET'; Tenant=$script:ForbiddenTenantId; Expected=403; Code='tenant_denied' },
+        @{ Name='cross-evidence'; Path='/api/v1/evidence?limit=1'; Method='GET'; Tenant=$script:ForbiddenTenantId; Expected=403; Code='tenant_denied' },
+        @{ Name='cross-enrollment'; Path='/api/v1/agent-enrollment/tokens'; Method='POST'; Tenant=$script:ForbiddenTenantId; Body=$crossTokenBody; Expected=403; Code='tenant_denied' },
+        @{ Name='no-bearer'; Path='/api/v1/collectors'; Method='GET'; NoBearer=$true; Expected=401; Code='authentication_required' },
+        @{ Name='wrong-bearer'; Path='/api/v1/collectors'; Method='GET'; Bearer='invalid-lab-credential-value'; Expected=401; Code='authentication_required' },
+        @{ Name='platform-privileged'; Path='/api/v1/admin/tenants?limit=1'; Method='GET'; Expected=403; Code='permission_denied' }
     )
     foreach ($check in $checks) {
         $denied = $false
-        try { & $check.Call } catch { $denied = $_.Exception.Message -match "status=$($check.Expected)\b" }
-        if (-not $denied) { throw "LAB_AUTH_ISOLATION_FAILED: $($check.Name) did not return $($check.Expected)." }
+        try {
+            $parameters = @{ Config=$Config; Path=$check.Path; Method=$check.Method }
+            if ($check.ContainsKey('Tenant')) { $parameters.TenantId = $check.Tenant }
+            if ($check.ContainsKey('Body')) { $parameters.Body = $check.Body }
+            if ($check.ContainsKey('Bearer')) { $parameters.Bearer = $check.Bearer }
+            if ($check.ContainsKey('NoBearer')) { $parameters.NoBearer = [switch] $check.NoBearer }
+            Invoke-KCSPLabApi @parameters | Out-Null
+        } catch {
+            $message = $_.Exception.Message
+            $denied = $message -match "status=$($check.Expected)\b" -and $message -match "code=$([regex]::Escape($check.Code))\b"
+        }
+        if (-not $denied) { throw "LAB_AUTH_ISOLATION_FAILED: $($check.Name) did not return $($check.Expected) $($check.Code)." }
     }
-    Write-KCSPLabLog 'VERIFIED lab auth: allowed=200 cross=403 none=401 wrong=401 platform=403' -Level PASS
-    return [pscustomobject]@{ Allowed=200; CrossTenant=403; NoBearer=401; WrongBearer=401; PlatformPrivileged=403; Principal=$credential.Principal }
+
+    $probeTokenId = $null
+    try {
+        $probe = New-KCSPLabEnrollmentToken -Config $Config -Label 'KCSP-LAB-AUTH-PROBE'
+        $probeTokenId = [string] $probe.token.token_id
+    } finally {
+        if ($probeTokenId) {
+            Invoke-KCSPLabApi -Config $Config -Path "/api/v1/agent-enrollment/tokens/$probeTokenId/revoke" -Method POST | Out-Null
+        }
+    }
+    Write-KCSPLabLog 'VERIFIED lab auth: principal=Lab Automation own=200 cross=403 none=401 wrong=401 platform=403 enrollment=create+revoke' -Level PASS
+    return [pscustomobject]@{ Allowed=200; CrossTenant=403; NoBearer=401; WrongBearer=401; PlatformPrivileged=403; Enrollment='created+revoked'; Principal=$credential.Principal; Role=$runtimePrincipal.role }
 }
 
 function Get-KCSPLabCollector {
@@ -1220,6 +1274,14 @@ function New-KCSPLabEnrollmentToken {
         $null -eq $tokenMetadata -or -not $tokenMetadata.PSObject.Properties['token_id'] -or
         -not $tokenMetadata.PSObject.Properties['expires_at'] -or -not $tokenMetadata.PSObject.Properties['max_uses']) {
         throw 'ENROLLMENT_TOKEN_CONTRACT_INVALID: required enrollment_token/token_id/expires_at/max_uses fields are missing.'
+    }
+    $expiresAt = [DateTimeOffset]::MinValue
+    $expiryValid = [DateTimeOffset]::TryParse([string] $tokenMetadata.expires_at, [ref] $expiresAt)
+    $now = [DateTimeOffset]::UtcNow
+    if ([string]::IsNullOrWhiteSpace([string] $tokenMetadata.token_id) -or
+        [int] $tokenMetadata.max_uses -ne 1 -or -not $expiryValid -or
+        $expiresAt -le $now -or $expiresAt -gt $now.AddHours(2)) {
+        throw 'ENROLLMENT_TOKEN_CONTRACT_INVALID: token must be one-use and expire within the requested finite TTL.'
     }
     return $issued
 }

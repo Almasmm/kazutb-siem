@@ -19,17 +19,17 @@ if (-not $SkipStack) {
     Write-KCSPLabLog 'Starting the KCSP stack' -Level STEP
     $labApiCredential = Ensure-KCSPLabTenantCredential -Config $config
     $previousLabBootstrap = $env:KCSP_LAB_BOOTSTRAP
-    $previousLabToken = $env:KCSP_LAB_ADMIN_TOKEN
+    $previousLabCredentialSource = $env:KCSP_LAB_ADMIN_CREDENTIAL_SOURCE
     Push-Location $config.RepoRoot
     try {
         $env:KCSP_LAB_BOOTSTRAP = 'true'
-        $env:KCSP_LAB_ADMIN_TOKEN = $labApiCredential.AccessToken
+        $env:KCSP_LAB_ADMIN_CREDENTIAL_SOURCE = $labApiCredential.Path
         & docker compose up -d | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "docker compose up failed ($LASTEXITCODE)" }
     } finally {
         Pop-Location
         $env:KCSP_LAB_BOOTSTRAP = $previousLabBootstrap
-        $env:KCSP_LAB_ADMIN_TOKEN = $previousLabToken
+        $env:KCSP_LAB_ADMIN_CREDENTIAL_SOURCE = $previousLabCredentialSource
     }
 
     $deadline = (Get-Date).AddSeconds(300)

@@ -57,11 +57,43 @@ func newDemoAuthenticator(labToken string) *DemoAuthenticator {
 		"kcsp-demo-admin":              demoRolePrincipal("user-platform-admin", "KCSP Administrator", "platform_administrator"),
 	}
 	if labToken != "" {
-		principal := demoRolePrincipal("svc-kcsp-lab-admin", "KCSP Hyper-V Lab", "tenant_admin")
-		principal.AllowedTenants = map[string]bool{core.LabTenantID: true}
-		tokens[labToken] = principal
+		tokens[labToken] = labAutomationPrincipal()
 	}
 	return &DemoAuthenticator{tokens: tokens}
+}
+
+// labAutomationPrincipal is deliberately independent from tenant_admin. The
+// Hyper-V range needs a narrow set of tenant-local operations, not identity,
+// licensing, retention, service-account, parser, SOAR, or AI administration.
+func labAutomationPrincipal() Principal {
+	permissions := PermissionsForScopes([]string{
+		"platform.overview.read",
+		"platform.collectors.read",
+		"platform.collectors.manage",
+		"platform.audit.read",
+		"siem.events.read",
+		"siem.findings.read",
+		"siem.hunt.read",
+		"siem.hunt.execute",
+		"detection.rules.read",
+		"siem.rules.read",
+		"soc.alerts.read",
+		"soc.alerts.manage",
+		"soc.incidents.read",
+		"soc.incidents.create",
+		"soc.incidents.manage",
+		"soc.cases.read",
+		"soc.cases.manage",
+		"soc.evidence.read",
+	})
+	return Principal{
+		ID:             "svc-kcsp-lab-admin",
+		DisplayName:    "KCSP Hyper-V Lab",
+		Role:           "Lab Automation",
+		Permissions:    permissions,
+		AllowedTenants: map[string]bool{core.LabTenantID: true},
+		PlatformScope:  false,
+	}
 }
 
 func demoRolePrincipal(id, name, role string) Principal {

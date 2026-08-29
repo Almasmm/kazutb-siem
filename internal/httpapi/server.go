@@ -485,13 +485,21 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	principal := principalFrom(r.Context())
+	tenantID := tenantFrom(r.Context())
+	tenantName := tenantID
+	switch tenantID {
+	case core.DefaultTenantID:
+		tenantName = "K. Kulazhanov University"
+	case core.LabTenantID:
+		tenantName = "KCSP Hyper-V Lab"
+	}
 	permissions := make([]string, 0, len(principal.Permissions))
 	for permission := range principal.Permissions {
 		permissions = append(permissions, permission)
 	}
 	s.json(w, http.StatusOK, map[string]interface{}{
 		"principal":   map[string]string{"id": principal.ID, "display_name": principal.DisplayName, "role": principal.Role},
-		"tenant":      map[string]string{"id": tenantFrom(r.Context()), "name": "K. Kulazhanov University"},
+		"tenant":      map[string]string{"id": tenantID, "name": tenantName},
 		"permissions": permissions, "locale": "ru-KZ", "timezone": "Asia/Qyzylorda", "auth_mode": s.authMode,
 	})
 }

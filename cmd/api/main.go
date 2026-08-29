@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -298,9 +299,9 @@ func configureAuthenticator(ctx context.Context, profile, mode string, labBootst
 			return nil, errors.New("demo authentication is forbidden outside development/test profiles")
 		}
 		if labBootstrap {
-			labToken := strings.TrimSpace(os.Getenv("KCSP_LAB_ADMIN_TOKEN"))
-			if len(labToken) < 32 {
-				return nil, errors.New("KCSP_LAB_ADMIN_TOKEN must be a generated secret of at least 32 characters when lab bootstrap is enabled")
+			labToken, err := readLabAdminToken(strings.TrimSpace(os.Getenv("KCSP_LAB_ADMIN_CREDENTIAL_FILE")))
+			if err != nil {
+				return nil, err
 			}
 			return auth.NewDemoAuthenticatorWithLab(labToken), nil
 		}
@@ -325,6 +326,31 @@ func configureAuthenticator(ctx context.Context, profile, mode string, labBootst
 	default:
 		return nil, fmt.Errorf("unsupported KCSP_AUTH_MODE %q", mode)
 	}
+}
+
+func readLabAdminToken(path string) (string, error) {
+	if path == "" {
+		return "", errors.New("KCSP_LAB_ADMIN_CREDENTIAL_FILE is required when lab bootstrap is enabled")
+	}
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read lab credential file: %w", err)
+	}
+	var credential struct {
+		TenantID    string `json:"tenant_id"`
+		Principal   string `json:"principal"`
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(payload, &credential); err != nil {
+		return "", fmt.Errorf("parse lab credential file: %w", err)
+	}
+	credential.TenantID = strings.TrimSpace(credential.TenantID)
+	credential.Principal = strings.TrimSpace(credential.Principal)
+	credential.AccessToken = strings.TrimSpace(credential.AccessToken)
+	if credential.TenantID != core.LabTenantID || credential.Principal != "svc-kcsp-lab-admin" || len(credential.AccessToken) < 32 {
+		return "", errors.New("lab credential file tenant, principal, or generated token is invalid")
+	}
+	return credential.AccessToken, nil
 }
 
 func envOr(key, fallback string) string {

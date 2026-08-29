@@ -71,11 +71,11 @@ Write-KCSPLabLog "Lab ingress ready: $ingress" -Level PASS
 if (-not $SkipStack) {
     Write-KCSPLabLog 'Starting the KCSP stack' -Level STEP
     $previousLabBootstrap = $env:KCSP_LAB_BOOTSTRAP
-    $previousLabToken = $env:KCSP_LAB_ADMIN_TOKEN
+    $previousLabCredentialSource = $env:KCSP_LAB_ADMIN_CREDENTIAL_SOURCE
     Push-Location $config.RepoRoot
     try {
         $env:KCSP_LAB_BOOTSTRAP = 'true'
-        $env:KCSP_LAB_ADMIN_TOKEN = $labApiCredential.AccessToken
+        $env:KCSP_LAB_ADMIN_CREDENTIAL_SOURCE = $labApiCredential.Path
         & docker compose build api | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "docker compose build api failed ($LASTEXITCODE)" }
         & docker compose up -d | Out-Null
@@ -83,7 +83,7 @@ if (-not $SkipStack) {
     } finally {
         Pop-Location
         $env:KCSP_LAB_BOOTSTRAP = $previousLabBootstrap
-        $env:KCSP_LAB_ADMIN_TOKEN = $previousLabToken
+        $env:KCSP_LAB_ADMIN_CREDENTIAL_SOURCE = $previousLabCredentialSource
     }
 
     $ready = $false
