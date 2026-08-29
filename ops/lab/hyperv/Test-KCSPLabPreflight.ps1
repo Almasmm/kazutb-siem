@@ -47,6 +47,7 @@ try {
     Import-Module (Join-Path $PSScriptRoot 'KCSPLab.psm1') -Force -ErrorAction Stop
     $required = @(
         'Get-KCSPLabConfig', 'Get-KCSPLabPaths', 'Write-KCSPLabLog', 'Test-KCSPLabElevated',
+        'Resolve-KCSPLabApplication', 'Resolve-KCSPLabGoToolchain',
         'Assert-KCSPLabElevated', 'Get-KCSPLabHyperVStatus', 'Get-KCSPLabCredential',
         'Get-KCSPLabVMName', 'Get-KCSPLabVMAddress', 'Assert-KCSPLabOwned', 'Get-KCSPLabVMs', 'Test-KCSPLabBaseImage',
         'Ensure-KCSPLabNetwork', 'Initialize-KCSPLabNetwork', 'Set-KCSPLabIngress', 'Wait-KCSPLabGuest', 'Invoke-KCSPLabGuest',

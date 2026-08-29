@@ -40,12 +40,10 @@ $repo = $config.RepoRoot
 $packageRoot = Join-Path $paths.Artifacts 'windows-agent'
 if (-not $SkipBuild) {
     Write-KCSPLabLog 'Building the Windows agent from the current working tree' -Level STEP
-    $go = (Get-Command go -ErrorAction SilentlyContinue).Source
-    if (-not $go) {
-        $local = Join-Path $repo '.tools\go\bin\go.exe'
-        if (Test-Path -LiteralPath $local) { $go = $local }
+    $goTool = Resolve-KCSPLabGoToolchain -RepoRoot $repo -Environment @{
+        GOOS='windows'; GOARCH='amd64'; CGO_ENABLED='0'
     }
-    if (-not $go) { throw 'Go toolchain not found. Install Go or place it in .tools\go.' }
+    Write-KCSPLabLog "Go toolchain: $($goTool.Kind) $($goTool.Executable)" -Level INFO
 
     # Version comes from source, never from a hardcoded number.
     $mainGo = Get-Content -LiteralPath (Join-Path $repo 'cmd\agent\main.go') -Raw
@@ -57,7 +55,10 @@ if (-not $SkipBuild) {
     $env:GOOS = 'windows'; $env:GOARCH = 'amd64'; $env:CGO_ENABLED = '0'
     try {
         Push-Location $repo
-        & $go build -trimpath -ldflags "-s -w -X main.agentVersion=$version" -o $binary ./cmd/agent
+        $goArguments = @($goTool.PrefixArguments) + @(
+            'build', '-trimpath', '-ldflags', "-s -w -X main.agentVersion=$version", '-o', $binary, './cmd/agent'
+        )
+        & $goTool.Executable @goArguments
         if ($LASTEXITCODE -ne 0) { throw "Agent build failed with exit code $LASTEXITCODE." }
     } finally {
         Pop-Location

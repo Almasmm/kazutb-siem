@@ -22,6 +22,56 @@ function Get-KCSPLabRoot {
     return [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
 }
 
+function Resolve-KCSPLabApplication {
+    <# Resolve only a real executable/application and remain safe under
+       Set-StrictMode when Get-Command returns null. #>
+    [CmdletBinding()] param([Parameter(Mandatory)] [string] $Name)
+    $command = Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $command) { return $null }
+    foreach ($propertyName in 'Path', 'Source') {
+        $property = $command.PSObject.Properties[$propertyName]
+        if ($property -and (Test-Path -LiteralPath $property.Value -PathType Leaf)) {
+            return [string] $property.Value
+        }
+    }
+    return $null
+}
+
+function Resolve-KCSPLabGoToolchain {
+    <# PATH, repository-local Go, then the approved pinned Docker toolchain. #>
+    [CmdletBinding()] param(
+        [Parameter(Mandatory)] [string] $RepoRoot,
+        [hashtable] $Environment
+    )
+    $normal = Resolve-KCSPLabApplication -Name 'go'
+    if ($normal) { return [pscustomobject]@{ Kind='native'; Executable=$normal; PrefixArguments=@() } }
+
+    foreach ($candidate in @(
+        (Join-Path $RepoRoot '.tools\go\bin\go.exe'),
+        (Join-Path $RepoRoot '.tools\go\bin\go')
+    )) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return [pscustomobject]@{ Kind='repository-local'; Executable=$candidate; PrefixArguments=@() }
+        }
+    }
+
+    $docker = Resolve-KCSPLabApplication -Name 'docker'
+    if ($docker) {
+        & $docker version --format '{{.Server.Version}}' *> $null
+        if ($LASTEXITCODE -eq 0) {
+            $prefix = @('run','--rm')
+            if ($Environment) {
+                foreach ($key in @($Environment.Keys | Sort-Object)) {
+                    $prefix += @('-e', "${key}=$($Environment[$key])")
+                }
+            }
+            $prefix += @('--mount', "type=bind,source=$RepoRoot,target=/src", '-w', '/src', 'golang:1.25', 'go')
+            return [pscustomobject]@{ Kind='docker'; Executable=$docker; PrefixArguments=$prefix }
+        }
+    }
+    throw 'TOOLCHAIN_MISSING: no Go application on PATH, repository-local Go, or reachable Docker Go toolchain.'
+}
+
 function Get-KCSPLabConfig {
     <#
         .SYNOPSIS

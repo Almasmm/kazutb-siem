@@ -104,3 +104,28 @@ Describe 'KCSP lab network reconciliation' {
             Remove-Variable KCSPTestConcurrentSwitch -Scope Global -ErrorAction SilentlyContinue
         }
 }
+
+Describe 'KCSP lab Go toolchain resolution' {
+        It 'falls back safely to repository-local Go when PATH lookup returns null under StrictMode' {
+            $testRepo = 'C:\test-repo'
+            $expected = Join-Path $testRepo '.tools\go\bin\go.exe'
+            $global:KCSPTestExpectedGo = $expected
+            Mock Get-Command { $null } -ModuleName KCSPLab
+            Mock Test-Path { param($LiteralPath) return $LiteralPath -eq $global:KCSPTestExpectedGo } -ModuleName KCSPLab
+
+            $tool = Resolve-KCSPLabGoToolchain -RepoRoot $testRepo
+
+            $tool.Kind | Should Be 'repository-local'
+            $tool.Executable | Should Be $expected
+            Remove-Variable KCSPTestExpectedGo -Scope Global -ErrorAction SilentlyContinue
+        }
+
+        It 'fails closed with TOOLCHAIN_MISSING when no approved resolver succeeds' {
+            Mock Get-Command { $null } -ModuleName KCSPLab
+            Mock Test-Path { $false } -ModuleName KCSPLab
+
+            $message = $null
+            try { Resolve-KCSPLabGoToolchain -RepoRoot 'C:\missing-repo' | Out-Null } catch { $message = $_.Exception.Message }
+            $message | Should Match '^TOOLCHAIN_MISSING:'
+        }
+}

@@ -61,48 +61,10 @@ function Invoke-Gate {
     }
 }
 
-function Resolve-KCSPApplication {
-    param([Parameter(Mandatory)] [string] $Name)
-    $command = Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -eq $command) { return $null }
-    $pathProperty = $command.PSObject.Properties['Path']
-    if ($pathProperty -and (Test-Path -LiteralPath $pathProperty.Value -PathType Leaf)) { return [string] $pathProperty.Value }
-    $sourceProperty = $command.PSObject.Properties['Source']
-    if ($sourceProperty -and (Test-Path -LiteralPath $sourceProperty.Value -PathType Leaf)) { return [string] $sourceProperty.Value }
-    return $null
-}
-
-function Resolve-KCSPGoToolchain {
-    $normal = Resolve-KCSPApplication -Name 'go'
-    if ($normal) { return [pscustomobject]@{ Kind='native'; Executable=$normal; PrefixArguments=@() } }
-
-    $localCandidates = @(
-        (Join-Path $repo '.tools\go\bin\go.exe'),
-        (Join-Path $repo '.tools\go\bin\go')
-    )
-    foreach ($candidate in $localCandidates) {
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-            return [pscustomobject]@{ Kind='repository-local'; Executable=$candidate; PrefixArguments=@() }
-        }
-    }
-
-    $docker = Resolve-KCSPApplication -Name 'docker'
-    if ($docker) {
-        & $docker version --format '{{.Server.Version}}' *> $null
-        if ($LASTEXITCODE -eq 0) {
-            return [pscustomobject]@{
-                Kind='docker'; Executable=$docker
-                PrefixArguments=@('run','--rm','--mount',"type=bind,source=$repo,target=/src",'-w','/src','golang:1.25','go')
-            }
-        }
-    }
-    throw 'TOOLCHAIN_MISSING: no Go application on PATH, repository-local Go, or reachable Docker Go toolchain.'
-}
-
 function Resolve-KCSPRaceToolchain {
     param([Parameter(Mandatory)] $Primary)
     if ($Primary.Kind -eq 'docker') { return $Primary }
-    $docker = Resolve-KCSPApplication -Name 'docker'
+    $docker = Resolve-KCSPLabApplication -Name 'docker'
     if ($docker) {
         & $docker version --format '{{.Server.Version}}' *> $null
         if ($LASTEXITCODE -eq 0) {
@@ -166,7 +128,7 @@ function Invoke-GateCommand {
 # --------------------------------------------------------------- portable suites
 if (-not $SkipUnit) {
     try {
-        $goTool = Resolve-KCSPGoToolchain
+        $goTool = Resolve-KCSPLabGoToolchain -RepoRoot $repo
         $report.Facts['go.toolchain'] = [ordered]@{ kind=$goTool.Kind; executable=$goTool.Executable }
         Invoke-GateCommand 'portable.go.vet' $goTool.Executable (@($goTool.PrefixArguments) + @('vet','./...')) $repo | Out-Null
         Invoke-GateCommand 'portable.go.test' $goTool.Executable (@($goTool.PrefixArguments) + @('test','./...','-count=1')) $repo | Out-Null
@@ -179,7 +141,7 @@ if (-not $SkipUnit) {
         Add-KCSPLabCheck -Report $report -Name 'portable.go.toolchain' -Status 'FAIL' -Detail $_.Exception.Message
     }
 
-    $windowsPowerShell = Resolve-KCSPApplication -Name 'powershell.exe'
+    $windowsPowerShell = Resolve-KCSPLabApplication -Name 'powershell.exe'
     if ($windowsPowerShell) {
         $pesterCommand = "Invoke-Pester -Path '$((Join-Path $PSScriptRoot 'KCSPLab.Network.Tests.ps1').Replace("'", "''"))' -EnableExit"
         Invoke-GateCommand 'windows.powershell.test' $windowsPowerShell @('-NoProfile','-Command',$pesterCommand) $repo | Out-Null
@@ -187,7 +149,7 @@ if (-not $SkipUnit) {
         Add-KCSPLabCheck -Report $report -Name 'windows.powershell.test' -Status 'FAIL' -Detail 'TOOLCHAIN_MISSING: powershell.exe'
     }
 
-    $npm = Resolve-KCSPApplication -Name 'npm'
+    $npm = Resolve-KCSPLabApplication -Name 'npm'
     if ($npm) {
         Invoke-GateCommand 'portable.web.test' $npm @('--prefix',(Join-Path $repo 'apps\web'),'run','test','--if-present') $repo | Out-Null
         Invoke-GateCommand 'portable.web.build' $npm @('--prefix',(Join-Path $repo 'apps\web'),'run','build') $repo | Out-Null
