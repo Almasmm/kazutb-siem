@@ -36,14 +36,14 @@ type DemoAuthenticator struct {
 }
 
 func NewDemoAuthenticator() *DemoAuthenticator {
-	return newDemoAuthenticator(false)
+	return newDemoAuthenticator("")
 }
 
-func NewDemoAuthenticatorWithLab() *DemoAuthenticator {
-	return newDemoAuthenticator(true)
+func NewDemoAuthenticatorWithLab(labToken string) *DemoAuthenticator {
+	return newDemoAuthenticator(strings.TrimSpace(labToken))
 }
 
-func newDemoAuthenticator(includeLab bool) *DemoAuthenticator {
+func newDemoAuthenticator(labToken string) *DemoAuthenticator {
 	tokens := map[string]Principal{
 		"kcsp-demo-l1":                 demoRolePrincipal("user-soc-l1", "Айдана Сәрсен", "soc_l1"),
 		"kcsp-demo-l2":                 demoRolePrincipal("user-soc-l2", "Данияр Нұрлан", "soc_l2"),
@@ -56,10 +56,10 @@ func newDemoAuthenticator(includeLab bool) *DemoAuthenticator {
 		"kcsp-demo-mssp":               demoRolePrincipal("user-mssp-manager", "MSSP Operations Manager", "mssp_manager"),
 		"kcsp-demo-admin":              demoRolePrincipal("user-platform-admin", "KCSP Administrator", "platform_administrator"),
 	}
-	if includeLab {
+	if labToken != "" {
 		principal := demoRolePrincipal("svc-kcsp-lab-admin", "KCSP Hyper-V Lab", "tenant_admin")
 		principal.AllowedTenants = map[string]bool{core.LabTenantID: true}
-		tokens["kcsp-lab-admin"] = principal
+		tokens[labToken] = principal
 	}
 	return &DemoAuthenticator{tokens: tokens}
 }

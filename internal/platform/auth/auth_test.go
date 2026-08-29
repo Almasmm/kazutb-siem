@@ -68,9 +68,10 @@ func TestUnknownDemoTokenIsRejected(t *testing.T) {
 }
 
 func TestLabCredentialCannotBeReusedAcrossTenants(t *testing.T) {
+	labToken := "test-kcsp-lab-admin-token-32-bytes"
 	request, _ := http.NewRequest(http.MethodGet, "http://kcsp.local", nil)
-	request.Header.Set("Authorization", "Bearer kcsp-lab-admin")
-	principal, err := NewDemoAuthenticatorWithLab().Authenticate(request)
+	request.Header.Set("Authorization", "Bearer "+labToken)
+	principal, err := NewDemoAuthenticatorWithLab(labToken).Authenticate(request)
 	if err != nil {
 		t.Fatal(err)
 	}

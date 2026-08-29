@@ -60,6 +60,8 @@ if (-not $hyperV.HostReachable) {
     if (-not $retry.HostReachable) { throw "Hyper-V is enabled but not reachable: $($retry.Detail)" }
 }
 
+$labApiCredential = Ensure-KCSPLabTenantCredential -Config $config
+
 # ---------------------------------------------------------------- 2. lab plumbing
 Ensure-KCSPLabNetwork -Config $config | Out-Null
 $ingress = Set-KCSPLabIngress -Config $config
@@ -68,11 +70,21 @@ Write-KCSPLabLog "Lab ingress ready: $ingress" -Level PASS
 # ------------------------------------------------------------------ 3. KCSP stack
 if (-not $SkipStack) {
     Write-KCSPLabLog 'Starting the KCSP stack' -Level STEP
+    $previousLabBootstrap = $env:KCSP_LAB_BOOTSTRAP
+    $previousLabToken = $env:KCSP_LAB_ADMIN_TOKEN
     Push-Location $config.RepoRoot
     try {
+        $env:KCSP_LAB_BOOTSTRAP = 'true'
+        $env:KCSP_LAB_ADMIN_TOKEN = $labApiCredential.AccessToken
+        & docker compose build api | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "docker compose build api failed ($LASTEXITCODE)" }
         & docker compose up -d | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "docker compose up failed ($LASTEXITCODE)" }
-    } finally { Pop-Location }
+    } finally {
+        Pop-Location
+        $env:KCSP_LAB_BOOTSTRAP = $previousLabBootstrap
+        $env:KCSP_LAB_ADMIN_TOKEN = $previousLabToken
+    }
 
     $ready = $false
     $deadline = (Get-Date).AddSeconds(420)
@@ -86,6 +98,9 @@ if (-not $SkipStack) {
     if (-not $ready) { throw 'KCSP API did not become ready.' }
     Write-KCSPLabLog 'KCSP API ready' -Level PASS
 }
+
+$ingress = Ensure-KCSPLabIngressReady -Config $config
+Test-KCSPLabApiAuthorization -Config $config | Out-Null
 
 # --------------------------------------------------------------- 4. golden image
 $baseDisk = Join-Path $paths.Base "$($config.Prefix)-WIN-BASE.vhdx"

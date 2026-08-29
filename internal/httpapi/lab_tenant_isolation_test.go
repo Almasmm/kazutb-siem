@@ -21,10 +21,10 @@ func TestLabCredentialCannotReadUniversityTenant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := New(repository, engine, soc.New(repository), auth.NewDemoAuthenticatorWithLab(), slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	handler := New(repository, engine, soc.New(repository), auth.NewDemoAuthenticatorWithLab("test-kcsp-lab-admin-token-32-bytes"), slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil)
-	request.Header.Set("Authorization", "Bearer kcsp-lab-admin")
+	request.Header.Set("Authorization", "Bearer test-kcsp-lab-admin-token-32-bytes")
 	request.Header.Set("X-KCSP-Tenant-ID", core.DefaultTenantID)
 	denied := httptest.NewRecorder()
 	handler.ServeHTTP(denied, request)
@@ -33,7 +33,7 @@ func TestLabCredentialCannotReadUniversityTenant(t *testing.T) {
 	}
 
 	request = httptest.NewRequest(http.MethodGet, "/api/v1/events", nil)
-	request.Header.Set("Authorization", "Bearer kcsp-lab-admin")
+	request.Header.Set("Authorization", "Bearer test-kcsp-lab-admin-token-32-bytes")
 	request.Header.Set("X-KCSP-Tenant-ID", core.LabTenantID)
 	allowed := httptest.NewRecorder()
 	handler.ServeHTTP(allowed, request)

@@ -17,8 +17,9 @@ Windows hypervisor platform, and a second hypervisor conflicts with it.
 Everything after that is automatic.
 
 The automation is pinned to the development-only tenant `kcsp-lab` and uses
-the tenant-scoped `kcsp-lab-admin` credential. Configuration loading and every
-API call fail closed if another tenant (especially `university-kulazhanov`) is
+a generated tenant-scoped credential stored only in
+`.lab\secrets\lab-api-credential.json`. Configuration loading and every API
+call fail closed if another tenant (especially `university-kulazhanov`) is
 supplied. The API creates `kcsp-lab` idempotently only when
 `KCSP_LAB_BOOTSTRAP=true` in a `development` or `test` profile; production
 rejects that setting.

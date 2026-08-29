@@ -298,7 +298,11 @@ func configureAuthenticator(ctx context.Context, profile, mode string, labBootst
 			return nil, errors.New("demo authentication is forbidden outside development/test profiles")
 		}
 		if labBootstrap {
-			return auth.NewDemoAuthenticatorWithLab(), nil
+			labToken := strings.TrimSpace(os.Getenv("KCSP_LAB_ADMIN_TOKEN"))
+			if len(labToken) < 32 {
+				return nil, errors.New("KCSP_LAB_ADMIN_TOKEN must be a generated secret of at least 32 characters when lab bootstrap is enabled")
+			}
+			return auth.NewDemoAuthenticatorWithLab(labToken), nil
 		}
 		return auth.NewDemoAuthenticator(), nil
 	case "oidc":

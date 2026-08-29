@@ -17,11 +17,20 @@ Assert-KCSPLabElevated
 
 if (-not $SkipStack) {
     Write-KCSPLabLog 'Starting the KCSP stack' -Level STEP
+    $labApiCredential = Ensure-KCSPLabTenantCredential -Config $config
+    $previousLabBootstrap = $env:KCSP_LAB_BOOTSTRAP
+    $previousLabToken = $env:KCSP_LAB_ADMIN_TOKEN
     Push-Location $config.RepoRoot
     try {
+        $env:KCSP_LAB_BOOTSTRAP = 'true'
+        $env:KCSP_LAB_ADMIN_TOKEN = $labApiCredential.AccessToken
         & docker compose up -d | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "docker compose up failed ($LASTEXITCODE)" }
-    } finally { Pop-Location }
+    } finally {
+        Pop-Location
+        $env:KCSP_LAB_BOOTSTRAP = $previousLabBootstrap
+        $env:KCSP_LAB_ADMIN_TOKEN = $previousLabToken
+    }
 
     $deadline = (Get-Date).AddSeconds(300)
     while ((Get-Date) -lt $deadline) {
@@ -36,6 +45,8 @@ if (-not $SkipStack) {
 Ensure-KCSPLabNetwork -Config $config | Out-Null
 $ingress = Set-KCSPLabIngress -Config $config
 Write-KCSPLabLog "Lab ingress: $ingress" -Level INFO
+Ensure-KCSPLabIngressReady -Config $config | Out-Null
+Test-KCSPLabApiAuthorization -Config $config | Out-Null
 
 foreach ($vm in Get-KCSPLabVMs -Config $config) {
     Assert-KCSPLabOwned -Config $config -Name $vm.Name -Kind 'VM'

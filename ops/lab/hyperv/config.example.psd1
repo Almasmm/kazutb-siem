@@ -16,6 +16,7 @@
     HostAddress        = '192.168.250.1'
     PrefixLength       = 24
     GuestAddressPrefix = '192.168.250.'
+    GuestDnsServers     = @('1.1.1.1', '8.8.8.8')
     # NAT gives guests outbound internet (Windows Update, Sysmon download).
     EnableNat = $true
 
@@ -26,7 +27,7 @@
     # Lab tenant, kept separate from the university pilot tenant so lab events
     # never mix with real pilot telemetry.
     TenantId = 'kcsp-lab'
-    ApiToken = 'kcsp-lab-admin'
+    Profile = 'development'
 
     # Guest VM sizing.
     VMGeneration   = 2

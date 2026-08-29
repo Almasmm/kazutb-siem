@@ -53,7 +53,8 @@ try {
         'ConvertTo-KCSPLabObjectArray', 'Get-KCSPLabBaseDependencies', 'Get-KCSPLabBaseImageState', 'Ensure-KCSPLabBaseImage',
         'Assert-KCSPLabBaseImageRemovalSafe', 'Remove-KCSPLabInvalidBaseImage', 'Test-KCSPLabBaseImage',
         'Ensure-KCSPLabNetwork', 'Initialize-KCSPLabNetwork', 'Set-KCSPLabIngress', 'Wait-KCSPLabGuest', 'Invoke-KCSPLabGuest',
-        'Copy-KCSPLabFileToGuest', 'Invoke-KCSPApi', 'New-KCSPLabReport', 'Add-KCSPLabCheck', 'Save-KCSPLabReport'
+        'Copy-KCSPLabFileToGuest', 'Ensure-KCSPLabTenantCredential', 'Ensure-KCSPLabGuestNetwork',
+        'Ensure-KCSPLabIngressReady', 'Invoke-KCSPLabApi', 'Invoke-KCSPApi', 'New-KCSPLabReport', 'Add-KCSPLabCheck', 'Save-KCSPLabReport'
     )
     $missing = @($required | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) })
     if ($missing.Count -gt 0) { Add-Result 'module.exports' 'FAIL' "missing: $($missing -join ', ')" }

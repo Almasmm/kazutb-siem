@@ -193,7 +193,8 @@ services:
       KCSP_VALKEY_PASSWORD: ${KCSP_VALKEY_PASSWORD:?Set KCSP_VALKEY_PASSWORD in .env}
       KCSP_VALKEY_NAMESPACE: kcsp
       KCSP_DEMO_SEED: "false"
-      KCSP_LAB_BOOTSTRAP: "true"
+      KCSP_LAB_BOOTSTRAP: ${KCSP_LAB_BOOTSTRAP:-false}
+      KCSP_LAB_ADMIN_TOKEN: ${KCSP_LAB_ADMIN_TOKEN:-}
       KCSP_DEFAULT_TENANT_ID: university-kulazhanov
       KCSP_DEFAULT_TENANT_NAME: K. Kulazhanov University
       KCSP_DATABASE_URL: postgres://kcsp:${KCSP_POSTGRES_PASSWORD}@postgres:5432/kcsp?sslmode=disable

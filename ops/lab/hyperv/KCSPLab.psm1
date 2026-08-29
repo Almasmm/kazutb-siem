@@ -101,6 +101,7 @@ function Get-KCSPLabConfig {
     $config.RepoRoot = $root
     $config.LabStateRoot = Join-Path $root '.lab'
     $config.SecretsRoot = Join-Path $config.LabStateRoot 'secrets'
+    $config.ApiCredentialPath = Join-Path $config.SecretsRoot 'lab-api-credential.json'
     if (-not $config.ContainsKey('Prefix') -or -not $config.Prefix) { $config.Prefix = 'KCSP-LAB' }
     Assert-KCSPLabTenant -Config $config
     return $config
@@ -116,8 +117,9 @@ function Assert-KCSPLabTenant {
     if ($tenantId -ne $script:LabTenantId) {
         throw "TENANT_SAFETY_GUARD: Hyper-V automation is pinned to '$script:LabTenantId'; got '$tenantId'."
     }
-    if (-not $Config.ContainsKey('ApiToken') -or [string] $Config.ApiToken -ne 'kcsp-lab-admin') {
-        throw "TENANT_SAFETY_GUARD: Hyper-V automation requires the tenant-scoped kcsp-lab credential."
+    $profile = if ($Config.ContainsKey('Profile')) { ([string] $Config.Profile).ToLowerInvariant() } else { '' }
+    if ($profile -notin 'development', 'test') {
+        throw "TENANT_SAFETY_GUARD: Hyper-V lab credential bootstrap is forbidden for profile '$profile'."
     }
 }
 
@@ -263,6 +265,54 @@ function New-KCSPLabPassword {
     return 'Kc1!' + $builder.ToString()
 }
 
+function New-KCSPLabApiToken {
+    [CmdletBinding()] param()
+    $bytes = New-Object byte[] 48
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    return 'kcsp_lab_' + [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_')
+}
+
+function Get-KCSPLabTenantCredential {
+    [CmdletBinding()] param([Parameter(Mandatory)] $Config)
+    Assert-KCSPLabTenant -Config $Config
+    $path = [string] $Config.ApiCredentialPath
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "LAB_CREDENTIAL_MISSING: run Bootstrap-KCSPLab.ps1 to initialize the development/test credential."
+    }
+    $saved = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    foreach ($property in 'tenant_id','principal','access_token') {
+        if (-not $saved.PSObject.Properties[$property] -or [string]::IsNullOrWhiteSpace([string] $saved.$property)) {
+            throw "LAB_CREDENTIAL_INVALID: missing $property."
+        }
+    }
+    if ($saved.tenant_id -ne $script:LabTenantId -or $saved.principal -ne 'svc-kcsp-lab-admin' -or
+        [string] $saved.access_token -notmatch '^kcsp_lab_[A-Za-z0-9_-]{40,}$') {
+        throw 'LAB_CREDENTIAL_INVALID: tenant, principal or token format mismatch.'
+    }
+    return [pscustomobject]@{ TenantId=$saved.tenant_id; Principal=$saved.principal; AccessToken=$saved.access_token; Path=$path }
+}
+
+function Ensure-KCSPLabTenantCredential {
+    [CmdletBinding()] param([Parameter(Mandatory)] $Config, [switch] $Rotate)
+    Assert-KCSPLabTenant -Config $Config
+    Get-KCSPLabSecretStore -Config $Config | Out-Null
+    if (-not $Rotate -and (Test-Path -LiteralPath $Config.ApiCredentialPath -PathType Leaf)) {
+        $existing = Get-KCSPLabTenantCredential -Config $Config
+        Write-KCSPLabLog 'EXISTS tenant-scoped lab API credential (secret redacted)' -Level INFO
+        return $existing
+    }
+    $token = New-KCSPLabApiToken
+    $payload = [ordered]@{ tenant_id=$script:LabTenantId; principal='svc-kcsp-lab-admin'; access_token=$token; created_at=(Get-Date).ToUniversalTime().ToString('o') }
+    $temporary = "$($Config.ApiCredentialPath).$([guid]::NewGuid().ToString('N')).tmp"
+    [IO.File]::WriteAllText($temporary, ($payload | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+    Protect-KCSPLabFile -Path $temporary
+    Move-Item -LiteralPath $temporary -Destination $Config.ApiCredentialPath -Force -ErrorAction Stop
+    Protect-KCSPLabFile -Path $Config.ApiCredentialPath
+    Write-KCSPLabLog "CREATE tenant-scoped lab API credential for $script:LabTenantId (secret redacted)" -Level INFO
+    return Get-KCSPLabTenantCredential -Config $Config
+}
+
 function Get-KCSPLabCredential {
     <#
         .SYNOPSIS
@@ -302,9 +352,9 @@ function Protect-KCSPLabFile {
         }
         $me = [Security.Principal.WindowsIdentity]::GetCurrent().User
         $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($me, 'FullControl', 'Allow')))
-        Set-Acl -LiteralPath $Path -AclObject $acl
+        Set-Acl -LiteralPath $Path -AclObject $acl -ErrorAction Stop
     } catch {
-        Write-KCSPLabLog "Could not tighten ACL on $(Split-Path -Leaf $Path): $($_.Exception.Message)" -Level WARN
+        throw "SECRET_ACL_FAILED for $(Split-Path -Leaf $Path): $($_.Exception.Message)"
     }
 }
 
@@ -823,10 +873,10 @@ function Set-KCSPLabIngress {
     $targetPort = $Config.ApiPort
 
     $existing = & netsh interface portproxy show v4tov4 2>$null | Out-String
-    $wanted = "$listen{0,-1}" -f ''
     if ($existing -notmatch [regex]::Escape($listen) -or $existing -notmatch "\b$listenPort\b") {
         if ($PSCmdlet.ShouldProcess("$listen`:$listenPort", "Forward to $target`:$targetPort")) {
-            & netsh interface portproxy add v4tov4 listenaddress=$listen listenport=$listenPort connectaddress=$target connectport=$targetPort | Out-Null
+            & netsh interface portproxy add v4tov4 listenaddress=$listen listenport=$listenPort connectaddress=$target connectport=$targetPort protocol=tcp | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "PORTPROXY_CREATE_FAILED: exit code $LASTEXITCODE" }
             Write-KCSPLabLog "Portproxy $listen`:$listenPort -> $target`:$targetPort" -Level INFO
         }
     } else {
@@ -835,6 +885,19 @@ function Set-KCSPLabIngress {
 
     $ruleName = "$($Config.Prefix) - ingress"
     $rule = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
+    $ruleValid = $false
+    if ($rule) {
+        $portFilter = $rule | Get-NetFirewallPortFilter
+        $addressFilter = $rule | Get-NetFirewallAddressFilter
+        $ruleValid = $rule.Enabled -eq 'True' -and $rule.Action -eq 'Allow' -and
+            $portFilter.Protocol -eq 'TCP' -and [string] $portFilter.LocalPort -eq [string] $listenPort -and
+            @($addressFilter.RemoteAddress) -contains $Config.Subnet
+    }
+    if ($rule -and -not $ruleValid) {
+        Remove-NetFirewallRule -DisplayName $ruleName -ErrorAction Stop
+        $rule = $null
+        Write-KCSPLabLog 'REPAIR removed mismatched lab-owned ingress firewall rule' -Level WARN
+    }
     if (-not $rule) {
         if ($PSCmdlet.ShouldProcess($ruleName, 'Create lab-scoped inbound rule')) {
             New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow -Protocol TCP `
@@ -843,6 +906,41 @@ function Set-KCSPLabIngress {
         }
     }
     return "http://$listen`:$listenPort"
+}
+
+function Test-KCSPLabTcpPort {
+    [CmdletBinding()] param([Parameter(Mandatory)] [string] $Address, [Parameter(Mandatory)] [int] $Port, [int] $TimeoutMilliseconds=2000)
+    $client = New-Object Net.Sockets.TcpClient
+    try {
+        $pending = $client.BeginConnect($Address, $Port, $null, $null)
+        if (-not $pending.AsyncWaitHandle.WaitOne($TimeoutMilliseconds, $false)) { return $false }
+        $client.EndConnect($pending)
+        return $client.Connected
+    } catch { return $false } finally { $client.Dispose() }
+}
+
+function Ensure-KCSPLabIngressReady {
+    [CmdletBinding()] param([Parameter(Mandatory)] $Config)
+    Assert-KCSPLabElevated
+    $listen = [string] $Config.HostAddress; $port = [int] $Config.IngressPort
+    $target = '127.0.0.1'; $targetPort = [int] $Config.ApiPort
+    for ($attempt=1; $attempt -le 2; $attempt++) {
+        if (Test-KCSPLabTcpPort -Address $listen -Port $port) {
+            try {
+                $health = Invoke-RestMethod "http://$listen`:$port/health/ready" -TimeoutSec 5 -ErrorAction Stop
+                if ($health.status -eq 'ready') {
+                    Write-KCSPLabLog "VERIFIED host ingress $listen`:$port -> $target`:$targetPort" -Level PASS
+                    return "http://$listen`:$port"
+                }
+            } catch { }
+        }
+        Write-KCSPLabLog "REPAIR refreshing exact KCSP-LAB portproxy (attempt $attempt)" -Level WARN
+        & netsh interface portproxy delete v4tov4 listenaddress=$listen listenport=$port protocol=tcp 2>$null | Out-Null
+        & netsh interface portproxy add v4tov4 listenaddress=$listen listenport=$port connectaddress=$target connectport=$targetPort protocol=tcp | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "PORTPROXY_REPAIR_FAILED: exit code $LASTEXITCODE" }
+        Start-Sleep -Seconds 2
+    }
+    throw "HOST_INGRESS_UNREACHABLE: $listen`:$port does not proxy the ready API at $target`:$targetPort."
 }
 
 function Remove-KCSPLabIngress {
@@ -899,6 +997,56 @@ function Invoke-KCSPLabGuest {
         [object[]] $ArgumentList = @()
     )
     return Invoke-Command -VMName $VMName -Credential $Credential -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList -ErrorAction Stop
+}
+
+function Ensure-KCSPLabGuestNetwork {
+    [CmdletBinding()] param(
+        [Parameter(Mandatory)] $Config,
+        [Parameter(Mandatory)] [string] $VMName,
+        [Parameter(Mandatory)] [pscredential] $Credential,
+        [Parameter(Mandatory)] [string] $Address
+    )
+    Assert-KCSPLabOwned -Config $Config -Name $VMName -Kind 'VM'
+    $hostNic = Get-VMNetworkAdapter -VMName $VMName -ErrorAction Stop | Where-Object { $_.SwitchName -eq $Config.Prefix } | Select-Object -First 1
+    if (-not $hostNic) { throw "GUEST_NETWORK_INVALID: $VMName has no adapter on $($Config.Prefix)." }
+    $mac = ([string] $hostNic.MacAddress).ToUpperInvariant()
+    $dns = if ($Config.ContainsKey('GuestDnsServers')) { @($Config.GuestDnsServers) } else { @('1.1.1.1','8.8.8.8') }
+    $state = Invoke-KCSPLabGuest -VMName $VMName -Credential $Credential -ArgumentList $mac,$Address,[int]$Config.PrefixLength,[string]$Config.HostAddress,$dns -ScriptBlock {
+        param($expectedMac,$expectedAddress,$prefixLength,$gateway,$dnsServers)
+        $ErrorActionPreference = 'Stop'
+        $normalize = { param($value) ([string]$value).Replace(':','').Replace('-','').ToUpperInvariant() }
+        $adapter = Get-NetAdapter | Where-Object { (& $normalize $_.MacAddress) -eq (& $normalize $expectedMac) } | Select-Object -First 1
+        if (-not $adapter) { throw "Hyper-V guest adapter with MAC $expectedMac was not found." }
+        if ($adapter.Status -ne 'Up') { Enable-NetAdapter -InterfaceIndex $adapter.ifIndex -Confirm:$false; Start-Sleep -Seconds 2 }
+        Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object { $_.IPAddress -ne $expectedAddress -or $_.PrefixLength -ne $prefixLength } | Remove-NetIPAddress -Confirm:$false -ErrorAction Stop
+        $current = Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object { $_.IPAddress -eq $expectedAddress -and $_.PrefixLength -eq $prefixLength }
+        if (-not $current) { New-NetIPAddress -InterfaceIndex $adapter.ifIndex -IPAddress $expectedAddress -PrefixLength $prefixLength -ErrorAction Stop | Out-Null }
+        Get-NetRoute -InterfaceIndex $adapter.ifIndex -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
+            Where-Object { $_.NextHop -ne $gateway } | Remove-NetRoute -Confirm:$false -ErrorAction Stop
+        if (-not (Get-NetRoute -InterfaceIndex $adapter.ifIndex -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Where-Object { $_.NextHop -eq $gateway })) {
+            New-NetRoute -InterfaceIndex $adapter.ifIndex -DestinationPrefix '0.0.0.0/0' -NextHop $gateway -RouteMetric 10 -ErrorAction Stop | Out-Null
+        }
+        Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses $dnsServers -ErrorAction Stop
+        [pscustomobject]@{ Hostname=$env:COMPUTERNAME; InterfaceAlias=$adapter.Name; InterfaceIndex=$adapter.ifIndex; MacAddress=$adapter.MacAddress; IPv4=$expectedAddress; PrefixLength=$prefixLength; Gateway=$gateway; DNS=@($dnsServers) }
+    }
+    Write-KCSPLabLog "$VMName VERIFIED guest network: $($state.IPv4)/$($state.PrefixLength) gateway=$($state.Gateway) adapter=$($state.InterfaceAlias)" -Level PASS
+    return $state
+}
+
+function Test-KCSPLabGuestIngress {
+    [CmdletBinding()] param([Parameter(Mandatory)] $Config,[Parameter(Mandatory)][string]$VMName,[Parameter(Mandatory)][pscredential]$Credential)
+    $result = Invoke-KCSPLabGuest -VMName $VMName -Credential $Credential -ArgumentList $Config.HostAddress,[int]$Config.IngressPort -ScriptBlock {
+        param($hostAddress,$port)
+        $tcp = (Test-NetConnection -ComputerName $hostAddress -Port $port -WarningAction SilentlyContinue).TcpTestSucceeded
+        $status = $null
+        if ($tcp) { try { $status=(Invoke-RestMethod "http://$hostAddress`:$port/health/ready" -TimeoutSec 10 -ErrorAction Stop).status } catch { } }
+        [pscustomobject]@{ Tcp=$tcp; Health=$status }
+    }
+    if (-not $result.Tcp -or $result.Health -ne 'ready') { throw "GUEST_INGRESS_UNREACHABLE: $VMName cannot reach ready API at $($Config.HostAddress):$($Config.IngressPort)." }
+    Write-KCSPLabLog "$VMName VERIFIED guest ingress TCP=True health=ready" -Level PASS
+    return $result
 }
 
 function Copy-KCSPLabFileToGuest {
@@ -964,26 +1112,87 @@ function Copy-KCSPLabFileToGuest {
 
 # ------------------------------------------------------------------ KCSP API
 
-function Invoke-KCSPApi {
-    <#  REST helper against the KCSP API with tenant scoping. #>
+function Invoke-KCSPLabApi {
+    <# Central fail-closed REST helper. It loads the ACL-protected lab bearer,
+       applies tenant scope, parses problem responses and never logs secrets. #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] $Config,
         [Parameter(Mandatory)] [string] $Path,
         [string] $Method = 'GET',
         $Body,
-        [int] $TimeoutSeconds = 30
+        [int] $TimeoutSeconds = 30,
+        [string] $TenantId,
+        [string] $Bearer,
+        [switch] $NoBearer
     )
     Assert-KCSPLabTenant -Config $Config
+    if (-not $TenantId) { $TenantId = $Config.TenantId }
+    if (-not $NoBearer -and -not $Bearer) { $Bearer = (Get-KCSPLabTenantCredential -Config $Config).AccessToken }
     $headers = @{
-        Authorization        = "Bearer $($Config.ApiToken)"
-        'X-KCSP-Tenant-ID'   = $Config.TenantId
+        'X-KCSP-Tenant-ID'   = $TenantId
         'Content-Type'       = 'application/json'
+        'X-Request-ID'       = "lab_$([guid]::NewGuid().ToString('N'))"
     }
+    if (-not $NoBearer) { $headers.Authorization = "Bearer $Bearer" }
     $uri = "http://127.0.0.1:$($Config.ApiPort)$Path"
-    $parameters = @{ Uri = $uri; Headers = $headers; Method = $Method; TimeoutSec = $TimeoutSeconds }
+    $parameters = @{ Uri=$uri; Headers=$headers; Method=$Method; TimeoutSec=$TimeoutSeconds; ErrorAction='Stop' }
     if ($null -ne $Body) { $parameters.Body = ($Body | ConvertTo-Json -Depth 8) }
-    return Invoke-RestMethod @parameters
+    try {
+        $response = Invoke-RestMethod @parameters
+        if ($null -eq $response) { throw 'KCSP_LAB_API_CONTRACT_INVALID: empty response.' }
+        return $response
+    } catch {
+        $caught = $_
+        if ($caught.Exception.Message -like 'KCSP_LAB_API_CONTRACT_INVALID:*') { throw }
+        $status = 0; $problemCode = 'request_failed'; $trace = ''
+        $responseProperty = $caught.Exception.PSObject.Properties['Response']
+        $errorResponse = if ($responseProperty) { $responseProperty.Value } else { $null }
+        if ($errorResponse) {
+            try { $status = [int] $errorResponse.StatusCode } catch { }
+            try {
+                $problemText = ''
+                if ($errorResponse.PSObject.Methods['GetResponseStream']) {
+                    $stream = $errorResponse.GetResponseStream()
+                    $reader = New-Object IO.StreamReader($stream)
+                    try { $problemText = $reader.ReadToEnd() } finally { $reader.Dispose() }
+                } elseif ($errorResponse.PSObject.Properties['Content'] -and $errorResponse.Content) {
+                    $problemText = $errorResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                }
+                if ($problemText) {
+                    $problem = $problemText | ConvertFrom-Json
+                    if ($problem.PSObject.Properties['code']) { $problemCode = [string] $problem.code }
+                    if ($problem.PSObject.Properties['trace_id']) { $trace = [string] $problem.trace_id }
+                }
+            } catch { }
+        }
+        throw "KCSP_LAB_API_ERROR status=$status code=$problemCode trace_id=$trace method=$Method path=$Path"
+    }
+}
+
+function Invoke-KCSPApi {
+    <# Compatibility wrapper for existing scripts. #>
+    [CmdletBinding()] param([Parameter(Mandatory)] $Config, [Parameter(Mandatory)] [string] $Path, [string] $Method='GET', $Body, [int] $TimeoutSeconds=30)
+    return Invoke-KCSPLabApi -Config $Config -Path $Path -Method $Method -Body $Body -TimeoutSeconds $TimeoutSeconds
+}
+
+function Test-KCSPLabApiAuthorization {
+    [CmdletBinding()] param([Parameter(Mandatory)] $Config)
+    $credential = Get-KCSPLabTenantCredential -Config $Config
+    Invoke-KCSPLabApi -Config $Config -Path '/api/v1/collectors' | Out-Null
+    $checks = @(
+        @{ Name='cross-tenant'; Expected=403; Call={ Invoke-KCSPLabApi -Config $Config -Path '/api/v1/events?limit=1' -TenantId $script:ForbiddenTenantId | Out-Null } },
+        @{ Name='no-bearer'; Expected=401; Call={ Invoke-KCSPLabApi -Config $Config -Path '/api/v1/collectors' -NoBearer | Out-Null } },
+        @{ Name='wrong-bearer'; Expected=401; Call={ Invoke-KCSPLabApi -Config $Config -Path '/api/v1/collectors' -Bearer 'invalid-lab-credential-value' | Out-Null } },
+        @{ Name='platform-privileged'; Expected=403; Call={ Invoke-KCSPLabApi -Config $Config -Path '/api/v1/demo/reset' -Method POST | Out-Null } }
+    )
+    foreach ($check in $checks) {
+        $denied = $false
+        try { & $check.Call } catch { $denied = $_.Exception.Message -match "status=$($check.Expected)\b" }
+        if (-not $denied) { throw "LAB_AUTH_ISOLATION_FAILED: $($check.Name) did not return $($check.Expected)." }
+    }
+    Write-KCSPLabLog 'VERIFIED lab auth: allowed=200 cross=403 none=401 wrong=401 platform=403' -Level PASS
+    return [pscustomobject]@{ Allowed=200; CrossTenant=403; NoBearer=401; WrongBearer=401; PlatformPrivileged=403; Principal=$credential.Principal }
 }
 
 function Get-KCSPLabCollector {
@@ -1003,7 +1212,15 @@ function New-KCSPLabEnrollmentToken {
         expires_in_seconds = 3600
         max_uses = 1
     }
-    $issued = Invoke-KCSPApi -Config $Config -Path '/api/v1/agent-enrollment/tokens' -Method POST -Body $body
+    $issued = Invoke-KCSPLabApi -Config $Config -Path '/api/v1/agent-enrollment/tokens' -Method POST -Body $body
+    $tokenProperty = $issued.PSObject.Properties['token']
+    $tokenMetadata = if ($tokenProperty) { $tokenProperty.Value } else { $null }
+    if (-not $issued.PSObject.Properties['enrollment_token'] -or
+        [string]::IsNullOrWhiteSpace([string] $issued.enrollment_token) -or
+        $null -eq $tokenMetadata -or -not $tokenMetadata.PSObject.Properties['token_id'] -or
+        -not $tokenMetadata.PSObject.Properties['expires_at'] -or -not $tokenMetadata.PSObject.Properties['max_uses']) {
+        throw 'ENROLLMENT_TOKEN_CONTRACT_INVALID: required enrollment_token/token_id/expires_at/max_uses fields are missing.'
+    }
     return $issued
 }
 

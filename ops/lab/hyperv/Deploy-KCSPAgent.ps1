@@ -91,18 +91,10 @@ foreach ($vm in $targets) {
     if ($vm.State -ne 'Running') { Start-VM -Name $vm.Name; Write-KCSPLabLog "$($vm.Name) starting" -Level INFO }
     Wait-KCSPLabGuest -VMName $vm.Name -Credential $credential -TimeoutSeconds 1800 | Out-Null
 
-    # Static lab address, applied by the guest itself.
-    Invoke-KCSPLabGuest -VMName $vm.Name -Credential $credential -ScriptBlock {
-        if (Test-Path C:\KCSP\Set-LabNetwork.ps1) {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\KCSP\Set-LabNetwork.ps1 | Out-Null
-        }
-    } | Out-Null
-
-    $reachable = Invoke-KCSPLabGuest -VMName $vm.Name -Credential $credential -ArgumentList $config.HostAddress, $config.IngressPort -ScriptBlock {
-        param($labHost, $port)
-        try { (Test-NetConnection -ComputerName $labHost -Port $port -WarningAction SilentlyContinue).TcpTestSucceeded } catch { $false }
-    }
-    Write-KCSPLabLog "$($vm.Name) -> KCSP ingress reachable: $reachable" -Level $(if ($reachable) { 'INFO' } else { 'WARN' })
+    if ($vm.Name -notmatch '-WIN-(\d+)$') { throw "$($vm.Name): cannot derive the configured endpoint index." }
+    $expectedAddress = Get-KCSPLabVMAddress -Config $config -Index ([int] $Matches[1])
+    Ensure-KCSPLabGuestNetwork -Config $config -VMName $vm.Name -Credential $credential -Address $expectedAddress | Out-Null
+    Test-KCSPLabGuestIngress -Config $config -VMName $vm.Name -Credential $credential | Out-Null
 
     # ------------------------------------------------------------------ Sysmon
     if (-not $SkipSysmon) {
