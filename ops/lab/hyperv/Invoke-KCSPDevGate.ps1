@@ -36,11 +36,17 @@ Start-KCSPLabLog -Path (Join-Path $paths.Logs ('devgate-{0}.log' -f (Get-Date -F
 
 $report = New-KCSPLabReport -Name 'KCSP developer gate'
 $repo = $config.RepoRoot
+$reportDirectory = Join-Path $resultsRoot $report.StartedAt.ToString('yyyyMMdd-HHmmss')
+$commandLogRoot = Join-Path $reportDirectory 'command-logs'
+New-Item -ItemType Directory -Path $commandLogRoot -Force | Out-Null
 
 function Invoke-Gate {
     param([string] $Name, [scriptblock] $Body, [switch] $Optional)
     $start = Get-Date
     try {
+        # Never inherit an exit code from an earlier external command. Lab
+        # stages either throw or explicitly set LASTEXITCODE in this scope.
+        $global:LASTEXITCODE = $null
         & $Body
         $ok = ($LASTEXITCODE -eq 0 -or $null -eq $LASTEXITCODE)
         $seconds = ((Get-Date) - $start).TotalSeconds
@@ -55,22 +61,139 @@ function Invoke-Gate {
     }
 }
 
-# --------------------------------------------------------------- portable suites
-if (-not $SkipUnit) {
-    $go = (Get-Command go -ErrorAction SilentlyContinue).Source
-    if (-not $go) {
-        $local = Join-Path $repo '.tools\go\bin\go.exe'
-        if (Test-Path -LiteralPath $local) { $go = $local }
-    }
-    if ($go) {
-        Invoke-Gate 'go.vet' { Push-Location $repo; try { & $go vet ./... } finally { Pop-Location } } | Out-Null
-        Invoke-Gate 'go.test' { Push-Location $repo; try { & $go test ./... -count=1 } finally { Pop-Location } } | Out-Null
-    } else {
-        Add-KCSPLabCheck -Report $report -Name 'go.test' -Status 'SKIP' -Detail 'no Go toolchain on PATH or in .tools\go'
+function Resolve-KCSPApplication {
+    param([Parameter(Mandatory)] [string] $Name)
+    $command = Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $command) { return $null }
+    $pathProperty = $command.PSObject.Properties['Path']
+    if ($pathProperty -and (Test-Path -LiteralPath $pathProperty.Value -PathType Leaf)) { return [string] $pathProperty.Value }
+    $sourceProperty = $command.PSObject.Properties['Source']
+    if ($sourceProperty -and (Test-Path -LiteralPath $sourceProperty.Value -PathType Leaf)) { return [string] $sourceProperty.Value }
+    return $null
+}
+
+function Resolve-KCSPGoToolchain {
+    $normal = Resolve-KCSPApplication -Name 'go'
+    if ($normal) { return [pscustomobject]@{ Kind='native'; Executable=$normal; PrefixArguments=@() } }
+
+    $localCandidates = @(
+        (Join-Path $repo '.tools\go\bin\go.exe'),
+        (Join-Path $repo '.tools\go\bin\go')
+    )
+    foreach ($candidate in $localCandidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return [pscustomobject]@{ Kind='repository-local'; Executable=$candidate; PrefixArguments=@() }
+        }
     }
 
-    Invoke-Gate 'web.test' { & npm --prefix (Join-Path $repo 'apps\web') run test --if-present } | Out-Null
-    Invoke-Gate 'web.build' { & npm --prefix (Join-Path $repo 'apps\web') run build } | Out-Null
+    $docker = Resolve-KCSPApplication -Name 'docker'
+    if ($docker) {
+        & $docker version --format '{{.Server.Version}}' *> $null
+        if ($LASTEXITCODE -eq 0) {
+            return [pscustomobject]@{
+                Kind='docker'; Executable=$docker
+                PrefixArguments=@('run','--rm','--mount',"type=bind,source=$repo,target=/src",'-w','/src','golang:1.25','go')
+            }
+        }
+    }
+    throw 'TOOLCHAIN_MISSING: no Go application on PATH, repository-local Go, or reachable Docker Go toolchain.'
+}
+
+function Resolve-KCSPRaceToolchain {
+    param([Parameter(Mandatory)] $Primary)
+    if ($Primary.Kind -eq 'docker') { return $Primary }
+    $docker = Resolve-KCSPApplication -Name 'docker'
+    if ($docker) {
+        & $docker version --format '{{.Server.Version}}' *> $null
+        if ($LASTEXITCODE -eq 0) {
+            return [pscustomobject]@{
+                Kind='docker-race'; Executable=$docker
+                PrefixArguments=@('run','--rm','--mount',"type=bind,source=$repo,target=/src",'-w','/src','golang:1.25','go')
+            }
+        }
+    }
+    return $Primary
+}
+
+function Format-KCSPCommandLine {
+    param([string] $Executable, [string[]] $Arguments)
+    $formatted = @($Executable) + @($Arguments | ForEach-Object {
+        if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+    })
+    return ($formatted -join ' ')
+}
+
+function Invoke-GateCommand {
+    param(
+        [Parameter(Mandatory)] [string] $Name,
+        [Parameter(Mandatory)] [string] $Executable,
+        [Parameter(Mandatory)] [string[]] $Arguments,
+        [Parameter(Mandatory)] [string] $WorkingDirectory
+    )
+    if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
+        Add-KCSPLabCheck -Report $report -Name $Name -Status 'FAIL' -Detail "TOOLCHAIN_MISSING: $Executable"
+        return $false
+    }
+    $safeName = $Name -replace '[^A-Za-z0-9_.-]', '_'
+    $stdoutPath = Join-Path $commandLogRoot "$safeName.stdout.log"
+    $stderrPath = Join-Path $commandLogRoot "$safeName.stderr.log"
+    $commandLine = Format-KCSPCommandLine -Executable $Executable -Arguments $Arguments
+    $started = Get-Date
+    $exitCode = -1
+    try {
+        Push-Location $WorkingDirectory
+        try {
+            $global:LASTEXITCODE = 0
+            & $Executable @Arguments 1> $stdoutPath 2> $stderrPath
+            $exitCode = [int] $LASTEXITCODE
+        } finally { Pop-Location }
+    } catch {
+        [IO.File]::AppendAllText($stderrPath, $_.Exception.ToString() + [Environment]::NewLine)
+    }
+    $seconds = ((Get-Date) - $started).TotalSeconds
+    if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath | Write-Host }
+    if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath | Write-Host }
+    $report.Facts["command.$Name"] = [ordered]@{
+        executable=$Executable; command=$commandLine; exit_code=$exitCode
+        stdout=$stdoutPath; stderr=$stderrPath; duration_seconds=[math]::Round($seconds,3)
+    }
+    $ok = $exitCode -eq 0
+    Add-KCSPLabCheck -Report $report -Name $Name -Status $(if ($ok) { 'PASS' } else { 'FAIL' }) `
+        -Detail "exit_code=$exitCode executable=$Executable stdout=$stdoutPath stderr=$stderrPath" -DurationSeconds $seconds
+    return $ok
+}
+
+# --------------------------------------------------------------- portable suites
+if (-not $SkipUnit) {
+    try {
+        $goTool = Resolve-KCSPGoToolchain
+        $report.Facts['go.toolchain'] = [ordered]@{ kind=$goTool.Kind; executable=$goTool.Executable }
+        Invoke-GateCommand 'portable.go.vet' $goTool.Executable (@($goTool.PrefixArguments) + @('vet','./...')) $repo | Out-Null
+        Invoke-GateCommand 'portable.go.test' $goTool.Executable (@($goTool.PrefixArguments) + @('test','./...','-count=1')) $repo | Out-Null
+        $raceTool = Resolve-KCSPRaceToolchain -Primary $goTool
+        Invoke-GateCommand 'portable.go.race' $raceTool.Executable (@($raceTool.PrefixArguments) + @('test','-race','./...','-count=1')) $repo | Out-Null
+
+        $agentOutput = Join-Path $commandLogRoot 'kcsp-agent.exe'
+        Invoke-GateCommand 'windows.agent.build' $goTool.Executable (@($goTool.PrefixArguments) + @('build','-trimpath','-o',$agentOutput,'./cmd/agent')) $repo | Out-Null
+    } catch {
+        Add-KCSPLabCheck -Report $report -Name 'portable.go.toolchain' -Status 'FAIL' -Detail $_.Exception.Message
+    }
+
+    $windowsPowerShell = Resolve-KCSPApplication -Name 'powershell.exe'
+    if ($windowsPowerShell) {
+        $pesterCommand = "Invoke-Pester -Path '$((Join-Path $PSScriptRoot 'KCSPLab.Network.Tests.ps1').Replace("'", "''"))' -EnableExit"
+        Invoke-GateCommand 'windows.powershell.test' $windowsPowerShell @('-NoProfile','-Command',$pesterCommand) $repo | Out-Null
+    } else {
+        Add-KCSPLabCheck -Report $report -Name 'windows.powershell.test' -Status 'FAIL' -Detail 'TOOLCHAIN_MISSING: powershell.exe'
+    }
+
+    $npm = Resolve-KCSPApplication -Name 'npm'
+    if ($npm) {
+        Invoke-GateCommand 'portable.web.test' $npm @('--prefix',(Join-Path $repo 'apps\web'),'run','test','--if-present') $repo | Out-Null
+        Invoke-GateCommand 'portable.web.build' $npm @('--prefix',(Join-Path $repo 'apps\web'),'run','build') $repo | Out-Null
+    } else {
+        Add-KCSPLabCheck -Report $report -Name 'portable.web.toolchain' -Status 'FAIL' -Detail 'TOOLCHAIN_MISSING: npm application not found'
+    }
 }
 
 # ---------------------------------------------------------- Windows acceptance
