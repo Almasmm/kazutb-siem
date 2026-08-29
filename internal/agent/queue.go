@@ -154,7 +154,7 @@ func (q *DiskQueue) enqueueLocked(item QueueItem, name string) (QueueItem, error
 	}
 	temporaryName := temporary.Name()
 	defer func() { _ = os.Remove(temporaryName) }()
-	if err := temporary.Chmod(0o600); err != nil {
+	if err := securePrivateFile(temporary); err != nil {
 		_ = temporary.Close()
 		return QueueItem{}, fmt.Errorf("secure queued event: %w", err)
 	}

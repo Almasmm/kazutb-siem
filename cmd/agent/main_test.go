@@ -7,12 +7,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	agentstate "github.com/kcsp/platform/internal/agent"
 	"github.com/kcsp/platform/internal/core"
 )
 
@@ -59,12 +59,8 @@ func TestRunEnrollOnlyPersistsAndReusesCredential(t *testing.T) {
 		t.Fatalf("first enrollment-only run failed: %v", err)
 	}
 	credentialPath := filepath.Join(stateDirectory, "credential.json")
-	info, err := os.Stat(credentialPath)
-	if err != nil {
-		t.Fatalf("credential was not persisted: %v", err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("credential permissions=%#o, want 0600", info.Mode().Perm())
+	if err := agentstate.ValidatePrivateFileSecurity(credentialPath); err != nil {
+		t.Fatalf("credential security is not private: %v", err)
 	}
 	if err := run(context.Background(), logger); err != nil {
 		t.Fatalf("credential reuse run failed: %v", err)

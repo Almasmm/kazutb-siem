@@ -150,7 +150,7 @@ func (s *JournalSource) CommitEvent(event Event) error {
 	}
 	name := temporary.Name()
 	defer func() { _ = os.Remove(name) }()
-	if err := temporary.Chmod(0o600); err != nil {
+	if err := securePrivateFile(temporary); err != nil {
 		_ = temporary.Close()
 		return fmt.Errorf("secure journald checkpoint: %w", err)
 	}

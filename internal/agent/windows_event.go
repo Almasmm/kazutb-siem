@@ -101,7 +101,7 @@ type WindowsEventSource struct {
 	reader         eventReaderFunc
 	now            func() time.Time
 
-	quarantined uint64
+	quarantined  uint64
 	lastEncoding WindowsTextEncoding
 }
 
@@ -524,7 +524,7 @@ func writeCheckpointFile(name, pattern string, cursor uint64) error {
 	}
 	temporaryName := temporary.Name()
 	defer func() { _ = os.Remove(temporaryName) }()
-	if err := temporary.Chmod(0o600); err != nil {
+	if err := securePrivateFile(temporary); err != nil {
 		_ = temporary.Close()
 		return fmt.Errorf("secure checkpoint: %w", err)
 	}

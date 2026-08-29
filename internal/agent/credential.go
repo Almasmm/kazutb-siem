@@ -325,8 +325,8 @@ func readPrivateFile(path string, maximumBytes int64) ([]byte, error) {
 	if !info.Mode().IsRegular() || info.Size() > maximumBytes {
 		return nil, errors.New("agent private state file is invalid or oversized")
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
-		return nil, errors.New("agent private state file has group or world permissions")
+	if err := ValidatePrivateFileSecurity(selected); err != nil {
+		return nil, err
 	}
 	body, err := io.ReadAll(io.LimitReader(file, maximumBytes+1))
 	if err != nil {
@@ -353,7 +353,7 @@ func writePrivateJSON(path string, value interface{}) error {
 	}
 	temporaryName := temporary.Name()
 	defer func() { _ = os.Remove(temporaryName) }()
-	if err := temporary.Chmod(0o600); err != nil {
+	if err := securePrivateFile(temporary); err != nil {
 		_ = temporary.Close()
 		return err
 	}

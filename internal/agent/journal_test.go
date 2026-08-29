@@ -44,12 +44,8 @@ func TestJournalCheckpointIsDurable(t *testing.T) {
 	if err != nil || checkpoint != "s=abc;i=42" {
 		t.Fatalf("checkpoint = %q, err = %v", checkpoint, err)
 	}
-	info, err := os.Stat(filepath.Join(directory, "journald.checkpoint"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm()&0o077 != 0 {
-		t.Fatalf("checkpoint permissions = %o", info.Mode().Perm())
+	if err := ValidatePrivateFileSecurity(filepath.Join(directory, "journald.checkpoint")); err != nil {
+		t.Fatalf("checkpoint security is not private: %v", err)
 	}
 }
 

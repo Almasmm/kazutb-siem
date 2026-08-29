@@ -72,8 +72,8 @@ func TestCredentialManagerEnrollsPersistsReloadsAndRotates(t *testing.T) {
 	if strings.Contains(string(body), "kcsp_enroll_test") {
 		t.Fatal("bootstrap enrollment token was persisted")
 	}
-	if info, err := os.Stat(credentialPath); err != nil || info.Mode().Perm()&0o077 != 0 {
-		t.Fatalf("credential permissions are not private: info=%v err=%v", info, err)
+	if err := ValidatePrivateFileSecurity(credentialPath); err != nil {
+		t.Fatalf("credential security is not private: %v", err)
 	}
 	reloaded, err := OpenCredentialManager(CredentialManagerConfig{ServerURL: server.URL, TenantID: "tenant-a", StateDirectory: directory, AllowInsecure: true})
 	if err != nil {
