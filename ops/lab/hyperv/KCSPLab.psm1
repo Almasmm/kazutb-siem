@@ -362,6 +362,20 @@ function Test-KCSPLabPathEqual {
     } catch { return $false }
 }
 
+function ConvertTo-KCSPLabObjectArray {
+    <# PowerShell 5.1 and 7.x both throw ArgumentException when @() wraps a
+       Generic.List[object]. Copy explicitly and emit the array as one object
+       so 0/1/N inputs always retain the System.Object[] contract. #>
+    [CmdletBinding()] param([AllowNull()] [System.Collections.IEnumerable] $InputCollection)
+    $buffer = New-Object System.Collections.Generic.List[object]
+    if ($null -ne $InputCollection) {
+        foreach ($item in $InputCollection) { $buffer.Add($item) }
+    }
+    [object[]] $result = [object[]]::new($buffer.Count)
+    $buffer.CopyTo($result)
+    Write-Output -NoEnumerate $result
+}
+
 function Get-KCSPLabBaseDependencies {
     <# Walk each attached lab VM disk through every AVHDX/VHDX parent. This is
        the authoritative guard before a base can ever be replaced. #>
@@ -372,6 +386,7 @@ function Get-KCSPLabBaseDependencies {
         $runtimeProof = @(Get-VMSnapshot -VMName $vm.Name -Name 'CLEAN_WINDOWS' -ErrorAction SilentlyContinue).Count -gt 0
         foreach ($drive in @(Get-VMHardDiskDrive -VMName $vm.Name -ErrorAction Stop)) {
             $leaf = [string] $drive.Path
+            $leafVhd = Get-VHD -Path $leaf -ErrorAction Stop
             $current = $leaf
             $chain = New-Object System.Collections.Generic.List[string]
             $visited = @{}
@@ -380,7 +395,9 @@ function Get-KCSPLabBaseDependencies {
                 $chain.Add($current)
                 if (Test-KCSPLabPathEqual -Left $current -Right $BasePath) {
                     $dependencies.Add([pscustomobject]@{
-                        VMName=$vm.Name; VMState=[string] $vm.State; DiskPath=$leaf
+                        VMName=$vm.Name; VMState=[string] $vm.State; DiskPath=$leaf; ChildPath=$leaf
+                        ParentPath=[string] $leafVhd.ParentPath; DiskType=[string] $leafVhd.VhdType
+                        Attached=[bool] $leafVhd.Attached; OwnedByLab=$true
                         Chain=@($chain); CleanWindowsCheckpoint=$runtimeProof
                     })
                     break
@@ -405,6 +422,7 @@ function Get-KCSPLabBaseDependencies {
         if ($knownLeaves.ContainsKey($file.FullName.ToLowerInvariant()) -or
             (Test-KCSPLabPathEqual -Left $file.FullName -Right $BasePath)) { continue }
         $current = $file.FullName
+        try { $leafVhd = Get-VHD -Path $file.FullName -ErrorAction Stop } catch { continue }
         $chain = New-Object System.Collections.Generic.List[string]
         $visited = @{}
         while (-not [string]::IsNullOrWhiteSpace($current) -and -not $visited.ContainsKey($current.ToLowerInvariant())) {
@@ -412,7 +430,9 @@ function Get-KCSPLabBaseDependencies {
             $chain.Add($current)
             if (Test-KCSPLabPathEqual -Left $current -Right $BasePath) {
                 $dependencies.Add([pscustomobject]@{
-                    VMName='unattached-lab-disk'; VMState='Detached'; DiskPath=$file.FullName
+                    VMName='unattached-lab-disk'; VMState='Detached'; DiskPath=$file.FullName; ChildPath=$file.FullName
+                    ParentPath=[string] $leafVhd.ParentPath; DiskType=[string] $leafVhd.VhdType
+                    Attached=[bool] $leafVhd.Attached; OwnedByLab=$true
                     Chain=@($chain); CleanWindowsCheckpoint=$false
                 })
                 break
@@ -420,7 +440,8 @@ function Get-KCSPLabBaseDependencies {
             try { $current = [string] (Get-VHD -Path $current -ErrorAction Stop).ParentPath } catch { break }
         }
     }
-    return @($dependencies)
+    $result = ConvertTo-KCSPLabObjectArray -InputCollection $dependencies
+    Write-Output -NoEnumerate $result
 }
 
 function Test-KCSPLabOfflineWindowsImage {
@@ -471,7 +492,7 @@ function Get-KCSPLabBaseImageState {
     $vhdValid = [string] $vhd.VhdType -eq 'Dynamic' -and
         [string] $vhd.VhdFormat -eq 'VHDX' -and
         [int64] $vhd.Size -eq [int64] $Config.VMDiskSizeBytes
-    $dependencies = @(Get-KCSPLabBaseDependencies -Config $Config -BasePath $basePath)
+    [object[]] $dependencies = Get-KCSPLabBaseDependencies -Config $Config -BasePath $basePath
     $runtimeProof = @($dependencies | Where-Object { $_.CleanWindowsCheckpoint }).Count -gt 0
     $offlineValid = $false
     if ($vhdValid -and -not $markerValid -and -not $runtimeProof -and -not $vhd.Attached) {

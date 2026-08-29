@@ -2,6 +2,7 @@
 
 $modulePath = Join-Path $PSScriptRoot 'KCSPLab.psm1'
 Import-Module $modulePath -Force
+Set-StrictMode -Version Latest
 
 function New-TestBaseState {
     param(
@@ -100,5 +101,80 @@ Describe 'KCSP golden image lifecycle' {
         Ensure-KCSPLabBaseImage -Config @{} | Out-Null
         Assert-MockCalled Remove-VMSnapshot -Times 0 -Exactly -ModuleName KCSPLab -Scope It
         Remove-Variable KCSPTestBaseState -Scope Global -ErrorAction SilentlyContinue
+    }
+}
+
+Describe 'KCSP dependency collection contract' {
+    BeforeEach {
+        $global:KCSPDependencyTestVMs = @()
+        Mock Get-KCSPLabVMs { $global:KCSPDependencyTestVMs } -ModuleName KCSPLab
+        Mock Assert-KCSPLabOwned {} -ModuleName KCSPLab
+        Mock Get-VMSnapshot { [pscustomobject]@{ Name='CLEAN_WINDOWS' } } -ModuleName KCSPLab
+        Mock Get-VMHardDiskDrive {
+            param($VMName)
+            [pscustomobject]@{ Path="C:\Hyper-V\KCSP-LAB\VMs\$VMName\$VMName.vhdx" }
+        } -ModuleName KCSPLab
+        Mock Get-VHD {
+            param($Path)
+            if ($Path -like '*WIN-BASE.vhdx') {
+                return [pscustomobject]@{ Path=$Path; ParentPath=''; VhdType='Dynamic'; Attached=$true }
+            }
+            return [pscustomobject]@{ Path=$Path; ParentPath='C:\Hyper-V\KCSP-LAB\Base\KCSP-LAB-WIN-BASE.vhdx'; VhdType='Differencing'; Attached=$true }
+        } -ModuleName KCSPLab
+        Mock Get-KCSPLabPaths { @{ VMs='C:\Hyper-V\KCSP-LAB\VMs' } } -ModuleName KCSPLab
+        Mock Get-ChildItem { @() } -ModuleName KCSPLab
+    }
+
+    It 'returns System.Object[] for 0, 1 and multiple List[object] dependencies' {
+        foreach ($count in 0, 1, 3) {
+            $source = New-Object System.Collections.Generic.List[object]
+            for ($index = 0; $index -lt $count; $index++) {
+                $source.Add([pscustomobject]@{ VMName="KCSP-LAB-WIN-$index"; ChildPath="child-$index.vhdx" })
+            }
+            $result = ConvertTo-KCSPLabObjectArray -InputCollection $source
+            $null -eq $result | Should Be $false
+            $result.GetType().FullName | Should Be 'System.Object[]'
+            $result.Count | Should Be $count
+        }
+    }
+
+    It 'returns System.Object[] for 0, 1 and multiple List[PSObject] dependencies' {
+        foreach ($count in 0, 1, 3) {
+            $source = New-Object System.Collections.Generic.List[psobject]
+            for ($index = 0; $index -lt $count; $index++) {
+                $source.Add([pscustomobject]@{ VMName="KCSP-LAB-WIN-$index"; ChildPath="child-$index.vhdx" })
+            }
+            $result = ConvertTo-KCSPLabObjectArray -InputCollection $source
+            $null -eq $result | Should Be $false
+            $result.GetType().FullName | Should Be 'System.Object[]'
+            $result.Count | Should Be $count
+        }
+    }
+
+    It 'does not contain the failing generic List wrapping return pattern' {
+        $source = Get-Content -LiteralPath $modulePath -Raw
+        $source | Should Not Match 'return\s+@\(\$dependencies\)'
+    }
+
+    It 'keeps the Get-KCSPLabBaseDependencies return type stable for 0, 1 and N real-contract objects' {
+        $base = 'C:\Hyper-V\KCSP-LAB\Base\KCSP-LAB-WIN-BASE.vhdx'
+        foreach ($count in 0, 1, 3) {
+            $global:KCSPDependencyTestVMs = @(for ($index=1; $index -le $count; $index++) {
+                [pscustomobject]@{ Name="KCSP-LAB-WIN-0$index"; State='Running' }
+            })
+            $result = Get-KCSPLabBaseDependencies -Config @{ Prefix='KCSP-LAB' } -BasePath $base
+            $result.GetType().FullName | Should Be 'System.Object[]'
+            $result.Count | Should Be $count
+            foreach ($dependency in $result) {
+                $names = @($dependency.PSObject.Properties.Name)
+                ($names -contains 'VMName') | Should Be $true
+                ($names -contains 'ChildPath') | Should Be $true
+                ($names -contains 'ParentPath') | Should Be $true
+                ($names -contains 'DiskType') | Should Be $true
+                ($names -contains 'Attached') | Should Be $true
+                ($names -contains 'OwnedByLab') | Should Be $true
+            }
+        }
+        Remove-Variable KCSPDependencyTestVMs -Scope Global -ErrorAction SilentlyContinue
     }
 }
