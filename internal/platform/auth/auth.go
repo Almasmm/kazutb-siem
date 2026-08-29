@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/kcsp/platform/internal/core"
 	"github.com/kcsp/platform/internal/platform/tenant"
 )
 
@@ -35,7 +36,15 @@ type DemoAuthenticator struct {
 }
 
 func NewDemoAuthenticator() *DemoAuthenticator {
-	return &DemoAuthenticator{tokens: map[string]Principal{
+	return newDemoAuthenticator(false)
+}
+
+func NewDemoAuthenticatorWithLab() *DemoAuthenticator {
+	return newDemoAuthenticator(true)
+}
+
+func newDemoAuthenticator(includeLab bool) *DemoAuthenticator {
+	tokens := map[string]Principal{
 		"kcsp-demo-l1":                 demoRolePrincipal("user-soc-l1", "Айдана Сәрсен", "soc_l1"),
 		"kcsp-demo-l2":                 demoRolePrincipal("user-soc-l2", "Данияр Нұрлан", "soc_l2"),
 		"kcsp-demo-auditor":            demoRolePrincipal("user-auditor", "Internal Auditor", "auditor"),
@@ -46,7 +55,13 @@ func NewDemoAuthenticator() *DemoAuthenticator {
 		"kcsp-demo-tenant-admin":       demoRolePrincipal("user-tenant-admin", "Tenant Administrator", "tenant_admin"),
 		"kcsp-demo-mssp":               demoRolePrincipal("user-mssp-manager", "MSSP Operations Manager", "mssp_manager"),
 		"kcsp-demo-admin":              demoRolePrincipal("user-platform-admin", "KCSP Administrator", "platform_administrator"),
-	}}
+	}
+	if includeLab {
+		principal := demoRolePrincipal("svc-kcsp-lab-admin", "KCSP Hyper-V Lab", "tenant_admin")
+		principal.AllowedTenants = map[string]bool{core.LabTenantID: true}
+		tokens["kcsp-lab-admin"] = principal
+	}
+	return &DemoAuthenticator{tokens: tokens}
 }
 
 func demoRolePrincipal(id, name, role string) Principal {

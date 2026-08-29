@@ -6,7 +6,10 @@ import (
 	"time"
 )
 
-const DefaultTenantID = "university-kulazhanov"
+const (
+	DefaultTenantID = "university-kulazhanov"
+	LabTenantID     = "kcsp-lab"
+)
 
 type Severity string
 

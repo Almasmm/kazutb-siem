@@ -50,6 +50,13 @@ func main() {
 func run(logger *slog.Logger) error {
 	profile := envOr("KCSP_PROFILE", "production")
 	authMode := envOr("KCSP_AUTH_MODE", "oidc")
+	labBootstrap, err := strconv.ParseBool(envOr("KCSP_LAB_BOOTSTRAP", "false"))
+	if err != nil {
+		return errors.New("KCSP_LAB_BOOTSTRAP must be true or false")
+	}
+	if labBootstrap && profile != "development" && profile != "test" {
+		return bootstrap.ErrLabBootstrapForbidden
+	}
 	observability.Configure("api", envOr("KCSP_VERSION", "development"))
 	if authMode == "demo" && profile != "development" && profile != "test" {
 		return errors.New("demo authentication is forbidden outside development/test profiles")
@@ -71,6 +78,11 @@ func run(logger *slog.Logger) error {
 	tenantName := envOr("KCSP_DEFAULT_TENANT_NAME", "K. Kulazhanov University")
 	if err := repository.EnsureTenant(startupContext, tenantID, tenantName); err != nil {
 		return fmt.Errorf("initialize default tenant: %w", err)
+	}
+	if labBootstrap {
+		if err := bootstrap.EnsureLabTenant(startupContext, repository, profile); err != nil {
+			return fmt.Errorf("initialize Hyper-V lab tenant: %w", err)
+		}
 	}
 	if authMode == "demo" {
 		_, err := repository.RegisterCollector(startupContext, core.Collector{
@@ -129,7 +141,7 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("configure Kafka envelope integrity: %w", err)
 	}
 	gateway := ingest.NewGateway(publisher, envelopeAuthenticator)
-	primaryAuthenticator, err := configureAuthenticator(startupContext, profile, authMode)
+	primaryAuthenticator, err := configureAuthenticator(startupContext, profile, authMode, labBootstrap)
 	if err != nil {
 		return err
 	}
@@ -279,11 +291,14 @@ func positiveInt16Env(key string, fallback int16) int16 {
 	return int16(value)
 }
 
-func configureAuthenticator(ctx context.Context, profile, mode string) (httpapi.Authenticator, error) {
+func configureAuthenticator(ctx context.Context, profile, mode string, labBootstrap bool) (httpapi.Authenticator, error) {
 	switch mode {
 	case "demo":
 		if profile != "development" && profile != "test" {
 			return nil, errors.New("demo authentication is forbidden outside development/test profiles")
+		}
+		if labBootstrap {
+			return auth.NewDemoAuthenticatorWithLab(), nil
 		}
 		return auth.NewDemoAuthenticator(), nil
 	case "oidc":

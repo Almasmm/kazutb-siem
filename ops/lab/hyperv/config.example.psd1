@@ -25,8 +25,8 @@
 
     # Lab tenant, kept separate from the university pilot tenant so lab events
     # never mix with real pilot telemetry.
-    TenantId = 'university-kulazhanov'
-    ApiToken = 'kcsp-demo-admin'
+    TenantId = 'kcsp-lab'
+    ApiToken = 'kcsp-lab-admin'
 
     # Guest VM sizing.
     VMGeneration   = 2

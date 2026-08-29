@@ -3,6 +3,8 @@ package auth
 import (
 	"net/http"
 	"testing"
+
+	"github.com/kcsp/platform/internal/core"
 )
 
 func TestDemoPermissionAndTenantBoundaries(t *testing.T) {
@@ -62,5 +64,23 @@ func TestUnknownDemoTokenIsRejected(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer not-a-real-token")
 	if _, err := NewDemoAuthenticator().Authenticate(request); err == nil {
 		t.Fatal("unknown token was accepted")
+	}
+}
+
+func TestLabCredentialCannotBeReusedAcrossTenants(t *testing.T) {
+	request, _ := http.NewRequest(http.MethodGet, "http://kcsp.local", nil)
+	request.Header.Set("Authorization", "Bearer kcsp-lab-admin")
+	principal, err := NewDemoAuthenticatorWithLab().Authenticate(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !principal.CanAccessTenant(core.LabTenantID) {
+		t.Fatal("lab credential cannot access kcsp-lab")
+	}
+	if principal.CanAccessTenant(core.DefaultTenantID) || principal.PlatformScope {
+		t.Fatal("lab credential can be reused outside kcsp-lab")
+	}
+	if _, err := NewDemoAuthenticator().Authenticate(request); err == nil {
+		t.Fatal("lab credential is active when lab bootstrap is disabled")
 	}
 }

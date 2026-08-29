@@ -16,6 +16,13 @@ Windows hypervisor platform, and a second hypervisor conflicts with it.
 
 Everything after that is automatic.
 
+The automation is pinned to the development-only tenant `kcsp-lab` and uses
+the tenant-scoped `kcsp-lab-admin` credential. Configuration loading and every
+API call fail closed if another tenant (especially `university-kulazhanov`) is
+supplied. The API creates `kcsp-lab` idempotently only when
+`KCSP_LAB_BOOTSTRAP=true` in a `development` or `test` profile; production
+rejects that setting.
+
 ```powershell
 # from an elevated PowerShell, at the repository root
 .\ops\lab\hyperv\Bootstrap-KCSPLab.ps1
@@ -89,6 +96,10 @@ The lab is deliberately isolated from the university LAN.
 whose name does not carry the lab prefix. Disks are only deleted from under the
 lab VM directory. Docker volumes, KCSP data and the physical pilot endpoint
 `kaztbu` are never in scope.
+
+Destroy and reset operations also load the pinned tenant configuration before
+doing any work. They have no caller-selectable database tenant and cannot reset
+or delete `university-kulazhanov`, its collector, or its backlog.
 
 The physical pilot is for milestone acceptance. Day-to-day regression belongs
 here.

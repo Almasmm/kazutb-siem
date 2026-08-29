@@ -11,6 +11,8 @@
 Set-StrictMode -Version Latest
 
 $script:LabLogPath = $null
+$script:LabTenantId = 'kcsp-lab'
+$script:ForbiddenTenantId = 'university-kulazhanov'
 
 # ---------------------------------------------------------------- configuration
 
@@ -50,7 +52,23 @@ function Get-KCSPLabConfig {
     $config.LabStateRoot = Join-Path $root '.lab'
     $config.SecretsRoot = Join-Path $config.LabStateRoot 'secrets'
     if (-not $config.ContainsKey('Prefix') -or -not $config.Prefix) { $config.Prefix = 'KCSP-LAB' }
+    Assert-KCSPLabTenant -Config $config
     return $config
+}
+
+function Assert-KCSPLabTenant {
+    <# Hard fail before any lab action can address the university tenant. #>
+    [CmdletBinding()] param([Parameter(Mandatory)] $Config)
+    $tenantId = if ($Config.ContainsKey('TenantId')) { [string] $Config.TenantId } else { '' }
+    if ($tenantId -eq $script:ForbiddenTenantId) {
+        throw "TENANT_SAFETY_GUARD: Hyper-V automation must never use '$script:ForbiddenTenantId'."
+    }
+    if ($tenantId -ne $script:LabTenantId) {
+        throw "TENANT_SAFETY_GUARD: Hyper-V automation is pinned to '$script:LabTenantId'; got '$tenantId'."
+    }
+    if (-not $Config.ContainsKey('ApiToken') -or [string] $Config.ApiToken -ne 'kcsp-lab-admin') {
+        throw "TENANT_SAFETY_GUARD: Hyper-V automation requires the tenant-scoped kcsp-lab credential."
+    }
 }
 
 function Get-KCSPLabPaths {
@@ -513,6 +531,7 @@ function Invoke-KCSPApi {
         $Body,
         [int] $TimeoutSeconds = 30
     )
+    Assert-KCSPLabTenant -Config $Config
     $headers = @{
         Authorization        = "Bearer $($Config.ApiToken)"
         'X-KCSP-Tenant-ID'   = $Config.TenantId
