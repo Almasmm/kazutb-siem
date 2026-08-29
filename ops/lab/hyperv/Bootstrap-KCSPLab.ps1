@@ -61,7 +61,7 @@ if (-not $hyperV.HostReachable) {
 }
 
 # ---------------------------------------------------------------- 2. lab plumbing
-Initialize-KCSPLabNetwork -Config $config | Out-Null
+Ensure-KCSPLabNetwork -Config $config | Out-Null
 $ingress = Set-KCSPLabIngress -Config $config
 Write-KCSPLabLog "Lab ingress ready: $ingress" -Level PASS
 
@@ -89,8 +89,8 @@ if (-not $SkipStack) {
 
 # --------------------------------------------------------------- 4. golden image
 $baseDisk = Join-Path $paths.Base "$($config.Prefix)-WIN-BASE.vhdx"
-if ((Test-Path -LiteralPath $baseDisk) -and -not $Force) {
-    Write-KCSPLabLog "Golden image already present" -Level INFO
+if ((Test-KCSPLabBaseImage -Config $config) -and -not $Force) {
+    Write-KCSPLabLog "VERIFIED golden image $baseDisk" -Level INFO
 } else {
     $isoPresent = $config.IsoPath -and (Test-Path -LiteralPath $config.IsoPath)
     if (-not $isoPresent) {
@@ -102,7 +102,11 @@ if ((Test-Path -LiteralPath $baseDisk) -and -not $Force) {
         Write-KCSPLabLog 'Everything after that step is automatic. Re-run this script once the ISO is in place.' -Level ERROR
         throw "WINDOWS_ISO_REQUIRED: expected an official Windows ISO in $($paths.ISOs)"
     }
-    Write-KCSPLabLog 'Building the golden Windows image (one-time, several minutes)' -Level STEP
+    if (Test-Path -LiteralPath $baseDisk) {
+        Write-KCSPLabLog 'REPAIR incomplete or invalid golden image' -Level WARN
+    } else {
+        Write-KCSPLabLog 'CREATE golden Windows image (one-time, several minutes)' -Level STEP
+    }
     & (Join-Path $PSScriptRoot 'New-KCSPWindowsBase.ps1') -ConfigPath $ConfigPath -Force:$Force | Out-Null
 }
 

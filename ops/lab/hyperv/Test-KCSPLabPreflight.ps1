@@ -48,8 +48,8 @@ try {
     $required = @(
         'Get-KCSPLabConfig', 'Get-KCSPLabPaths', 'Write-KCSPLabLog', 'Test-KCSPLabElevated',
         'Assert-KCSPLabElevated', 'Get-KCSPLabHyperVStatus', 'Get-KCSPLabCredential',
-        'Get-KCSPLabVMName', 'Get-KCSPLabVMAddress', 'Assert-KCSPLabOwned', 'Get-KCSPLabVMs',
-        'Initialize-KCSPLabNetwork', 'Set-KCSPLabIngress', 'Wait-KCSPLabGuest', 'Invoke-KCSPLabGuest',
+        'Get-KCSPLabVMName', 'Get-KCSPLabVMAddress', 'Assert-KCSPLabOwned', 'Get-KCSPLabVMs', 'Test-KCSPLabBaseImage',
+        'Ensure-KCSPLabNetwork', 'Initialize-KCSPLabNetwork', 'Set-KCSPLabIngress', 'Wait-KCSPLabGuest', 'Invoke-KCSPLabGuest',
         'Copy-KCSPLabFileToGuest', 'Invoke-KCSPApi', 'New-KCSPLabReport', 'Add-KCSPLabCheck', 'Save-KCSPLabReport'
     )
     $missing = @($required | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) })

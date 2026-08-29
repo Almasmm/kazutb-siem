@@ -34,11 +34,11 @@ Assert-KCSPLabElevated
 
 if (-not $Count) { $Count = [int] $config.DefaultCount }
 $basePath = Join-Path $paths.Base "$($config.Prefix)-WIN-BASE.vhdx"
-if (-not (Test-Path -LiteralPath $basePath -PathType Leaf)) {
-    throw "Golden image not found: $basePath. Run New-KCSPWindowsBase.ps1 first."
+if (-not (Test-KCSPLabBaseImage -Config $config)) {
+    throw "Golden image is absent or incomplete: $basePath. Run New-KCSPWindowsBase.ps1 first."
 }
 
-$switchName = Initialize-KCSPLabNetwork -Config $config
+$switchName = Ensure-KCSPLabNetwork -Config $config
 $credential = Get-KCSPLabCredential -Config $config
 $template = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'unattend.template.xml') -Raw
 $created = New-Object System.Collections.Generic.List[object]

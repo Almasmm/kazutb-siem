@@ -304,37 +304,211 @@ function Get-KCSPLabVMs {
     return @(Get-VM -Name $pattern -ErrorAction SilentlyContinue)
 }
 
+function Test-KCSPLabBaseImage {
+    <# A VHDX is reusable only after image application, boot-file creation and
+       clean dismount completed. The marker records that completed transaction;
+       Get-VHD supplies current Hyper-V truth rather than trusting the marker. #>
+    [CmdletBinding()] param([Parameter(Mandatory)] $Config)
+    $paths = Get-KCSPLabPaths -Config $Config
+    $basePath = Join-Path $paths.Base "$($Config.Prefix)-WIN-BASE.vhdx"
+    $readyPath = "$basePath.ready.json"
+    if (-not (Test-Path -LiteralPath $basePath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $readyPath -PathType Leaf)) { return $false }
+    try {
+        $marker = Get-Content -LiteralPath $readyPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $vhd = Get-VHD -Path $basePath -ErrorAction Stop
+        return $marker.status -eq 'ready' -and
+            $marker.base_image -eq $basePath -and
+            $vhd.VhdType -eq 'Dynamic' -and
+            [int64] $vhd.Size -eq [int64] $Config.VMDiskSizeBytes -and
+            -not $vhd.Attached
+    } catch {
+        Write-KCSPLabLog "Base image validation failed: $($_.Exception.Message)" -Level WARN
+        return $false
+    }
+}
+
 # --------------------------------------------------------------------- network
 
-function Initialize-KCSPLabNetwork {
+function Get-KCSPLabHostAdapter {
+    <# Resolve the management vNIC using Hyper-V ownership plus the Windows
+       network inventory. The exact alias is preferred, while InterfaceGuid
+       and Hyper-V adapter metadata cover delayed/localised enumeration. #>
+    [CmdletBinding()] param([Parameter(Mandatory)] [string] $SwitchName)
+
+    $management = @(Get-VMNetworkAdapter -ManagementOS -ErrorAction SilentlyContinue |
+        Where-Object { $_.SwitchName -eq $SwitchName })
+    $adapters = @(Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue)
+    $exactAlias = "vEthernet ($SwitchName)"
+    $adapter = @($adapters | Where-Object {
+        $_.Name -eq $exactAlias -and $_.InterfaceDescription -like 'Hyper-V Virtual Ethernet Adapter*'
+    }) | Select-Object -First 1
+    if ($adapter) { return $adapter }
+
+    foreach ($virtualAdapter in $management) {
+        $identities = @([string] $virtualAdapter.DeviceId, [string] $virtualAdapter.Id) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        foreach ($candidate in $adapters) {
+            $guid = [string] $candidate.InterfaceGuid
+            if (-not [string]::IsNullOrWhiteSpace($guid) -and
+                $candidate.InterfaceDescription -like 'Hyper-V Virtual Ethernet Adapter*' -and
+                @($identities | Where-Object { $_ -match [regex]::Escape($guid.Trim('{}')) }).Count -gt 0) {
+                return $candidate
+            }
+        }
+    }
+    return $null
+}
+
+function Wait-KCSPLabHostAdapter {
+    [CmdletBinding()] param(
+        [Parameter(Mandatory)] [string] $SwitchName,
+        [int] $TimeoutSeconds = 60,
+        [int] $PollMilliseconds = 1000
+    )
+    $started = Get-Date
+    $deadline = $started.AddSeconds($TimeoutSeconds)
+    do {
+        $adapter = Get-KCSPLabHostAdapter -SwitchName $SwitchName
+        if ($adapter) {
+            return [pscustomobject]@{ Adapter = $adapter; WaitedSeconds = ((Get-Date) - $started).TotalSeconds }
+        }
+        Start-Sleep -Milliseconds $PollMilliseconds
+    } while ((Get-Date) -lt $deadline)
+    return $null
+}
+
+function Write-KCSPLabNetworkDiagnostics {
+    [CmdletBinding()] param([Parameter(Mandatory)] $Config, [string] $Reason)
+    $switchName = [string] $Config.Prefix
+    $switches = @(Get-VMSwitch -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $switchName })
+    $management = @(Get-VMNetworkAdapter -ManagementOS -ErrorAction SilentlyContinue |
+        Where-Object { $_.SwitchName -eq $switchName -or $_.Name -eq $switchName })
+    $adapters = @(Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -eq "vEthernet ($switchName)" -or $_.Name -eq $switchName })
+    $nats = @(Get-NetNat -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -eq "$($switchName)-NAT" -or $_.InternalIPInterfaceAddressPrefix -eq $Config.Subnet })
+    Write-KCSPLabLog "FAILED network reconciliation: $Reason; switches=$($switches.Count) management_vnics=$($management.Count) net_adapters=$($adapters.Count) nats=$($nats.Count)" -Level ERROR
+    foreach ($item in $switches) {
+        Write-KCSPLabLog "DIAGNOSTIC switch name=$($item.Name) type=$($item.SwitchType) id=$($item.Id)" -Level ERROR
+    }
+    foreach ($item in $management) {
+        Write-KCSPLabLog "DIAGNOSTIC management_vnic name=$($item.Name) switch=$($item.SwitchName) id=$($item.Id)" -Level ERROR
+    }
+    foreach ($item in $adapters) {
+        Write-KCSPLabLog "DIAGNOSTIC host_adapter name=$($item.Name) status=$($item.Status) ifIndex=$($item.ifIndex) guid=$($item.InterfaceGuid)" -Level ERROR
+    }
+    foreach ($item in $nats) {
+        Write-KCSPLabLog "DIAGNOSTIC nat name=$($item.Name) prefix=$($item.InternalIPInterfaceAddressPrefix) active=$($item.Active)" -Level ERROR
+    }
+}
+
+function Ensure-KCSPLabNetwork {
     <#
         .SYNOPSIS
-        Creates the isolated lab switch, host address and NAT.
+        Ensures the isolated lab switch, host address and NAT.
 
         .DESCRIPTION
         An Internal switch keeps lab traffic off the university LAN. The host
         end of the switch holds the gateway address; NAT is optional and only
         gives guests outbound internet for Windows Update.
     #>
-    [CmdletBinding(SupportsShouldProcess = $true)] param([Parameter(Mandatory)] $Config)
+    [CmdletBinding(SupportsShouldProcess = $true)] param(
+        [Parameter(Mandatory)] $Config,
+        [int] $AdapterTimeoutSeconds = 60,
+        [int] $PollMilliseconds = 1000
+    )
     Assert-KCSPLabElevated
 
     $switchName = "$($Config.Prefix)"
+    Assert-KCSPLabOwned -Config $Config -Name $switchName -Kind 'VMSwitch'
     $existing = Get-VMSwitch -Name $switchName -ErrorAction SilentlyContinue
-    if (-not $existing) {
-        if ($PSCmdlet.ShouldProcess($switchName, 'Create internal VM switch')) {
-            New-VMSwitch -Name $switchName -SwitchType Internal | Out-Null
-            Write-KCSPLabLog "Created internal switch $switchName" -Level INFO
-        }
-    } else {
-        Write-KCSPLabLog "Switch $switchName already present" -Level INFO
+    if ($existing -and [string] $existing.SwitchType -ne 'Internal') {
+        Write-KCSPLabNetworkDiagnostics -Config $Config -Reason "owned switch has type $($existing.SwitchType), expected Internal"
+        throw "NETWORK_OWNERSHIP_CONFLICT: switch '$switchName' exists but is not Internal."
     }
 
-    $adapter = Get-NetAdapter -Name "vEthernet ($switchName)" -ErrorAction SilentlyContinue
-    if (-not $adapter) { throw "Host adapter for switch $switchName did not appear." }
+    $adapterResult = $null
+    if ($existing) {
+        Write-KCSPLabLog "EXISTS internal switch $switchName" -Level INFO
+        $adapterResult = Wait-KCSPLabHostAdapter -SwitchName $switchName -TimeoutSeconds $AdapterTimeoutSeconds -PollMilliseconds $PollMilliseconds
+        if (-not $adapterResult) {
+            # A switch object without its management vNIC is an owned partial
+            # state. Remove only that exact switch through Hyper-V, wait for
+            # Windows cleanup, and recreate it through supported cmdlets.
+            Write-KCSPLabLog "REPAIR partial switch ${switchName}: management vNIC did not appear" -Level WARN
+            if ($PSCmdlet.ShouldProcess($switchName, 'Remove broken lab-owned switch')) {
+                Remove-VMSwitch -Name $switchName -Force -ErrorAction Stop
+                $cleanupDeadline = (Get-Date).AddSeconds(30)
+                do {
+                    $remaining = Get-KCSPLabHostAdapter -SwitchName $switchName
+                    if (-not $remaining) { break }
+                    Start-Sleep -Milliseconds $PollMilliseconds
+                } while ((Get-Date) -lt $cleanupDeadline)
+                if (Get-VMSwitch -Name $switchName -ErrorAction SilentlyContinue) {
+                    Write-KCSPLabNetworkDiagnostics -Config $Config -Reason 'broken switch remained after supported removal'
+                    throw "NETWORK_REPAIR_FAILED: switch '$switchName' remained after Remove-VMSwitch."
+                }
+                $existing = $null
+            }
+        }
+    }
+
+    if (-not $existing) {
+        if ($PSCmdlet.ShouldProcess($switchName, 'Create internal VM switch')) {
+            $created = $false
+            for ($attempt = 1; $attempt -le 2 -and -not $created; $attempt++) {
+                try {
+                    New-VMSwitch -Name $switchName -SwitchType Internal -ErrorAction Stop | Out-Null
+                    $verifiedSwitch = Get-VMSwitch -Name $switchName -ErrorAction Stop
+                    if ([string] $verifiedSwitch.SwitchType -ne 'Internal') {
+                        throw "created switch has type $($verifiedSwitch.SwitchType)"
+                    }
+                    $created = $true
+                    $existing = $verifiedSwitch
+                    Write-KCSPLabLog "CREATE internal switch $switchName verified (attempt $attempt)" -Level INFO
+                } catch {
+                    $message = $_.Exception.Message
+                    Write-KCSPLabLog "FAILED create internal switch $switchName (attempt $attempt): $message" -Level WARN
+                    # 0x800700B7 may be a concurrent/partially materialised
+                    # switch. Re-inspect truth and allow Windows bounded time to
+                    # publish or clean the owned miniport before one retry.
+                    $recovered = Get-VMSwitch -Name $switchName -ErrorAction SilentlyContinue
+                    if ($recovered -and [string] $recovered.SwitchType -eq 'Internal') {
+                        $existing = $recovered
+                        $created = $true
+                        Write-KCSPLabLog "REPAIRED switch $switchName materialised after create error" -Level INFO
+                        break
+                    }
+                    if ($attempt -lt 2) {
+                        Start-Sleep -Seconds 5
+                        continue
+                    }
+                    Write-KCSPLabNetworkDiagnostics -Config $Config -Reason $message
+                    throw
+                }
+            }
+        }
+    }
+
+    if (-not $adapterResult) {
+        $adapterResult = Wait-KCSPLabHostAdapter -SwitchName $switchName -TimeoutSeconds $AdapterTimeoutSeconds -PollMilliseconds $PollMilliseconds
+    }
+    if (-not $adapterResult -or -not $adapterResult.Adapter) {
+        Write-KCSPLabNetworkDiagnostics -Config $Config -Reason "host adapter timeout after ${AdapterTimeoutSeconds}s"
+        throw "NETWORK_ADAPTER_TIMEOUT: host adapter for switch '$switchName' did not appear within ${AdapterTimeoutSeconds}s."
+    }
+    $adapter = $adapterResult.Adapter
+    Write-KCSPLabLog ("VERIFIED host adapter {0} (ifIndex={1}, waited={2:N1}s)" -f $adapter.Name, $adapter.ifIndex, $adapterResult.WaitedSeconds) -Level INFO
 
     $hostAddress = $Config.HostAddress
     $prefixLength = $Config.PrefixLength
+    $foreignAddress = @(Get-NetIPAddress -IPAddress $hostAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object { $_.InterfaceIndex -ne $adapter.ifIndex })
+    if ($foreignAddress.Count -gt 0) {
+        Write-KCSPLabNetworkDiagnostics -Config $Config -Reason "$hostAddress is assigned outside the lab adapter"
+        throw "NETWORK_OWNERSHIP_CONFLICT: $hostAddress is already assigned to a non-lab interface."
+    }
     $current = Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
         Where-Object { $_.IPAddress -eq $hostAddress }
     if (-not $current) {
@@ -342,22 +516,46 @@ function Initialize-KCSPLabNetwork {
             # Clear any stale address on this adapter before assigning ours.
             Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
                 Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
-            New-NetIPAddress -InterfaceIndex $adapter.ifIndex -IPAddress $hostAddress -PrefixLength $prefixLength | Out-Null
-            Write-KCSPLabLog "Assigned $hostAddress/$prefixLength to the lab adapter" -Level INFO
+            New-NetIPAddress -InterfaceIndex $adapter.ifIndex -IPAddress $hostAddress -PrefixLength $prefixLength -ErrorAction Stop | Out-Null
+            Write-KCSPLabLog "CREATE host IPv4 $hostAddress/$prefixLength on lab adapter" -Level INFO
         }
+    } elseif ([int] $current.PrefixLength -ne $prefixLength) {
+        throw "NETWORK_CONFIG_CONFLICT: $hostAddress has prefix length $($current.PrefixLength), expected $prefixLength."
     }
+    $verifiedAddress = Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -IPAddress $hostAddress -AddressFamily IPv4 -ErrorAction Stop
+    Write-KCSPLabLog "VERIFIED host IPv4 $($verifiedAddress.IPAddress)/$($verifiedAddress.PrefixLength)" -Level INFO
 
     if ($Config.EnableNat) {
         $natName = "$($Config.Prefix)-NAT"
-        $nat = Get-NetNat -Name $natName -ErrorAction SilentlyContinue
-        if (-not $nat) {
-            if ($PSCmdlet.ShouldProcess($natName, 'Create lab NAT')) {
-                New-NetNat -Name $natName -InternalIPInterfaceAddressPrefix $Config.Subnet | Out-Null
-                Write-KCSPLabLog "Created NAT $natName for $($Config.Subnet)" -Level INFO
-            }
+        Assert-KCSPLabOwned -Config $Config -Name $natName -Kind 'NAT'
+        $foreignNat = @(Get-NetNat -ErrorAction SilentlyContinue | Where-Object {
+            $_.InternalIPInterfaceAddressPrefix -eq $Config.Subnet -and $_.Name -ne $natName
+        })
+        if ($foreignNat.Count -gt 0) {
+            throw "NETWORK_OWNERSHIP_CONFLICT: subnet $($Config.Subnet) belongs to NAT '$($foreignNat[0].Name)'."
         }
+        $nat = Get-NetNat -Name $natName -ErrorAction SilentlyContinue
+        if ($nat -and $nat.InternalIPInterfaceAddressPrefix -ne $Config.Subnet) {
+            throw "NETWORK_CONFIG_CONFLICT: NAT '$natName' uses $($nat.InternalIPInterfaceAddressPrefix), expected $($Config.Subnet)."
+        } elseif (-not $nat) {
+            if ($PSCmdlet.ShouldProcess($natName, 'Create lab NAT')) {
+                New-NetNat -Name $natName -InternalIPInterfaceAddressPrefix $Config.Subnet -ErrorAction Stop | Out-Null
+                Write-KCSPLabLog "CREATE NAT $natName for $($Config.Subnet)" -Level INFO
+            }
+        } else {
+            Write-KCSPLabLog "EXISTS NAT $natName for $($Config.Subnet)" -Level INFO
+        }
+        $verifiedNat = Get-NetNat -Name $natName -ErrorAction Stop
+        if ($verifiedNat.InternalIPInterfaceAddressPrefix -ne $Config.Subnet) { throw "NETWORK_NAT_VERIFY_FAILED: $natName" }
+        Write-KCSPLabLog "VERIFIED NAT $natName for $($verifiedNat.InternalIPInterfaceAddressPrefix)" -Level INFO
     }
     return $switchName
+}
+
+function Initialize-KCSPLabNetwork {
+    <# Backward-compatible entrypoint; all behavior is ensure/reconcile. #>
+    [CmdletBinding(SupportsShouldProcess = $true)] param([Parameter(Mandatory)] $Config)
+    return Ensure-KCSPLabNetwork -Config $Config
 }
 
 function Set-KCSPLabIngress {

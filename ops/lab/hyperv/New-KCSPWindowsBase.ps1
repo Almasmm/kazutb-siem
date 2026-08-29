@@ -34,8 +34,9 @@ Start-KCSPLabLog -Path (Join-Path $paths.Logs ('base-{0}.log' -f (Get-Date -Form
 Assert-KCSPLabElevated
 
 $basePath = Join-Path $paths.Base "$($config.Prefix)-WIN-BASE.vhdx"
-if ((Test-Path -LiteralPath $basePath) -and -not $Force) {
-    Write-KCSPLabLog "Base image already present: $basePath (use -Force to rebuild)" -Level INFO
+$readyPath = "$basePath.ready.json"
+if ((Test-KCSPLabBaseImage -Config $config) -and -not $Force) {
+    Write-KCSPLabLog "VERIFIED base image: $basePath (use -Force to rebuild)" -Level INFO
     return [pscustomobject]@{ BaseImage = $basePath; Rebuilt = $false }
 }
 
@@ -89,8 +90,11 @@ try {
     Write-KCSPLabLog "Selected edition: $($selected.ImageName) (index $($selected.ImageIndex))" -Level STEP
 
     # ------------------------------------------------------------ create VHDX
+    if (Test-Path -LiteralPath $readyPath) {
+        Remove-Item -LiteralPath $readyPath -Force -ErrorAction Stop
+    }
     if (Test-Path -LiteralPath $basePath) {
-        Write-KCSPLabLog "Removing previous base image" -Level WARN
+        Write-KCSPLabLog "REPAIR removing incomplete or invalid lab base image" -Level WARN
         Remove-Item -LiteralPath $basePath -Force
     }
     if (-not $PSCmdlet.ShouldProcess($basePath, 'Create and populate base VHDX')) { return }
@@ -158,6 +162,18 @@ finally {
 }
 
 $size = (Get-Item -LiteralPath $basePath).Length
+$marker = [ordered]@{
+    status = 'ready'
+    base_image = $basePath
+    edition = $selected.ImageName
+    source = $IsoPath
+    size_bytes = $size
+    completed_at = (Get-Date).ToUniversalTime().ToString('o')
+}
+[IO.File]::WriteAllText($readyPath, ($marker | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+if (-not (Test-KCSPLabBaseImage -Config $config)) {
+    throw "BASE_IMAGE_VERIFY_FAILED: $basePath"
+}
 Write-KCSPLabLog "Golden image ready: $basePath ($([math]::Round($size/1GB,1)) GB on disk)" -Level PASS
 [pscustomobject]@{
     BaseImage = $basePath

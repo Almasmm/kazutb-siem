@@ -33,7 +33,7 @@ if (-not $SkipStack) {
     }
 }
 
-Initialize-KCSPLabNetwork -Config $config | Out-Null
+Ensure-KCSPLabNetwork -Config $config | Out-Null
 $ingress = Set-KCSPLabIngress -Config $config
 Write-KCSPLabLog "Lab ingress: $ingress" -Level INFO
 
